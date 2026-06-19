@@ -1,4 +1,4 @@
-﻿# TRD — Recall
+# TRD — Recall
 
 | Field | Value |
 |-------|-------|
