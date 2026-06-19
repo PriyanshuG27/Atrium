@@ -54,7 +54,7 @@ Task received
 
 | Property | Value |
 |----------|-------|
-| Models | Whisper large-v3-turbo (STT) + Qwen3-32b (Primary LLM) + Llama 4 Scout 17b (Overflow LLM) |
+| Models | Whisper large-v3-turbo (STT, fallback to Whisper large-v3) + Qwen3-32b (Primary LLM) + Llama 4 Scout 17b (Overflow LLM) |
 | Why position 1 | Fastest external inference; free tier; excellent for burst; Qwen3-32b offers 60 RPM and high-fidelity reasoning |
 | Limits | 60 RPM for Qwen3-32b, 30 RPM / 30K TPM for Llama 4 Scout; 500K TPD limits |
 | Failover trigger | 429 (rate limited), 5xx, or timeout > 20 s |
@@ -62,6 +62,7 @@ Task received
 
 > Groq does not serve embedding models. MiniLM embedding falls back to Modal or is computed locally if Groq is used for STT/summary.
 > **Overflow routing**: Qwen3-32b is the primary for general text tasks and quizzes (due to high 60 RPM limit and 96.1% MATH score). Llama 4 Scout 17b is selected for long-document/PDF contexts (up to 30K TPM / 10M token context window) and as an overflow model.
+> **STT Fallback**: If `whisper-large-v3-turbo` fails or returns an error on Groq, the ingestion service automatically falls back to `whisper-large-v3` on Groq before attempting Tier 2.
 
 ---
 

@@ -17,7 +17,7 @@
 | Database | PostgreSQL + pgvector + pg_trgm | Neon free (0.5 GB) | Single DB for relational + vector + full-text; no separate vector DB |
 | Task Queue | Upstash Redis (REST) | Free (10K cmd/day) | Serverless Redis; no persistent connection needed; atomic ZADD for rate limiting |
 | AI Tier 0 | Modal serverless GPU | Pay-per-second | Whisper large-v3 + Llama 3.3 70B + MiniLM — highest quality, no monthly fee when idle |
-| AI Tier 1 | Groq Cloud API | Free tier | Whisper-Turbo + Qwen3-32b (60 RPM) + Llama 4 Scout (long context) |
+| AI Tier 1 | Groq Cloud API | Free tier | Whisper-Turbo (fallback to Whisper-v3) + Qwen3-32b (60 RPM) + Llama 4 Scout |
 | AI Tier 2 | Gemini 3.1 Flash-Lite | Free (30 RPM / 1500 RPD) | Large context window; fallback for summarisation |
 | AI Tier 3 | Ollama (local) | Optional | Developer/self-host escape hatch; active when LOCAL_MODE=true |
 | AI Tier 4 | Bookmark fallback | — | Guarantees zero data loss; item saved without AI enrichment |
