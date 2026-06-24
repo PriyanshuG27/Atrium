@@ -81,7 +81,7 @@ Knowledge workers and students encounter valuable content throughout the day but
 | WebSocket graph updates | 5 | Real-time node additions without refresh |
 | Spaced repetition | 6 | SM-2 quiz generation and scheduling |
 | Daily streak + nudges | 6 | Streak counter + Drive connect nudge |
-| Google Drive sync | 7 | Export items to user's Drive (drive.file scope) |
+| Google Drive integration | 9 | Export items to user's Drive (drive.file) & parse user-pasted Google Drive links (drive.readonly) |
 | Chrome extension | 8 | One-click capture from browser |
 | Louvain clustering (hubs) | 6 | Daily graph clustering -> semantic_hubs |
 
@@ -92,6 +92,6 @@ Knowledge workers and students encounter valuable content throughout the day but
 - **E2EE** — Server processes plaintext during embedding; no end-to-end encryption claim.
 - **Team / collaborative workspaces** — Single-user knowledge graph only (v1).
 - **Native mobile app** — Telegram TWA covers mobile surface; no separate iOS/Android app.
-- **Custom domain storage** — Items stored in Recall DB only; Drive sync is export, not primary store.
+- **Custom domain storage** — Items stored in Recall DB only; Drive sync is export/backup, not primary store. Pasted Google Drive links are downloaded/parsed temporarily and deleted immediately.
 - **Real-time collaborative editing** — No multiplayer features.
 - **Billing / monetisation** — Free-tier infrastructure only; no payment integration in scope.

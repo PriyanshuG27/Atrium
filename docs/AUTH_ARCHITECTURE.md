@@ -1,4 +1,4 @@
-﻿# AUTH_ARCHITECTURE — Recall
+# AUTH_ARCHITECTURE — Recall
 
 | Field | Value |
 |-------|-------|
@@ -14,7 +14,7 @@ Three independent auth layers stack on top of each other. Layer 1 is always acti
 
 ```
 ┌────────────────────────────────────────────────┐
-│ Layer 3: Google OAuth (drive.file)             │ optional
+│ Layer 3: Google OAuth (drive.file + drive.readonly)│ optional
 ├────────────────────────────────────────────────┤
 │ Layer 2a: TWA HMAC   │ Layer 2b: Login Widget  │ surface-dependent
 ├────────────────────────────────────────────────┤
@@ -116,7 +116,7 @@ Sequence (bot-triggered):
     User sends /connect_drive to bot
         -> Bot sends OAuth URL: GET /auth/google
         -> Backend generates state = JWT {chat_id, exp: +10 min}
-        -> Redirects to Google with scope=drive.file, state=<token>
+        -> Redirects to Google with scope=drive.file+drive.readonly, state=<token>
 
     User authenticates with Google
         -> Google redirects to GET /auth/google/callback?code=...&state=...
@@ -138,7 +138,7 @@ Sequence (website-triggered):
         -> WS event updates button state in real time without page reload
 ```
 
-Scope: `https://www.googleapis.com/auth/drive.file` — can only access files Recall created.
+Scopes: `https://www.googleapis.com/auth/drive.file` (write) & `https://www.googleapis.com/auth/drive.readonly` (read). Allows exporting summaries and downloading user-submitted links.
 
 ---
 

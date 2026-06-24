@@ -49,7 +49,7 @@
 - [ ] Verify Google Client ID matches Google Cloud Console.
 - [ ] Confirm Google Redirect URI is exactly set to production callback:
   - `https://api.recall-app.com/auth/google/callback` (or your Render domain callback).
-- [ ] Confirm OAuth scopes requested are restricted strictly to `drive.file` to prevent excessive file system access.
+- [ ] Confirm OAuth scopes requested are restricted strictly to `drive.file` and `drive.readonly` to prevent excessive file system access.
 - [ ] Verify `FERNET_KEY` is exactly 32 URL-safe base64-encoded bytes (test token encryption/decryption with key).
 
 ---

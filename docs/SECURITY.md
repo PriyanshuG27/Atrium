@@ -1,4 +1,4 @@
-﻿# SECURITY — Recall
+# SECURITY — Recall
 
 | Field | Value |
 |-------|-------|
@@ -17,6 +17,7 @@
 | TWA session spoofing | HMAC-SHA256 of initData signed with TELEGRAM_BOT_TOKEN |
 | DB data breach | raw_text + google_refresh_token Fernet-encrypted at rest |
 | OAuth token theft | Refresh token Fernet-encrypted; access tokens never persisted |
+| Ephemeral disk exhaustion | Guarded by Semaphore(3), 100MB size limit, and instant deletion in finally block |
 | Cross-user data access | All queries parameterised with user_id from verified JWT |
 | Replay attacks (webhook) | Telegram update_id dedup via processed_updates table |
 | Brute-force / flooding | Redis sliding window rate limiter (20 req/user/min) |
@@ -75,9 +76,9 @@ See `AUTH_ARCHITECTURE.md` for full sequence diagrams.
 - Issues JWT (7-day, httpOnly cookie, signed with `JWT_SECRET`).
 
 ### Layer 3 — Google OAuth
-- Scope: `drive.file` only (files created by Recall; cannot access existing Drive files).
+- Scope: `drive.file` (export summaries) and `drive.readonly` (download user-submitted Drive links).
 - Refresh token Fernet-encrypted before DB write.
-- Access token never persisted; obtained at sync time via refresh.
+- Access token never persisted; obtained at sync/download time via refresh.
 
 ---
 
@@ -88,7 +89,7 @@ See `AUTH_ARCHITECTURE.md` for full sequence diagrams.
 | "Your data is encrypted" | Partial | raw_text encrypted; summary/embedding/title are not |
 | "Server never sees your content" | **False** | Server processes plaintext to generate embeddings and summaries |
 | "TLS protects data in transit" | True | All links use TLS |
-| "Google Drive access is limited" | True | drive.file scope; cannot read pre-existing Drive files |
+| "Google Drive access is limited" | True | drive.file + drive.readonly scopes; readonly is restricted to downloading user-submitted links |
 | "Tokens are encrypted at rest" | True | Fernet AES-128 on refresh tokens |
 
 ---
@@ -102,3 +103,14 @@ See `AUTH_ARCHITECTURE.md` for full sequence diagrams.
 5. Redeploy backend.
 
 > Do not rotate without the migration step — existing encrypted rows become unreadable.
+
+---
+
+## Ephemeral Storage Constraints
+
+Recall runs on Render/Railway free tier, which imposes a **1 GB ephemeral storage limit**.
+
+- **Concurrency Guard**: Processing is gated by `asyncio.Semaphore(3)`, limiting maximum concurrent downloads to 3.
+- **Instant Deletion**: Downloaded files are saved temporarily to a unique path in `/tmp/` and deleted in a `finally` block immediately after text extraction/transcription.
+- **Size Enforcer**: User-submitted files/URLs exceeding 100 MB are rejected before download begins.
+

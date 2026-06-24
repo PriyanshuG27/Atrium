@@ -25,9 +25,7 @@
 | `GOOGLE_CLIENT_ID` | Google OAuth 2.0 client ID | Google Cloud Console -> Credentials | Yes (Drive) | — |
 | `GOOGLE_CLIENT_SECRET` | Google OAuth 2.0 client secret | Google Cloud Console -> Credentials | Yes (Drive) | — |
 | `GOOGLE_REDIRECT_URI` | OAuth callback URL registered in Google Cloud Console | Set to `https://<render-url>/auth/google/callback` | Yes (Drive) | Must match exactly what is in GCP |
-| `OLLAMA_HOST` | Ollama local model server URL (e.g. `http://localhost:11434`) | Self-hosted Ollama instance | Optional | Active in local development cascade |
-| `LOCAL_MODE` | Boolean flag to prioritize local Ollama execution over API tiers | Set to `true` or `false` | Optional | Development only; default: `false` |
-| `COMPUTE_PROVIDER` | Override cascade tier for testing (e.g. `groq`, `gemini`, `ollama`, `modal`) | — | Optional | Development / CI only |
+| `COMPUTE_PROVIDER` | Override cascade tier for testing (e.g. `groq`, `gemini`, `modal`) | — | Optional | Development / CI only |
 
 ---
 

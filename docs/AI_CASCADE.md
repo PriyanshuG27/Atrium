@@ -2,18 +2,17 @@
 
 | Field | Value |
 |-------|-------|
-| Version | 0.1.1 |
-| Date | 2026-06-19 |
+| Version | 0.2.0 |
+| Date | 2026-06-24 |
 | Status | Active |
 
 ---
 
 ## Overview
 
-Every AI task follows a multi-tier cascade. In production, a 4-tier cascade is used. Each tier is attempted in order; on failure, the next tier is tried. Tier 3 guarantees no data loss.
+Every AI task follows a multi-tier cascade. Each tier is attempted in order; on failure, the next tier is tried. The final tier (Bookmark) guarantees no data loss.
 
 ```
-[Production Cascade]
 Task received
     |
     v
@@ -22,16 +21,6 @@ Task received
                                                                     FAIL
                                                                       v
                                                           [Tier 3: Bookmark]
-```
-
-In local development, setting `LOCAL_MODE=true` flips the cascade to prioritize local execution:
-
-```
-[Local Development Cascade (LOCAL_MODE=true)]
-Task received
-    |
-    v
-[Tier 0: Ollama (Local)] ----FAIL----> [Tier 1: Modal GPU] ----FAIL----> [Tier 2: Groq] ----FAIL----> [Tier 3: Gemini] ----FAIL----> [Tier 4: Bookmark]
 ```
 
 ---
@@ -54,14 +43,14 @@ Task received
 
 | Property | Value |
 |----------|-------|
-| Models | Whisper large-v3-turbo (STT, fallback to Whisper large-v3) + Qwen3-32b (Primary LLM) + Llama 4 Scout 17b (Overflow LLM) |
-| Why position 1 | Fastest external inference; free tier; excellent for burst; Qwen3-32b offers 60 RPM and high-fidelity reasoning |
-| Limits | 60 RPM for Qwen3-32b, 30 RPM / 30K TPM for Llama 4 Scout; 500K TPD limits |
+| Models | Whisper large-v3-turbo (STT, fallback to Whisper large-v3) + qwen/qwen3.6-27b (Primary LLM) + openai/gpt-oss-120b (Overflow LLM) |
+| Why position 1 | Fastest external inference; free tier; excellent for burst; qwen/qwen3.6-27b offers high-speed and high-fidelity reasoning |
+| Limits | Standard API rate limits apply (RPM/TPM caps) |
 | Failover trigger | 429 (rate limited), 5xx, or timeout > 20 s |
 | Fallback output | Full transcript + summary + (embedding via MiniLM fallback) |
 
 > Groq does not serve embedding models. MiniLM embedding falls back to Modal or is computed locally if Groq is used for STT/summary.
-> **Overflow routing**: Qwen3-32b is the primary for general text tasks and quizzes (due to high 60 RPM limit and 96.1% MATH score). Llama 4 Scout 17b is selected for long-document/PDF contexts (up to 30K TPM / 10M token context window) and as an overflow model.
+> **Overflow routing**: `qwen/qwen3.6-27b` is the primary for general text tasks and quizzes. `openai/gpt-oss-120b` is selected for long-document/PDF contexts and as an overflow model.
 > **STT Fallback**: If `whisper-large-v3-turbo` fails or returns an error on Groq, the ingestion service automatically falls back to `whisper-large-v3` on Groq before attempting Tier 2.
 
 ---
@@ -78,27 +67,14 @@ Task received
 
 ---
 
-## Tier 3 — Ollama (LOCAL MODE ONLY)
-
-| Property | Value |
-|----------|-------|
-| Models | Any model served by local Ollama instance (e.g. gemma3:4b, phi4-mini) |
-| Why position 3 | Developer escape hatch; only active locally when `LOCAL_MODE=true` is set. |
-| Activation | `OLLAMA_HOST` env var must be set; skipped in production cascade. |
-| Limits | Depends on local hardware; no enforced rate limit |
-| Failover trigger | Connection refused, timeout > 60 s, or OLLAMA_HOST not set |
-| Fallback output | Summary only; no transcription |
-
----
-
-## Tier 4 — Bookmark Fallback (GUARANTEED)
+## Tier 3 — Bookmark Fallback (GUARANTEED)
 
 | Property | Value |
 |----------|-------|
 | Action | Save item as bookmark with minimal metadata (source_url, title if extractable) |
-| Why position 4 | Zero data loss guarantee; always succeeds |
+| Why position 3 | Zero data loss guarantee; always succeeds |
 | Limits | None |
-| Trigger | All Tiers 0-3 have failed (or Tiers 0-2 in production cascade) |
+| Trigger | All Tiers 0-2 have failed |
 | Output | Item inserted with source_type preserved; raw_text=NULL; summary=NULL; embedding=NULL |
 | User notification | "Could not process [content type]. Saved as bookmark. We'll retry later." |
 | Retry path | Task payload written to dead_letter_queue; admin can re-enqueue |
@@ -107,14 +83,14 @@ Task received
 
 ## Cascade Decision Matrix
 
-| Content Type | Tier 0 Task | Tier 1 Task | Tier 2 Task | T4 |
+| Content Type | Tier 0 Task | Tier 1 Task | Tier 2 Task | T3 (Bookmark) |
 |-------------|-------------|-------------|-------------|-----|
-| Voice/Audio | Whisper STT + Llama 3.3 70B | Groq Whisper-Turbo + Qwen3-32b | Gemini STT+summary | Bookmark |
+| Voice/Audio | Whisper STT + Llama 3.3 70B | Groq Whisper-Turbo + qwen/qwen3.6-27b | Gemini STT+summary | Bookmark |
 | YouTube URL | yt-dlp + Whisper STT + Llama 3.3 70B | yt-dlp + Groq Whisper-Turbo | yt-dlp + Gemini | Bookmark |
-| Plain URL | Scrape + MiniLM embed + Llama 3.3 70B | Scrape + Qwen3-32b summary | Scrape + Gemini | Bookmark |
-| PDF | PyMuPDF + MiniLM + Llama 3.3 70B | PyMuPDF + Llama 4 Scout | PyMuPDF + Gemini | Bookmark |
-| Image | Tesseract + MiniLM + Llama 3.3 70B | Tesseract + Qwen3-32b | Tesseract + Gemini | Bookmark |
-| Text | MiniLM + Llama 3.3 70B | Qwen3-32b | Gemini | Bookmark |
+| Plain URL | Scrape + MiniLM embed + Llama 3.3 70B | Scrape + qwen/qwen3.6-27b summary | Scrape + Gemini | Bookmark |
+| PDF | PyMuPDF + MiniLM + Llama 3.3 70B | PyMuPDF + openai/gpt-oss-120b | PyMuPDF + Gemini | Bookmark |
+| Image | Tesseract + MiniLM + Llama 3.3 70B | Tesseract + qwen/qwen3.6-27b | Tesseract + Gemini | Bookmark |
+| Text | MiniLM + Llama 3.3 70B | qwen/qwen3.6-27b | Gemini | Bookmark |
 
 ---
 
@@ -125,8 +101,7 @@ Task received
 | 0 — Modal | 30 s |
 | 1 — Groq | 20 s |
 | 2 — Gemini | 20 s |
-| 3 — Ollama | 60 s |
-| Total max | ~130 s (extreme case) |
+| Total max | ~70 s (extreme case) |
 
 In practice, Tier 0 or Tier 1 handles >95% of requests.
 
@@ -134,4 +109,4 @@ In practice, Tier 0 or Tier 1 handles >95% of requests.
 
 ## Override
 
-Set `COMPUTE_PROVIDER` env var to `groq`, `gemini`, `ollama`, or `modal` to pin to a specific tier. For testing and CI only.
+Set `COMPUTE_PROVIDER` env var to `groq`, `gemini`, or `modal` to pin to a specific tier. For testing and CI only.

@@ -11,14 +11,18 @@
 ## Phase Overview
 
 ```
-Phase 1: DB + Webhook + Basic Save
-Phase 2: Voice + AI Summarisation (Modal)
-Phase 3: Semantic Search + Embeddings
-Phase 4: Mind Map Frontend (Canvas)
-Phase 5: Website + Unified Auth + WebSocket
-Phase 6: Spaced Repetition + Scheduler
-Phase 7: Google Drive Sync
-Phase 8: Chrome Extension
+Phase 0: Project Foundation (Local Env, DB DDL, Config Loader)
+Phase 1: Core Webhook & Bot Commands
+Phase 2: Ingestion Pipeline & AI Cascade (Text, Voice, PDF, Image, URLs)
+Phase 3: Embeddings & Semantic Search (pgvector, Hybrid Search)
+Phase 4: Web Dashboard Foundation & UI (React/Vite)
+Phase 5: Canvas Interactive Mind Map (Force-Directed Graph)
+Phase 6: Web Authentication & WebSockets (Telegram JWT, TWA, WS)
+Phase 7: Spaced Repetition Quizzes (SM-2 Algorithm)
+Phase 8: Scheduler & Cron Jobs (APScheduler)
+Phase 9: Google Drive Sync & Link Ingestion + Chrome Extension
+Phase 10: Automated Testing Suite (Pytest, Vitest, k6)
+Phase 11: Deployment, Security & Observability (GitHub Actions, Render)
 ```
 
 ---
@@ -145,40 +149,30 @@ Phase 8: Chrome Extension
 
 ---
 
-## Phase 7 — Google Drive Sync
+## Phase 9 — Google Drive Integration & Chrome Extension
 
 **Deliverables**:
-- GET /auth/google + GET /auth/google/callback.
-- Fernet encryption of refresh token.
-- /connect_drive bot command + website button.
-- WebSocket event: google_connected.
-- Drive sync: export item summaries to Google Docs (drive.file scope).
-- drive_nudge_sender scheduler job active.
+- **OAuth Setup**: GET /auth/google + GET /auth/google/callback requesting `drive.file` and `drive.readonly` scopes.
+- **Token Security**: Fernet encryption of refresh token at rest.
+- **Drive Connect**: `/connect_drive` bot command + website connection button with real-time WS connection event.
+- **Drive Link Parser**: Ingestion logic detecting `drive.google.com` links:
+  - Public Links: Download and parse directly (PDF/Doc/audio) without token.
+  - Private Links: If user has connected Google account, use `google_refresh_token` to generate access token and download. If not connected, reply with warning message.
+  - Ephemeral Disk Safety: Limit concurrency using `asyncio.Semaphore(3)`, restrict file size to 100 MB max, save to unique paths under `/tmp/`, and delete inside a `finally` block immediately after parsing.
+- **Drive Sync**: Export user's top summaries to a "Recall" Google Doc weekly or via manual dashboard trigger.
+- **Chrome Extension**: Manifest V3 extension with popup button saving current tab URL to Recall database.
 
 **Acceptance Criteria**:
-- Connecting Drive from bot stores encrypted refresh token in DB.
-- WebSocket event updates website Drive icon in real time.
+- Connecting Google Drive stores Fernet-encrypted refresh token.
+- Pasting a public Google Drive link (PDF/Doc/audio) successfully downloads, parses, and adds a node to the mind map.
+- Pasting a private Google Drive link:
+  - If connected: successfully downloads, parses, and adds a node.
+  - If not connected: replies: `⚠️ I can't access that Google Drive link because it's private. Please connect your Google Drive first using /connect_drive or via the web dashboard.`
+- Files > 100 MB are rejected immediately without filling the disk.
 - Exported Doc appears in user's Drive under "Recall" folder.
-- drive_nudge_sent gates nudge to one message per user.
+- Clicking Chrome extension button on any webpage saves the URL.
 
-**Dependencies**: Phase 6, Google OAuth credentials, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI.
-
----
-
-## Phase 8 — Chrome Extension
-
-**Deliverables**:
-- Chrome extension: Manifest V3.
-- Popup: "Save to Recall" button for current tab URL.
-- Uses existing POST /webhook indirectly via extension API or direct POST /api/items.
-- Extension auth: JWT from website session or Telegram login flow.
-
-**Acceptance Criteria**:
-- Clicking extension button on any webpage saves URL to Recall.
-- Item appears in mind map within 30 s.
-- Extension works without opening Telegram.
-
-**Dependencies**: Phase 5 (auth), published API.
+**Dependencies**: Phase 6 & 8, Google OAuth credentials.
 
 ---
 
@@ -194,17 +188,20 @@ Phase 2 (AI)
 Phase 3 (search)
     |
     v
-Phase 4 (canvas)
+Phase 4 (canvas UI)
     |
     v
-Phase 5 (auth/WS) <-- Phase 3 also required
+Phase 5 (interactive graph)
     |
     v
-Phase 6 (scheduler/quiz)
+Phase 6 (web auth & websockets)
     |
     v
-Phase 7 (Drive)
+Phase 7 (quizzes)
     |
     v
-Phase 8 (extension)
+Phase 8 (scheduler)
+    |
+    v
+Phase 9 (Google Drive & Chrome Extension)
 ```

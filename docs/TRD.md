@@ -17,10 +17,9 @@
 | Database | PostgreSQL + pgvector + pg_trgm | Neon free (0.5 GB) | Single DB for relational + vector + full-text; no separate vector DB |
 | Task Queue | Upstash Redis (REST) | Free (10K cmd/day) | Serverless Redis; no persistent connection needed; atomic ZADD for rate limiting |
 | AI Tier 0 | Modal serverless GPU | Pay-per-second | Whisper large-v3 + Llama 3.3 70B + MiniLM — highest quality, no monthly fee when idle |
-| AI Tier 1 | Groq Cloud API | Free tier | Whisper-Turbo (fallback to Whisper-v3) + Qwen3-32b (60 RPM) + Llama 4 Scout |
+| AI Tier 1 | Groq Cloud API | Free tier | Whisper-Turbo (fallback to Whisper-v3) + qwen/qwen3.6-27b + openai/gpt-oss-120b |
 | AI Tier 2 | Gemini 3.1 Flash-Lite | Free (30 RPM / 1500 RPD) | Large context window; fallback for summarisation |
-| AI Tier 3 | Ollama (local) | Optional | Developer/self-host escape hatch; active when LOCAL_MODE=true |
-| AI Tier 4 | Bookmark fallback | — | Guarantees zero data loss; item saved without AI enrichment |
+| AI Tier 3 | Bookmark fallback | — | Guarantees zero data loss; item saved without AI enrichment |
 | Scheduler | APScheduler (in-process) | — | No extra infra; runs inside FastAPI on Render |
 | Keepalive | Uptime Robot | Free (5-min ping) | Prevents Render free-tier cold starts |
 
@@ -62,8 +61,7 @@
             │  + pgvector  │ │  Queue   │   │  T1: Groq        │
             │  + pg_trgm   │ │  + Rate  │   │  T2: Gemini      │
             └──────────────┘ │  Limiter │   │  T3: Bookmark    │
-                             └──────────┘   │  T4: Ollama (dev)│
-                                            └──────────────────┘
+                             └──────────┘   └──────────────────┘
 ```
 
 ---
@@ -115,6 +113,7 @@ Worker dequeues task:
 | Neon free tier | 0.5 GB storage | Monthly partitioning; pruning old partitions manually |
 | Upstash free tier | 10K commands/day | Rate limiter caps at 20 req/user/min; typical user: ~50 cmd/day |
 | Render free tier | 512 MB RAM, sleeps after 15 min inactivity | Uptime Robot 5-min ping; asyncio.Semaphore(3) caps memory |
+| Ephemeral storage | 1 GB disk | Semaphore(3) limits concurrent disk usage; immediate deletion in finally; 100MB max file size limit |
 | Modal cold start | 2-5 s for GPU container | Groq Tier 1 handles burst while Modal warms |
 | Groq free tier | Unknown RPM cap | Gemini Tier 2 absorbs overflow |
 | pgvector HNSW | Sub-10 ms at 1M vectors | m=16, ef_construction=64; acceptable for single-user scale |

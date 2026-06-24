@@ -1,0 +1,103 @@
+import pytest
+import httpx
+import unittest.mock as mock
+from backend.services.redis_client import redis, RedisUnavailableError, RedisAuthError
+
+@pytest.mark.asyncio
+async def test_redis_lpush():
+    mock_resp = mock.Mock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"result": 3}
+    
+    with mock.patch("httpx.AsyncClient.post", new_callable=mock.AsyncMock) as mock_post:
+        mock_post.return_value = mock_resp
+        
+        res = await redis.lpush("mykey", "myval")
+        assert res == 3
+        
+        # Verify call arguments
+        mock_post.assert_called_once_with("", json=["LPUSH", "mykey", "myval"])
+
+@pytest.mark.asyncio
+async def test_redis_brpop():
+    mock_resp = mock.Mock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"result": ["mykey", "myval"]}
+    
+    with mock.patch("httpx.AsyncClient.post", new_callable=mock.AsyncMock) as mock_post:
+        mock_post.return_value = mock_resp
+        
+        res = await redis.brpop("mykey", timeout=10)
+        assert res == ("mykey", "myval")
+        
+        mock_post.assert_called_once_with("", json=["BRPOP", "mykey", "10"])
+
+@pytest.mark.asyncio
+async def test_redis_brpop_timeout():
+    mock_resp = mock.Mock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"result": None}
+    
+    with mock.patch("httpx.AsyncClient.post", new_callable=mock.AsyncMock) as mock_post:
+        mock_post.return_value = mock_resp
+        
+        res = await redis.brpop("mykey")
+        assert res is None
+        
+        mock_post.assert_called_once_with("", json=["BRPOP", "mykey", "5"])
+
+@pytest.mark.asyncio
+async def test_redis_pipeline_format():
+    mock_resp = mock.Mock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = [
+        {"result": "OK"},
+        {"result": "val1"}
+    ]
+    
+    with mock.patch("httpx.AsyncClient.post", new_callable=mock.AsyncMock) as mock_post:
+        mock_post.return_value = mock_resp
+        
+        commands = [
+            ["SET", "k1", "v1"],
+            ["GET", "k1"]
+        ]
+        res = await redis.pipeline(commands)
+        assert res == ["OK", "val1"]
+        
+        # Verify the pipeline endpoint and JSON format are correct
+        mock_post.assert_called_once_with("pipeline", json=commands)
+
+@pytest.mark.asyncio
+async def test_redis_ping():
+    mock_resp = mock.Mock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"result": "PONG"}
+    
+    with mock.patch("httpx.AsyncClient.post", new_callable=mock.AsyncMock) as mock_post:
+        mock_post.return_value = mock_resp
+        
+        res = await redis.ping()
+        assert res is True
+        
+        mock_post.assert_called_once_with("", json=["PING"])
+
+@pytest.mark.asyncio
+async def test_redis_timeout_exception():
+    with mock.patch("httpx.AsyncClient.post", new_callable=mock.AsyncMock) as mock_post:
+        mock_post.side_effect = httpx.TimeoutException("Connection timed out")
+        
+        with pytest.raises(RedisUnavailableError) as exc_info:
+            await redis.lpush("k", "v")
+        assert "timed out" in str(exc_info.value).lower()
+
+@pytest.mark.asyncio
+async def test_redis_auth_error():
+    request = httpx.Request("POST", "https://localhost")
+    response = httpx.Response(401, request=request)
+    
+    with mock.patch("httpx.AsyncClient.post", new_callable=mock.AsyncMock) as mock_post:
+        mock_post.return_value = response
+        
+        with pytest.raises(RedisAuthError):
+            await redis.lpush("k", "v")

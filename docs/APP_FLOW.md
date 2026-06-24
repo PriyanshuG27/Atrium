@@ -76,6 +76,28 @@ User sends YouTube or Instagram URL
     -> INSERT items (source_type='url', source_url set)
     -> Bot replies: video title + summary
 ```
+```
+
+### Google Drive URL
+
+```
+User sends Google Drive link (drive.google.com)
+    -> Webhook received -> extract file ID
+    -> Detect link privacy state:
+       - Public: Download file directly using httpx (without credentials)
+       - Private: Check if user has connected Google Account:
+         - Connected: Decrypt google_refresh_token, exchange for access token, download file via Drive API
+         - Not Connected: Reply: "⚠️ I can't access that Google Drive link because it's private. Please connect your Google Drive first using /connect_drive or via the web dashboard."
+    -> Ephemeral Storage: download to unique /tmp/ path (max 100 MB), gated by Semaphore(3)
+    -> Route file:
+       - PDF: PyMuPDF -> chunking + embedding + summary
+       - Audio: Whisper STT -> summary + embedding
+       - Image: Tesseract OCR -> summary + embedding
+       - Google Doc: Export to plain text -> summary + embedding
+    -> Clean up: delete local /tmp/ file in finally block
+    -> INSERT items
+    -> Bot replies: title + summary + source_type set accordingly
+```
 
 ### PDF
 

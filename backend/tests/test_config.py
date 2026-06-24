@@ -19,7 +19,7 @@ def test_valid_config(monkeypatch):
     for k, v in env.items():
         monkeypatch.setenv(k, v)
         
-    settings = Settings()
+    settings = Settings(_env_file=None)
     assert settings.TELEGRAM_BOT_TOKEN == env["TELEGRAM_BOT_TOKEN"]
     assert settings.DATABASE_URL == env["DATABASE_URL"]
     
@@ -37,7 +37,7 @@ def test_missing_required_var(monkeypatch):
         monkeypatch.setenv(k, v)
         
     with pytest.raises(ValidationError):
-        Settings()
+        Settings(_env_file=None)
 
 def test_invalid_fernet_key_length(monkeypatch):
     env = get_valid_mock_env()
@@ -47,7 +47,7 @@ def test_invalid_fernet_key_length(monkeypatch):
     for k, v in env.items():
         monkeypatch.setenv(k, v)
         
-    settings = Settings()
+    settings = Settings(_env_file=None)
     with pytest.raises(ValueError, match="FERNET_KEY"):
         settings.validate_crypto_keys()
 
@@ -59,7 +59,7 @@ def test_invalid_fernet_key_base64(monkeypatch):
     for k, v in env.items():
         monkeypatch.setenv(k, v)
         
-    settings = Settings()
+    settings = Settings(_env_file=None)
     with pytest.raises(ValueError, match="FERNET_KEY"):
         settings.validate_crypto_keys()
 
@@ -71,7 +71,7 @@ def test_invalid_jwt_secret_length(monkeypatch):
     for k, v in env.items():
         monkeypatch.setenv(k, v)
         
-    settings = Settings()
+    settings = Settings(_env_file=None)
     with pytest.raises(ValueError, match="JWT_SECRET"):
         settings.validate_crypto_keys()
 
@@ -83,7 +83,7 @@ def test_invalid_jwt_secret_chars(monkeypatch):
     for k, v in env.items():
         monkeypatch.setenv(k, v)
         
-    settings = Settings()
+    settings = Settings(_env_file=None)
     with pytest.raises(ValueError, match="JWT_SECRET"):
         settings.validate_crypto_keys()
 
@@ -95,7 +95,7 @@ def test_invalid_telegram_token(monkeypatch):
     for k, v in env.items():
         monkeypatch.setenv(k, v)
         
-    settings = Settings()
+    settings = Settings(_env_file=None)
     with pytest.raises(ValueError, match="TELEGRAM_BOT_TOKEN"):
         settings.validate_crypto_keys()
 
@@ -104,7 +104,7 @@ def test_settings_redaction(monkeypatch):
     for k, v in env.items():
         monkeypatch.setenv(k, v)
         
-    settings = Settings()
+    settings = Settings(_env_file=None)
     assert repr(settings) == "<Settings: [REDACTED]>"
     assert str(settings) == "<Settings: [REDACTED]>"
 
@@ -113,7 +113,7 @@ def test_settings_serialization_blocked(monkeypatch):
     for k, v in env.items():
         monkeypatch.setenv(k, v)
         
-    settings = Settings()
+    settings = Settings(_env_file=None)
     with pytest.raises(TypeError, match="serialization is disabled"):
         settings.model_dump()
         

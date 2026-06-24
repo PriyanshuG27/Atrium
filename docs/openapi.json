@@ -1,0 +1,1486 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Recall API",
+    "description": "Recall \u2014 AI-powered second brain. Ingest links, voice notes, PDFs and images via Telegram. Search, map, and quiz your knowledge via the web dashboard.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/webhook": {
+      "post": {
+        "summary": "Telegram Webhook",
+        "description": "FastAPI webhook handler for Telegram Bot updates.\nEnforces idempotency, parses message type, pushes tasks, and responds in < 50ms.",
+        "operationId": "telegram_webhook_webhook_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/telegram": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Telegram login verification",
+        "description": "Verifies the signature of the Telegram login widget data and sets the recall_session JWT cookie.",
+        "operationId": "auth_telegram_auth_telegram_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginStatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid signature or expired authentication data.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Logout session",
+        "description": "Clears the recall_session JWT cookie.",
+        "operationId": "auth_logout_auth_logout_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/google": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Initiate Google OAuth flow",
+        "description": "Redirects user to Google OAuth consent screen with drive.file scope.",
+        "operationId": "auth_google_auth_google_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/google/callback": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Google OAuth callback",
+        "description": "Processes the OAuth callback, exchanges authorization code, and stores encrypted refresh token.",
+        "operationId": "auth_google_callback_auth_google_callback_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginStatusResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "OAuth code exchange failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/items": {
+      "get": {
+        "tags": [
+          "api",
+          "items"
+        ],
+        "summary": "Get saved items",
+        "description": "Returns a paginated list of saved items for the authenticated user, optionally filtered by tag.",
+        "operationId": "get_items_api_items_get",
+        "parameters": [
+          {
+            "name": "tag",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional tag to filter items by.",
+              "title": "Tag"
+            },
+            "description": "Optional tag to filter items by."
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Page number for pagination.",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "Page number for pagination."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ItemResponse"
+                  },
+                  "title": "Response Get Items Api Items Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "telegramInitData": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "api",
+          "items"
+        ],
+        "summary": "Save a new item",
+        "description": "Saves a new item (url with optional title) for the authenticated user.",
+        "operationId": "create_item_api_items_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ItemCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "telegramInitData": []
+          }
+        ]
+      }
+    },
+    "/api/items/{item_id}": {
+      "delete": {
+        "tags": [
+          "api",
+          "items"
+        ],
+        "summary": "Delete an item",
+        "description": "Deletes a saved item by ID. Validates ownership to prevent IDOR.",
+        "operationId": "delete_item_api_items__item_id__delete",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "description": "ID of the item to delete.",
+              "title": "Item Id"
+            },
+            "description": "ID of the item to delete."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Item not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "telegramInitData": []
+          }
+        ]
+      }
+    },
+    "/api/search": {
+      "post": {
+        "tags": [
+          "api",
+          "search"
+        ],
+        "summary": "Search items",
+        "description": "Performs a hybrid (vector + text trigram GIN) search on the user's saved items.",
+        "operationId": "search_items_api_search_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "telegramInitData": []
+          }
+        ]
+      }
+    },
+    "/api/graph": {
+      "get": {
+        "tags": [
+          "api",
+          "graph"
+        ],
+        "summary": "Get mind map graph",
+        "description": "Returns nodes (items, semantic hubs) and edges (similarity links) for graph visualization.",
+        "operationId": "get_graph_api_graph_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "telegramInitData": []
+          }
+        ]
+      }
+    },
+    "/api/quizzes/due": {
+      "get": {
+        "tags": [
+          "api",
+          "quizzes"
+        ],
+        "summary": "Get due quizzes",
+        "description": "Returns a list of quizzes due for review based on SM-2 scheduling.",
+        "operationId": "get_due_quizzes_api_quizzes_due_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/QuizResponse"
+                  },
+                  "type": "array",
+                  "title": "Response Get Due Quizzes Api Quizzes Due Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "telegramInitData": []
+          }
+        ]
+      }
+    },
+    "/api/quizzes/{id}/answer": {
+      "post": {
+        "tags": [
+          "api",
+          "quizzes"
+        ],
+        "summary": "Submit quiz answer",
+        "description": "Records response quality (0-5) and updates SM-2 scheduling parameters for the quiz.",
+        "operationId": "answer_quiz_api_quizzes__id__answer_post",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "description": "Quiz ID.",
+              "title": "Id"
+            },
+            "description": "Quiz ID."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuizAnswerRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuizResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Quiz not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "telegramInitData": []
+          }
+        ]
+      }
+    },
+    "/api/quizzes/stats": {
+      "get": {
+        "tags": [
+          "api",
+          "quizzes"
+        ],
+        "summary": "Get quiz stats",
+        "description": "Returns aggregated quiz statistics (total, due, reviews, average ease, streak) for the user.",
+        "operationId": "get_quiz_stats_api_quizzes_stats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuizStatsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "telegramInitData": []
+          }
+        ]
+      }
+    },
+    "/api/reminders": {
+      "get": {
+        "tags": [
+          "api",
+          "reminders"
+        ],
+        "summary": "Get reminders",
+        "description": "Returns all reminders configured by the user (up to 20 limit).",
+        "operationId": "get_reminders_api_reminders_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ReminderResponse"
+                  },
+                  "type": "array",
+                  "title": "Response Get Reminders Api Reminders Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "telegramInitData": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "api",
+          "reminders"
+        ],
+        "summary": "Create reminder",
+        "description": "Saves a new reminder message scheduled for a specific UTC timestamp.",
+        "operationId": "create_reminder_api_reminders_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReminderCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReminderResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "telegramInitData": []
+          }
+        ]
+      }
+    },
+    "/api/reminders/{id}": {
+      "delete": {
+        "tags": [
+          "api",
+          "reminders"
+        ],
+        "summary": "Delete a reminder",
+        "description": "Deletes a reminder by ID. Validates ownership to prevent IDOR.",
+        "operationId": "delete_reminder_api_reminders__id__delete",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "description": "Reminder ID to delete.",
+              "title": "Id"
+            },
+            "description": "Reminder ID to delete."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Reminder not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "telegramInitData": []
+          }
+        ]
+      }
+    },
+    "/api/drive/sync": {
+      "post": {
+        "tags": [
+          "api",
+          "drive"
+        ],
+        "summary": "Sync Google Drive",
+        "description": "Triggers a background synchronization of Recall items to Google Drive as a unified doc.",
+        "operationId": "sync_drive_api_drive_sync_post",
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Sync limit exceeded (max 5 requests per hour).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "telegramInitData": []
+          }
+        ]
+      }
+    },
+    "/api/drive": {
+      "delete": {
+        "tags": [
+          "api",
+          "drive"
+        ],
+        "summary": "Disconnect Google Drive",
+        "description": "Clears the user's stored Google refresh token, disconnecting Google Drive integration.",
+        "operationId": "disconnect_drive_api_drive_delete",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "telegramInitData": []
+          }
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Health check",
+        "description": "Lightweight liveness probe \u2014 no DB queries, no external calls.\nTarget response time: < 5 ms.\nUsed by Render health checks and Uptime Robot monitoring.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Service is alive",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Health Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ErrorResponse": {
+        "properties": {
+          "error": {
+            "type": "string",
+            "title": "Error",
+            "description": "Programmatic error code."
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Human-readable error description."
+          }
+        },
+        "type": "object",
+        "required": [
+          "error",
+          "message"
+        ],
+        "title": "ErrorResponse"
+      },
+      "GraphEdge": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "Source node ID."
+          },
+          "target": {
+            "type": "string",
+            "title": "Target",
+            "description": "Target node ID."
+          },
+          "weight": {
+            "type": "number",
+            "title": "Weight",
+            "description": "Edge weight representing similarity."
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "target",
+          "weight"
+        ],
+        "title": "GraphEdge"
+      },
+      "GraphNode": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Node ID (e.g. 'item_12' or 'hub_5')."
+          },
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "description": "Node type: 'orbital', 'hub', or 'pulse'."
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "Node display label."
+          },
+          "x": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "X",
+            "description": "Optional X coordinate for Mind Map layout."
+          },
+          "y": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Y",
+            "description": "Optional Y coordinate for Mind Map layout."
+          },
+          "item_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Id",
+            "description": "Direct item ID if this node represents a saved item."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "type",
+          "label"
+        ],
+        "title": "GraphNode"
+      },
+      "GraphResponse": {
+        "properties": {
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNode"
+            },
+            "type": "array",
+            "title": "Nodes",
+            "description": "All items and semantic hub nodes."
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/GraphEdge"
+            },
+            "type": "array",
+            "title": "Edges",
+            "description": "Connections between nodes representing similarity."
+          }
+        },
+        "type": "object",
+        "required": [
+          "nodes",
+          "edges"
+        ],
+        "title": "GraphResponse"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "ItemCreateRequest": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "The URL of the item to add."
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "The optional title of the item."
+          }
+        },
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "title": "ItemCreateRequest"
+      },
+      "ItemResponse": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "Internal surrogate ID of the item."
+          },
+          "user_id": {
+            "type": "integer",
+            "title": "User Id",
+            "description": "Owner's internal user ID."
+          },
+          "source_type": {
+            "type": "string",
+            "title": "Source Type",
+            "description": "Type of ingest source (e.g. url, voice, pdf, image, text)."
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url",
+            "description": "Original source URL."
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary",
+            "description": "LLM-generated plain-text summary."
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "Extracted or generated title."
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags",
+            "description": "List of auto-generated tags."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Item creation timestamp."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "source_type",
+          "summary",
+          "created_at"
+        ],
+        "title": "ItemResponse"
+      },
+      "LoginStatusResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Authentication status."
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "LoginStatusResponse"
+      },
+      "QuizAnswerRequest": {
+        "properties": {
+          "quality": {
+            "type": "integer",
+            "maximum": 5.0,
+            "minimum": 0.0,
+            "title": "Quality",
+            "description": "SM-2 response quality score (0 to 5)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "quality"
+        ],
+        "title": "QuizAnswerRequest"
+      },
+      "QuizResponse": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "Quiz ID."
+          },
+          "user_id": {
+            "type": "integer",
+            "title": "User Id",
+            "description": "Owner's internal user ID."
+          },
+          "item_id": {
+            "type": "integer",
+            "title": "Item Id",
+            "description": "Reference to the tested item."
+          },
+          "question": {
+            "type": "string",
+            "title": "Question",
+            "description": "LLM-generated question."
+          },
+          "options": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Options",
+            "description": "List of answer choices."
+          },
+          "correct_index": {
+            "type": "integer",
+            "title": "Correct Index",
+            "description": "0-based index of correct option."
+          },
+          "explanation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explanation",
+            "description": "LLM-generated explanation."
+          },
+          "ease_factor": {
+            "type": "number",
+            "title": "Ease Factor",
+            "description": "SM-2 ease factor."
+          },
+          "interval_days": {
+            "type": "integer",
+            "title": "Interval Days",
+            "description": "SM-2 interval in days."
+          },
+          "next_review": {
+            "type": "string",
+            "format": "date",
+            "title": "Next Review",
+            "description": "Scheduled review date."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Quiz creation timestamp."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "item_id",
+          "question",
+          "options",
+          "correct_index",
+          "ease_factor",
+          "interval_days",
+          "next_review",
+          "created_at"
+        ],
+        "title": "QuizResponse"
+      },
+      "QuizStatsResponse": {
+        "properties": {
+          "total_quizzes": {
+            "type": "integer",
+            "title": "Total Quizzes",
+            "description": "Total quizzes created."
+          },
+          "due_today": {
+            "type": "integer",
+            "title": "Due Today",
+            "description": "Quizzes due for review today."
+          },
+          "completed_reviews": {
+            "type": "integer",
+            "title": "Completed Reviews",
+            "description": "Number of reviewed quizzes."
+          },
+          "average_ease_factor": {
+            "type": "number",
+            "title": "Average Ease Factor",
+            "description": "Average SM-2 ease factor."
+          },
+          "streak": {
+            "type": "integer",
+            "title": "Streak",
+            "description": "Current review streak count."
+          }
+        },
+        "type": "object",
+        "required": [
+          "total_quizzes",
+          "due_today",
+          "completed_reviews",
+          "average_ease_factor",
+          "streak"
+        ],
+        "title": "QuizStatsResponse"
+      },
+      "ReminderCreateRequest": {
+        "properties": {
+          "item_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Id",
+            "description": "Optional linked item ID."
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Reminder message body."
+          },
+          "remind_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Remind At",
+            "description": "Scheduled delivery timestamp (UTC)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "message",
+          "remind_at"
+        ],
+        "title": "ReminderCreateRequest"
+      },
+      "ReminderResponse": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "Reminder ID."
+          },
+          "user_id": {
+            "type": "integer",
+            "title": "User Id",
+            "description": "Owner's internal user ID."
+          },
+          "item_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Id",
+            "description": "Optional linked item ID."
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Reminder text message."
+          },
+          "remind_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Remind At",
+            "description": "Scheduled delivery timestamp (UTC)."
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Delivery status ('pending', 'sent', 'failed')."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Reminder creation timestamp."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "message",
+          "remind_at",
+          "status",
+          "created_at"
+        ],
+        "title": "ReminderResponse"
+      },
+      "SearchRequest": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query",
+            "description": "Search query string."
+          }
+        },
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "title": "SearchRequest"
+      },
+      "SearchResponse": {
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/SearchResultItem"
+            },
+            "type": "array",
+            "title": "Results",
+            "description": "List of matched items sorted by relevance."
+          }
+        },
+        "type": "object",
+        "required": [
+          "results"
+        ],
+        "title": "SearchResponse"
+      },
+      "SearchResultItem": {
+        "properties": {
+          "item": {
+            "$ref": "#/components/schemas/ItemResponse",
+            "description": "Matched item metadata."
+          },
+          "score": {
+            "type": "number",
+            "title": "Score",
+            "description": "Relevance score (cosine similarity or text match rank)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "item",
+          "score"
+        ],
+        "title": "SearchResultItem"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "recall_session",
+        "description": "JWT stored in the httpOnly 'recall_session' cookie."
+      },
+      "telegramInitData": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Authorization",
+        "description": "Telegram Web App initData in Authorization header (format: TelegramInitData <init_data>)."
+      }
+    }
+  }
+}

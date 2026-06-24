@@ -17,6 +17,7 @@ Security:
 """
 
 import logging
+import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
@@ -27,10 +28,84 @@ from fastapi.responses import JSONResponse
 # ---------------------------------------------------------------------------
 # Logging — structured, nothing sensitive
 # ---------------------------------------------------------------------------
+class SecretMaskingFilter(logging.Filter):
+    """
+    Filters all log messages and redacts sensitive information such as
+    the Telegram Bot Token, Fernet key, JWT secret, database passwords,
+    and other API keys.
+    """
+    def __init__(self):
+        super().__init__()
+        self.telegram_pattern = re.compile(r"bot\d+:[A-Za-z0-9_-]+")
+
+    def mask_text(self, text: str) -> str:
+        # Mask Telegram bot tokens in URLs (e.g., bot8764400085:AAFo3...)
+        text = self.telegram_pattern.sub("bot<REDACTED>", text)
+        
+        try:
+            from backend.config import settings
+            if settings:
+                secrets = [
+                    settings.TELEGRAM_BOT_TOKEN,
+                    settings.FERNET_KEY,
+                    settings.JWT_SECRET,
+                    settings.UPSTASH_REDIS_REST_TOKEN,
+                ]
+                
+                # Extract and mask DB password if present
+                db_url = settings.DATABASE_URL
+                if db_url:
+                    # Match password component in connection string
+                    match = re.search(r":([^@:]+)@", db_url)
+                    if match:
+                        secrets.append(match.group(1))
+                
+                # Mask other optional API keys/secrets
+                for key in ["MODAL_API_TOKEN", "GROQ_API_KEY", "GEMINI_API_KEY", "ZENROWS_KEY", "SCRAPINGBEE_KEY", "SCRAPERAPI_KEY"]:
+                    val = getattr(settings, key, None)
+                    if val:
+                        secrets.append(val)
+                
+                for secret in secrets:
+                    if secret and len(secret) > 4:
+                        text = text.replace(secret, "<REDACTED>")
+        except Exception:
+            pass
+            
+        return text
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.msg, str):
+            record.msg = self.mask_text(record.msg)
+        if record.args:
+            new_args = []
+            for arg in record.args:
+                if isinstance(arg, str):
+                    new_args.append(self.mask_text(arg))
+                else:
+                    new_args.append(arg)
+            record.args = tuple(new_args)
+        return True
+
+# Initialize standard logging configuration
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
 )
+
+# Apply secret masking filter to all handlers on the root logger
+mask_filter = SecretMaskingFilter()
+root_logger = logging.getLogger()
+root_logger.addFilter(mask_filter)
+for handler in root_logger.handlers:
+    handler.addFilter(mask_filter)
+
+# Suppress verbose httpx request logging to prevent token leakage in info logs
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
+# Suppress psycopg.pool connection warnings on shutdown/cancellation
+logging.getLogger("psycopg.pool").setLevel(logging.ERROR)
+
 logger = logging.getLogger(__name__)
 
 
@@ -151,6 +226,14 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+from backend.routes.webhook import router as webhook_router
+from backend.routes.auth import router as auth_router
+from backend.routes.api import router as api_router
+
+app.include_router(webhook_router)
+app.include_router(auth_router)
+app.include_router(api_router)
+
 @app.get(
     "/health",
     tags=["ops"],
@@ -167,3 +250,60 @@ async def health() -> dict:
         "status": "ok",
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+
+# ---------------------------------------------------------------------------
+# OpenAPI Customisation & Security Definitions
+# ---------------------------------------------------------------------------
+from fastapi.openapi.utils import get_openapi
+from backend.config import settings
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+        
+    openapi_schema = get_openapi(
+        title="Recall API",
+        version="0.1.0",
+        description=(
+            "Recall — AI-powered second brain. "
+            "Ingest links, voice notes, PDFs and images via Telegram. "
+            "Search, map, and quiz your knowledge via the web dashboard."
+        ),
+        routes=app.routes,
+    )
+    
+    # Custom security schemes definitions
+    openapi_schema["components"]["securitySchemes"] = {
+        "bearerAuth": {
+            "type": "apiKey",
+            "in": "cookie",
+            "name": "recall_session",
+            "description": "JWT stored in the httpOnly 'recall_session' cookie.",
+        },
+        "telegramInitData": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "Authorization",
+            "description": "Telegram Web App initData in Authorization header (format: TelegramInitData <init_data>).",
+        }
+    }
+    
+    # Associate security schemes dynamically with all /api/* endpoints
+    for path, path_item in openapi_schema.get("paths", {}).items():
+        if path.startswith("/api/"):
+            for method in path_item:
+                path_item[method]["security"] = [
+                    {"bearerAuth": []},
+                    {"telegramInitData": []}
+                ]
+                
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi
+
+# Explicitly disable Swagger UI & ReDoc in production mode
+if settings and settings.ENV == "production":
+    app.docs_url = None
+    app.redoc_url = None

@@ -21,7 +21,6 @@ class Settings(BaseSettings):
     MODAL_API_TOKEN: str | None = None
     GROQ_API_KEY: str | None = None
     GEMINI_API_KEY: str | None = None
-    OLLAMA_HOST: str | None = None
     COMPUTE_PROVIDER: str | None = None
     
     GOOGLE_CLIENT_ID: str | None = None
@@ -36,7 +35,6 @@ class Settings(BaseSettings):
     SCRAPERAPI_KEY: str | None = None
 
     ENV: str = "development"
-    LOCAL_MODE: bool = False
 
 
     # ==========================================================================
