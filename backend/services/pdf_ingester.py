@@ -243,7 +243,7 @@ async def ingest_pdf(
                 VALUES (%s, %s, %s, %s, %s::vector);
             """
             for idx, (chunk, emb) in enumerate(zip(chunks, chunk_embeddings)):
-                chunk_excerpt = chunk[:2000]
+                chunk_excerpt = chunk[:500]
                 await cur.execute(
                     insert_chunk_query,
                     (item_id, user_id, idx, chunk_excerpt, emb)

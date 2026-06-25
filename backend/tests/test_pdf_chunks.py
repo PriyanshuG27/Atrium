@@ -208,7 +208,7 @@ async def test_pdf_ingestion_creates_chunks():
             assert chunk["item_id"] == item_id
             assert chunk["user_id"] == 42
             assert chunk["chunk_index"] == idx
-            assert len(chunk["chunk_text"]) <= 2000  # Full chunk storage (up to 2000 chars)
+            assert len(chunk["chunk_text"]) <= 500  # Excerpt chunk storage (up to 500 chars)
             
         # items.embedding must equal first chunk's embedding (chunk index 0)
         assert parent["embedding"] == state.item_chunks[0]["embedding"]

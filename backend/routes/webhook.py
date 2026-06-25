@@ -359,7 +359,10 @@ async def telegram_webhook(
                                 else "Link" if source_type == "url"
                                 else "Text"
                             )
-                            lines.append(f"{idx}. [{source_type}] {display_title} — /file_{item['id']}")
+                            summary = item.get("summary") or ""
+                            summary_snippet = summary[:100] + "..." if len(summary) > 100 else summary
+                            summary_part = f" - {summary_snippet}" if summary_snippet else ""
+                            lines.append(f"{idx}. [{source_type}] {display_title}{summary_part} — /file_{item['id']}")
                         search_msg = "\n".join(lines)
                         
                 background_tasks.add_task(send_telegram_ack, chat_id, search_msg)
