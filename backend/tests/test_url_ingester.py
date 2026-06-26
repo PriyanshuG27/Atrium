@@ -106,3 +106,30 @@ async def test_scrape_url_private_google_drive(monkeypatch):
         await scrape_url("https://drive.google.com/file/d/12345/view")
         
     assert "private Google Drive link" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_scrape_url_public_google_doc(monkeypatch):
+    mock_title_resp = mock.Mock()
+    mock_title_resp.status_code = 200
+    mock_title_resp.text = "<html><head><title>Project Brain v2 - Google Docs</title></head><body></body></html>"
+    
+    mock_export_resp = mock.Mock()
+    mock_export_resp.status_code = 200
+    mock_export_resp.text = "\ufeffThis is the Google Doc content plain text."
+    
+    calls = []
+    async def mock_get(self, url, *args, **kwargs):
+        calls.append(url)
+        if "export?format=txt" in url:
+            return mock_export_resp
+        return mock_title_resp
+        
+    monkeypatch.setattr("httpx.AsyncClient.get", mock_get)
+    
+    title, text = await scrape_url("https://docs.google.com/document/d/18viTGbbuzt7ojoSCyMtxr26VhcU_F9L_/edit")
+    
+    assert title == "Project Brain v2"
+    assert text == "This is the Google Doc content plain text."
+    assert any("export?format=txt" in c for c in calls)
+

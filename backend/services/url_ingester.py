@@ -14,11 +14,204 @@ from backend.services.ai_cascade import AICascade
 
 logger = logging.getLogger(__name__)
 
-async def scrape_url(url: str) -> tuple[str, str]:
+async def scrape_url(url: str, user_id = None, db = None) -> tuple[str, str]:
     """
     Scrapes the given URL and returns (title, clean_text).
+    Supports parsing Google Docs, Sheets, Slides, and general Google Drive files.
     If scraping fails, returns (URL, URL).
     """
+    import re
+    import os
+
+    # Check if URL is Google Doc/Sheet/Slide or general Google Drive file
+    doc_match = re.search(r"docs\.google\.com/document/d/([a-zA-Z0-9_-]+)", url)
+    sheet_match = re.search(r"docs\.google\.com/spreadsheets/d/([a-zA-Z0-9_-]+)", url)
+    slide_match = re.search(r"docs\.google\.com/presentation/d/([a-zA-Z0-9_-]+)", url)
+    drive_match = re.search(r"drive\.google\.com/file/d/([a-zA-Z0-9_-]+)", url)
+
+    google_file_id = None
+    google_type = None
+
+    if doc_match:
+        google_file_id = doc_match.group(1)
+        google_type = "document"
+    elif sheet_match:
+        google_file_id = sheet_match.group(1)
+        google_type = "spreadsheet"
+    elif slide_match:
+        google_file_id = slide_match.group(1)
+        google_type = "presentation"
+    elif drive_match:
+        google_file_id = drive_match.group(1)
+        google_type = "file"
+
+    if google_file_id:
+        # Try authenticated route if we have user credentials
+        access_token = None
+        if user_id and db:
+            try:
+                # Fetch refresh token from users
+                if hasattr(db, "cursor"):
+                    async with db.cursor() as cur:
+                        await cur.execute("SELECT google_refresh_token FROM users WHERE id = %s;", (user_id,))
+                        row = await cur.fetchone()
+                        encrypted_token = row[0] if row else None
+                else:
+                    async with db.connection() as conn:
+                        async with conn.cursor() as cur:
+                            await cur.execute("SELECT google_refresh_token FROM users WHERE id = %s;", (user_id,))
+                            row = await cur.fetchone()
+                            encrypted_token = row[0] if row else None
+
+                if encrypted_token:
+                    from backend.services.encryption import decrypt
+                    refresh_token = decrypt(encrypted_token)
+
+                    # Exchange refresh token for access token
+                    from backend.config import settings
+                    async with httpx.AsyncClient(timeout=15.0) as client:
+                        token_resp = await client.post(
+                            "https://oauth2.googleapis.com/token",
+                            data={
+                                "client_id": settings.GOOGLE_CLIENT_ID,
+                                "client_secret": settings.GOOGLE_CLIENT_SECRET,
+                                "refresh_token": refresh_token,
+                                "grant_type": "refresh_token",
+                            }
+                        )
+                        token_resp.raise_for_status()
+                        access_token = token_resp.json().get("access_token")
+            except Exception as token_err:
+                logger.error("Failed to get Google access token for scraping: %s", token_err)
+
+        content_text = None
+        title = "Untitled Google File"
+
+        if access_token:
+            headers = {"Authorization": f"Bearer {access_token}"}
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                try:
+                    # Get file metadata to find title and mimeType
+                    meta_resp = await client.get(
+                        f"https://www.googleapis.com/drive/v3/files/{google_file_id}",
+                        headers=headers
+                    )
+                    meta_resp.raise_for_status()
+                    meta_data = meta_resp.json()
+                    title = meta_data.get("name", title)
+                    mime_type = meta_data.get("mimeType", "")
+
+                    # Determine how to fetch content
+                    if mime_type == "application/vnd.google-apps.document" or google_type == "document":
+                        # Export Doc as plain text
+                        export_resp = await client.get(
+                            f"https://www.googleapis.com/drive/v3/files/{google_file_id}/export?mimeType=text/plain",
+                            headers=headers
+                        )
+                        export_resp.raise_for_status()
+                        content_text = export_resp.text
+                    elif mime_type == "application/vnd.google-apps.spreadsheet" or google_type == "spreadsheet":
+                        # Export Sheet as CSV
+                        export_resp = await client.get(
+                            f"https://www.googleapis.com/drive/v3/files/{google_file_id}/export?mimeType=text/csv",
+                            headers=headers
+                        )
+                        export_resp.raise_for_status()
+                        content_text = export_resp.text
+                    elif mime_type == "application/vnd.google-apps.presentation" or google_type == "presentation":
+                        # Export Slide as plain text
+                        export_resp = await client.get(
+                            f"https://www.googleapis.com/drive/v3/files/{google_file_id}/export?mimeType=text/plain",
+                            headers=headers
+                        )
+                        export_resp.raise_for_status()
+                        content_text = export_resp.text
+                    else:
+                        # Fetch binary file or text file
+                        file_resp = await client.get(
+                            f"https://www.googleapis.com/drive/v3/files/{google_file_id}?alt=media",
+                            headers=headers
+                        )
+                        file_resp.raise_for_status()
+                        # If PDF, parse PDF content
+                        if mime_type == "application/pdf" or file_resp.content.startswith(b"%PDF"):
+                            import tempfile
+                            from backend.services.pdf_ingester import extract_pdf_text
+                            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                                tmp.write(file_resp.content)
+                                tmp_path = tmp.name
+                            try:
+                                content_text = await extract_pdf_text(tmp_path)
+                            finally:
+                                if os.path.exists(tmp_path):
+                                    os.remove(tmp_path)
+                        else:
+                            content_text = file_resp.text
+                except Exception as api_err:
+                    logger.error("Failed to fetch Google file via API: %s", api_err)
+
+        # Fallback to public endpoints if we couldn't get content authenticated
+        if not content_text:
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+                try:
+                    # Get title from normal URL scrape first
+                    headers = {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+                    }
+                    resp = await client.get(url, headers=headers)
+                    if resp.status_code == 200:
+                        soup = BeautifulSoup(resp.text, "html.parser")
+                        if soup.title and soup.title.string:
+                            title = soup.title.string.strip()
+                            # Clean up title if it contains " - Google Docs" etc
+                            title = re.sub(r"\s*-\s*Google\s*(Docs|Sheets|Slides|Drive)$", "", title, flags=re.IGNORECASE)
+                except Exception as title_err:
+                    logger.error("Failed to get public Google file title: %s", title_err)
+
+                # Now fetch the public export/download content
+                try:
+                    if google_type == "document":
+                        export_url = f"https://docs.google.com/document/d/{google_file_id}/export?format=txt"
+                        exp_resp = await client.get(export_url)
+                        if exp_resp.status_code == 200:
+                            content_text = exp_resp.text
+                    elif google_type == "spreadsheet":
+                        export_url = f"https://docs.google.com/spreadsheets/d/{google_file_id}/export?format=csv"
+                        exp_resp = await client.get(export_url)
+                        if exp_resp.status_code == 200:
+                            content_text = exp_resp.text
+                    elif google_type == "presentation":
+                        export_url = f"https://docs.google.com/presentation/d/{google_file_id}/export?format=txt"
+                        exp_resp = await client.get(export_url)
+                        if exp_resp.status_code == 200:
+                            content_text = exp_resp.text
+                    elif google_type == "file":
+                        dl_url = f"https://drive.google.com/uc?id={google_file_id}&export=download"
+                        exp_resp = await client.get(dl_url)
+                        if exp_resp.status_code == 200:
+                            if exp_resp.content.startswith(b"%PDF"):
+                                import tempfile
+                                from backend.services.pdf_ingester import extract_pdf_text
+                                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                                    tmp.write(exp_resp.content)
+                                    tmp_path = tmp.name
+                                try:
+                                    content_text = await extract_pdf_text(tmp_path)
+                                finally:
+                                    if os.path.exists(tmp_path):
+                                        os.remove(tmp_path)
+                            else:
+                                content_text = exp_resp.text
+                except Exception as exp_err:
+                    logger.error("Failed to fetch public Google file export: %s", exp_err)
+
+        if content_text is not None:
+            # Strip BOM if present
+            if content_text.startswith("\ufeff"):
+                content_text = content_text[1:]
+            return title, content_text[:10000]
+
+    # Standard URL scraping logic (non-Google Docs/Drive)
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
@@ -69,8 +262,8 @@ async def ingest_url(url: str, user_id: int, db: AsyncConnection) -> int:
     Scrapes, encrypts, embeds, and saves URL content.
     Returns the inserted item's ID.
     """
-    # 1. Scrape content
-    title, text_content = await scrape_url(url)
+    # 1. Scrape content (passing user_id and db to support google drive/docs access)
+    title, text_content = await scrape_url(url, user_id, db)
     
     raw_text = f"URL: {url}\nTitle: {title}\nContent:\n{text_content}"
     
