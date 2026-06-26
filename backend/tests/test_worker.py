@@ -125,7 +125,8 @@ async def test_process_url_task(monkeypatch):
     await process_task(task)
     
     mock_redis.delete.assert_called_once_with("graph:42")
-    mock_send.assert_called_once_with("7732257445", "Saved ✓ — Mock Page Title")
+    mock_send.assert_called_once_with("7732257445", "🔗 Mock Page Title\n\nMock Summary\n\nSaved ✓")
+
 
 
 @pytest.mark.asyncio

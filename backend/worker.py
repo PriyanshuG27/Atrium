@@ -376,7 +376,10 @@ async def process_task(task: Dict[str, Any]) -> None:
                     else:
                         bot_reply = f"📸 {title}\n\n{summary}\n\nSaved ✓"
                 else:
-                    bot_reply = f"Saved ✓ — {title}"
+                    if summary:
+                        bot_reply = f"🔗 {title}\n\n{summary}\n\nSaved ✓"
+                    else:
+                        bot_reply = f"Saved ✓ — {title}"
                 await send_telegram_message(chat_id, bot_reply)
                 
             elif content_type == "pdf":

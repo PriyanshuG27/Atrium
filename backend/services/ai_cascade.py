@@ -229,6 +229,8 @@ class AICascade:
                     if resp.status_code == 200:
                         data = resp.json()
                         return data["choices"][0]["message"]["content"]
+                    elif resp.status_code == 429:
+                        logger.warning("Groq model %s rate limited (429). Mapped keys/organization TPM exceeded.", model)
                     else:
                         logger.warning("Groq call failed for model %s with status %d: %s", model, resp.status_code, resp.text)
             except Exception as e:
