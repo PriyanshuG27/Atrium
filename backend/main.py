@@ -143,8 +143,19 @@ for handler in root_logger.handlers:
     handler.setFormatter(beautiful_formatter)
 
 
-# Suppress verbose httpx request logging to prevent token leakage in info logs
-logging.getLogger("httpx").setLevel(logging.WARNING)
+# Suppress verbose third-party loggers to prevent log clutter
+for logger_name in [
+    "watchfiles.main",
+    "watchfiles",
+    "apscheduler",
+    "sentence_transformers",
+    "huggingface_hub",
+    "httpx",
+    "httpcore",
+    "urllib3",
+    "uvicorn.access",
+]:
+    logging.getLogger(logger_name).setLevel(logging.WARNING)
 
 # Suppress psycopg.pool connection warnings on shutdown/cancellation
 logging.getLogger("psycopg.pool").setLevel(logging.ERROR)
