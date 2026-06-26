@@ -8,6 +8,7 @@ import { GraphSkeleton, FeedCardSkeleton, NodePanelSkeleton } from '../component
 import { useToast } from '../components/Toast';
 import ErrorBoundary from '../components/ErrorBoundary';
 import GraphCanvas from '../canvas/GraphCanvas';
+import { useGraphSocket } from '../hooks/useGraphSocket';
 import NodePanel from '../components/NodePanel';
 import useKeyboardShortcuts from '../hooks/useKeyboardShortcuts';
 import KeyboardShortcutsModal from '../components/KeyboardShortcutsModal';
@@ -54,10 +55,15 @@ function layoutNodes(nodes, edges, hubs) {
   hubs.forEach(hub => {
     const hubNodeId = -hub.id;
     const hubNode = hubNodes.find(hn => hn.id === hubNodeId);
-    if (hubNode && hub.member_ids) {
-      hub.member_ids.forEach(mid => {
-        memberHubMap[mid] = hubNode;
-      });
+    if (hubNode) {
+      if (hub.updated_at) {
+        hubNode.updated_at = hub.updated_at;
+      }
+      if (hub.member_ids) {
+        hub.member_ids.forEach(mid => {
+          memberHubMap[mid] = hubNode;
+        });
+      }
     }
   });
 
@@ -105,8 +111,17 @@ function layoutNodes(nodes, edges, hubs) {
 }
 
 export default function Dashboard() {
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const { addToast } = useToast();
+
+  const [dashboardItems, setDashboardItems] = useState([]);
+  const [initialGraph, setInitialGraph] = useState({ nodes: [], edges: [], hubs: [] });
+
+  const {
+    nodes: hookNodes,
+    edges: hookEdges,
+    hubs: hookHubs
+  } = useGraphSocket(token, initialGraph);
   const starField = React.useMemo(() => {
     const arr = [];
     const classes = ['twinkle-slow', 'twinkle-medium', 'twinkle-fast'];
@@ -318,99 +333,21 @@ export default function Dashboard() {
         }
       }
 
+      setDashboardItems(itemsData.items || []);
+
       // 3. Fetch graph nodes and edges if items exist
       if (hasSaves) {
         const graphRes = await fetch('/api/graph');
         if (graphRes && graphRes.ok) {
           const graphData = await graphRes.json();
-          setHubs(graphData.hubs || []);
-
-          // Build a details lookup map from paginated items
-          const detailsMap = {};
-          if (itemsData.items) {
-            itemsData.items.forEach(item => {
-              detailsMap[item.id] = item;
-            });
-          }
-
-          // Enrich graph nodes with summaries, tags, and source urls
-          const enrichedNodes = (graphData.nodes || []).map(node => {
-            const details = detailsMap[node.id];
-            return {
-              ...node,
-              summary: details?.summary || 'No summary generated.',
-              tags: details?.tags || [],
-              source_url: details?.source_url || ''
-            };
+          setInitialGraph({
+            nodes: graphData.nodes || [],
+            edges: graphData.edges || [],
+            hubs: graphData.hubs || []
           });
-
-          // Keep all similarity edges to show proper intra-hub connections
-          const finalEdges = [...(graphData.edges || [])];
-
-          // Dynamically construct Hub Centroid Nodes and Hub-to-Member Edges
-          const valid_item_ids = new Set(enrichedNodes.map(node => node.id));
-          const finalNodes = [...enrichedNodes];
-
-          if (graphData.hubs) {
-            graphData.hubs.forEach(hub => {
-              if (hub.member_ids && hub.member_ids.length > 0) {
-                // Check if any member actually exists in the graph nodes list
-                const hasVisibleMember = hub.member_ids.some(mid => valid_item_ids.has(mid));
-                if (hasVisibleMember) {
-                  const hubNodeId = -hub.id; // Negative integer ID to avoid collision
-                  
-                  // Create central Hub Centroid Node
-                  finalNodes.push({
-                    id: hubNodeId,
-                    title: hub.label,
-                    source_type: 'hub',
-                    created_at: new Date().toISOString(),
-                    is_hub: true,
-                    type: 'hub',
-                    summary: `Semantic cluster containing: ${hub.label}`,
-                    tags: ['hub', 'semantic'],
-                    source_url: ''
-                  });
-
-                  // Add edges connecting the hub centroid node to all its member nodes
-                  hub.member_ids.forEach(mid => {
-                    if (valid_item_ids.has(mid)) {
-                      finalEdges.push({
-                        source: hubNodeId,
-                        target: mid,
-                        weight: 1.0 // Strong connection weight
-                      });
-                    }
-                  });
-                }
-              }
-            });
-          }
-
-          // Layout the constellation nodes dynamically
-          const positioned = layoutNodes(finalNodes, finalEdges, graphData.hubs || []);
-          setActiveNodes(positioned);
-          setEdges(finalEdges);
-
-          // Auto-center: compute bounding box of positioned nodes and set initial pan.
-          // Guard: only run when container has a real measured size (not in JSDOM/tests).
-          if (positioned.length > 0 && canvasRef.current) {
-            const rect = canvasRef.current.getBoundingClientRect();
-            if (rect.width > 0 && rect.height > 0) {
-              const xs = positioned.map(n => n.x).filter(v => v !== undefined && !isNaN(v));
-              const ys = positioned.map(n => n.y).filter(v => v !== undefined && !isNaN(v));
-              if (xs.length > 0) {
-                const layoutCx = (Math.min(...xs) + Math.max(...xs)) / 2;
-                const layoutCy = (Math.min(...ys) + Math.max(...ys)) / 2;
-                setPan({ x: rect.width / 2 - layoutCx, y: rect.height / 2 - layoutCy });
-              }
-            }
-          }
-
         }
       } else {
-        setActiveNodes([]);
-        setEdges([]);
+        setInitialGraph({ nodes: [], edges: [], hubs: [] });
       }
     } catch (err) {
       console.error('Failed to initialize dashboard:', err);
@@ -418,6 +355,99 @@ export default function Dashboard() {
       setIsFirstLoad(false);
     }
   };
+
+  // Synchronize WebSocket hook state to local activeNodes/edges/hubs and perform auto-centering
+  useEffect(() => {
+    // If hookNodes is undefined (e.g. in tests where hook is globally mocked without returning nodes), fallback to initialGraph
+    const currentNodes = hookNodes !== undefined ? hookNodes : initialGraph.nodes;
+    const currentEdges = hookEdges !== undefined ? hookEdges : initialGraph.edges;
+    const currentHubs = hookHubs !== undefined ? hookHubs : initialGraph.hubs;
+
+    if (!currentNodes || currentNodes.length === 0) {
+      setActiveNodes([]);
+      setEdges([]);
+      setHubs([]);
+      return;
+    }
+
+    const detailsMap = {};
+    dashboardItems.forEach(item => {
+      detailsMap[item.id] = item;
+    });
+
+    const enrichedNodes = currentNodes.map(node => {
+      const details = detailsMap[node.id];
+      return {
+        ...node,
+        summary: details?.summary || node.summary || 'No summary generated.',
+        tags: details?.tags || node.tags || [],
+        source_url: details?.source_url || node.source_url || ''
+      };
+    });
+
+    const valid_item_ids = new Set(enrichedNodes.map(node => node.id));
+    const finalNodes = [...enrichedNodes];
+
+    if (currentHubs) {
+      currentHubs.forEach(hub => {
+        if (hub.member_ids && hub.member_ids.length > 0) {
+          const hasVisibleMember = hub.member_ids.some(mid => valid_item_ids.has(mid));
+          if (hasVisibleMember) {
+            const hubNodeId = -hub.id;
+            finalNodes.push({
+              id: hubNodeId,
+              title: hub.label,
+              source_type: 'hub',
+              created_at: new Date().toISOString(),
+              is_hub: true,
+              type: 'hub',
+              summary: `Semantic cluster containing: ${hub.label}`,
+              tags: ['hub', 'semantic'],
+              source_url: '',
+              updated_at: hub.updated_at
+            });
+          }
+        }
+      });
+    }
+
+    const finalEdges = [...currentEdges];
+    if (currentHubs) {
+      currentHubs.forEach(hub => {
+        if (hub.member_ids && hub.member_ids.length > 0) {
+          const hubNodeId = -hub.id;
+          hub.member_ids.forEach(mid => {
+            if (valid_item_ids.has(mid)) {
+              finalEdges.push({
+                source: hubNodeId,
+                target: mid,
+                weight: 1.0
+              });
+            }
+          });
+        }
+      });
+    }
+
+    const positioned = layoutNodes(finalNodes, finalEdges, currentHubs);
+    setActiveNodes(positioned);
+    setEdges(finalEdges);
+    setHubs(currentHubs);
+
+    // Auto-center on first load when container is measured
+    if (isFirstLoad && positioned.length > 0 && canvasRef.current) {
+      const rect = canvasRef.current.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        const xs = positioned.map(n => n.x).filter(v => v !== undefined && !isNaN(v));
+        const ys = positioned.map(n => n.y).filter(v => v !== undefined && !isNaN(v));
+        if (xs.length > 0) {
+          const layoutCx = (Math.min(...xs) + Math.max(...xs)) / 2;
+          const layoutCy = (Math.min(...ys) + Math.max(...ys)) / 2;
+          setPan({ x: rect.width / 2 - layoutCx, y: rect.height / 2 - layoutCy });
+        }
+      }
+    }
+  }, [hookNodes, hookEdges, hookHubs, initialGraph, dashboardItems, isFirstLoad]);
 
   // Fetch due quizzes count and check items on first load
   useEffect(() => {

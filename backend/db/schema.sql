@@ -14,12 +14,17 @@ CREATE TABLE IF NOT EXISTS users (
     id                   SERIAL PRIMARY KEY,
     telegram_chat_id     VARCHAR(50) UNIQUE NOT NULL,
     google_refresh_token TEXT,              -- Fernet AES-128 encrypted
+    google_last_sync     TIMESTAMP,         -- Timestamp of last Google Drive sync
     timezone_offset      INT DEFAULT 0,     -- UTC offset in minutes
     streak_count         INT DEFAULT 0,
     last_activity_date   DATE,
     drive_nudge_sent     BOOLEAN DEFAULT FALSE,
     created_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Ensure the column exists if the users table already exists
+ALTER TABLE users ADD COLUMN IF NOT EXISTS google_last_sync TIMESTAMP;
+
 
 -- 3. ITEMS TABLE (Partitioned by Range on created_at)
 CREATE TABLE IF NOT EXISTS items (

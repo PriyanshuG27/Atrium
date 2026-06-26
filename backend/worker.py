@@ -342,7 +342,19 @@ async def process_task(task: Dict[str, Any]) -> None:
                     from backend.services.youtube_ingester import ingest_instagram
                     item_id = await ingest_instagram(text_content, user_id, _pool)
                 else:
-                    item_id = await ingest_url(text_content, user_id, _pool)
+                    try:
+                        item_id = await ingest_url(text_content, user_id, _pool)
+                    except ValueError as e:
+                        if "private Google Drive link" in str(e):
+                            bot_reply = (
+                                "🔒 This Google Drive file is private.\n\n"
+                                "To save it in Recall, please either:\n"
+                                "1. Set the file's link sharing to \"Anyone with the link can view\", or\n"
+                                "2. Share the file with our Service Account email (if configured)."
+                            )
+                            await send_telegram_message(chat_id, bot_reply)
+                            return
+                        raise
                 
                 # Fetch saved details for bot reply (short connection block)
                 async with _pool.connection() as conn:

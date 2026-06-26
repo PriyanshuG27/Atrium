@@ -22,6 +22,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 
+import os
+
 # ---------------------------------------------------------------------------
 # Shared mock environment
 # ---------------------------------------------------------------------------
@@ -36,6 +38,11 @@ VALID_ENV = {
     "WEBSITE_URL": "http://localhost:5173",
     "ENV": "test",
 }
+
+# Pre-populate environment before any backend imports are evaluated
+for k, v in VALID_ENV.items():
+    os.environ.setdefault(k, v)
+    os.environ[k] = v
 
 
 @pytest.fixture()

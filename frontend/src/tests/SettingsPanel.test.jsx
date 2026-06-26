@@ -56,6 +56,17 @@ describe('SettingsPanel Component', () => {
   });
 
   it('renders settings panel when open and fetches settings data', async () => {
+    vi.spyOn(window, 'fetch').mockImplementation((url) => {
+      if (url === '/auth/me') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ id: 42, chat_id: '99999', drive_connected: true }),
+        });
+      }
+      return Promise.resolve({ ok: false });
+    });
+
     axios.get.mockResolvedValue({
       data: {
         timezone_offset: 5,
@@ -69,7 +80,7 @@ describe('SettingsPanel Component', () => {
     render(
       <ToastProvider>
         <AuthProvider>
-          <SeedAuth user={{ id: 42, chat_id: '99999' }}>
+          <SeedAuth user={{ id: 42, chat_id: '99999', drive_connected: true }}>
             <SettingsPanel isOpen={true} onClose={() => {}} />
           </SeedAuth>
         </AuthProvider>
@@ -85,7 +96,7 @@ describe('SettingsPanel Component', () => {
       expect(screen.getByText('🔥 7 days')).toBeInTheDocument();
       expect(screen.getByText('42')).toBeInTheDocument();
       expect(screen.getByText('12')).toBeInTheDocument();
-      expect(screen.getByText('Connected')).toBeInTheDocument();
+      expect(screen.getByText('Google Drive connected')).toBeInTheDocument();
     });
   });
 

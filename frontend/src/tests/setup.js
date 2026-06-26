@@ -45,6 +45,7 @@ vi.mock('@phosphor-icons/react', () => {
     MagnifyingGlass: makeMock('MagnifyingGlass'),
     GoogleLogo: makeMock('GoogleLogo'),
     CloudX: makeMock('CloudX'),
+    CloudArrowUp: makeMock('CloudArrowUp'),
     SignOut: makeMock('SignOut'),
     CaretDown: makeMock('CaretDown'),
     CaretUp: makeMock('CaretUp'),

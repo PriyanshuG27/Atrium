@@ -9,7 +9,7 @@ All endpoints require bearerAuth or telegramInitData (applied via OpenAPI custom
 from datetime import date
 import logging
 from typing import List, Optional
-from fastapi import APIRouter, Path, Query, Response, status, Depends, HTTPException
+from fastapi import APIRouter, Path, Query, Response, status, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
 import psycopg
 
@@ -675,8 +675,13 @@ async def delete_reminder(
         429: {"model": ErrorResponse, "description": "Sync limit exceeded (max 5 requests per hour)."},
     },
 )
-async def sync_drive():
+async def sync_drive(
+    background_tasks: BackgroundTasks,
+    user: UserContext = Depends(get_current_user)
+):
     """Sync items to Google Drive."""
+    from backend.services.google_drive import run_google_drive_sync
+    background_tasks.add_task(run_google_drive_sync, user.id)
     return {"status": "ok"}
 
 @router.delete(
@@ -687,8 +692,66 @@ async def sync_drive():
     description="Clears the user's stored Google refresh token, disconnecting Google Drive integration.",
     responses={401: {"model": ErrorResponse}},
 )
-async def disconnect_drive():
+async def disconnect_drive(
+    user: UserContext = Depends(get_current_user),
+    db: psycopg.AsyncConnection = Depends(get_db)
+):
     """Disconnect Google Drive integration."""
+    # 1. Fetch user's current Google refresh token
+    async with db.cursor() as cur:
+        await cur.execute(
+            "SELECT google_refresh_token FROM users WHERE id = %s;",
+            (user.id,)
+        )
+        row = await cur.fetchone()
+        google_refresh_token = row[0] if row else None
+
+    # 2. If it is already NULL/disconnected, return 204
+    if not google_refresh_token:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    # 3. Decrypt token securely
+    from backend.services.encryption import decrypt
+    try:
+        decrypted_token = decrypt(google_refresh_token)
+    except Exception:
+        logger.error("Failed to decrypt Google refresh token during disconnect. Proceeding anyway.")
+        decrypted_token = None
+
+    # 4. Invoke Google token revocation endpoint if token is present
+    if decrypted_token:
+        import httpx
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                url = f"https://oauth2.googleapis.com/revoke?token={decrypted_token}"
+                resp = await client.post(url)
+                resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            # Do NOT log the exception object e or e.request.url to avoid token leakage
+            status_code = e.response.status_code
+            if status_code == 400:
+                logger.info("Google token revoke returned 400 (already revoked). Proceeding to clear local token.")
+            elif status_code == 503:
+                logger.error("Google token revoke returned 503. Proceeding to clear local token anyway.")
+            else:
+                logger.error(f"Google token revoke failed with status {status_code}. Proceeding anyway.")
+        except Exception:
+            # Secure error logging: do NOT log the exception or request/response info directly
+            logger.error("Network or connection error reaching Google token revoke endpoint. Proceeding anyway.")
+
+    # 5. Reset columns locally in all cases (ensure disconnect succeeds)
+    async with db.cursor() as cur:
+        await cur.execute(
+            """
+            UPDATE users
+            SET google_refresh_token = NULL,
+                google_last_sync = NULL
+            WHERE id = %s;
+            """,
+            (user.id,)
+        )
+        await db.commit()
+
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -847,7 +910,7 @@ async def get_user_me(
 ):
     async with db.cursor() as cur:
         await cur.execute(
-            "SELECT timezone_offset, streak_count, google_refresh_token FROM users WHERE id = %s;",
+            "SELECT timezone_offset, streak_count, google_refresh_token, google_last_sync FROM users WHERE id = %s;",
             (user.id,)
         )
         row = await cur.fetchone()
@@ -860,6 +923,7 @@ async def get_user_me(
         db_offset = row[0] or 0
         streak = row[1] or 0
         has_drive = row[2] is not None
+        google_last_sync = row[3]
 
         # Convert minutes (stored in DB) to hours for API layer (float division)
         offset_hours = round(db_offset / 60.0, 2)
@@ -884,6 +948,7 @@ async def get_user_me(
             "timezone_offset": offset_hours,
             "streak_count": streak,
             "drive_connected": has_drive,
+            "google_last_sync": google_last_sync.isoformat() if google_last_sync else None,
             "total_saves": total_saves,
             "quizzes_answered": quizzes_answered,
         }
@@ -935,13 +1000,14 @@ async def update_user_me(
 
         # Fetch the updated user details
         await cur.execute(
-            "SELECT timezone_offset, streak_count, google_refresh_token FROM users WHERE id = %s;",
+            "SELECT timezone_offset, streak_count, google_refresh_token, google_last_sync FROM users WHERE id = %s;",
             (user.id,)
         )
         row = await cur.fetchone()
         db_offset = row[0] or 0
         streak = row[1] or 0
         has_drive = row[2] is not None
+        google_last_sync = row[3]
         offset_hours = round(db_offset / 60.0, 2)
 
         # Total saves
@@ -964,6 +1030,7 @@ async def update_user_me(
             "timezone_offset": offset_hours,
             "streak_count": streak,
             "drive_connected": has_drive,
+            "google_last_sync": google_last_sync.isoformat() if google_last_sync else None,
             "total_saves": total_saves,
             "quizzes_answered": quizzes_answered,
         }

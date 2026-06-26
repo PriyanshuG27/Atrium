@@ -17,6 +17,9 @@ VALID_ENV = {
     "JWT_SECRET": "8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b",
     "WEBSITE_URL": "http://localhost:5173",
     "ENV": "test",
+    "GOOGLE_CLIENT_ID": "mock_client_id",
+    "GOOGLE_CLIENT_SECRET": "mock_client_secret",
+    "GOOGLE_REDIRECT_URI": "http://localhost:8000/auth/google/callback",
 }
 
 @pytest.fixture(autouse=True)
@@ -128,13 +131,13 @@ def override_db(mock_conn):
 # ---------------------------------------------------------------------------
 
 def test_login_widget_success(client):
-    """Case 1: Valid Telegram Widget Login -> Sets httpOnly cookies, returns 200."""
+    """Case 1: Valid Telegram Widget Login -> Sets httpOnly cookies, redirects to dashboard."""
     now = int(time.time())
     params = make_widget_params("12345", settings.TELEGRAM_BOT_TOKEN, now)
     
-    response = client.get("/auth/telegram", params=params)
-    assert response.status_code == 200
-    assert response.json()["status"] == "ok"
+    response = client.get("/auth/telegram", params=params, follow_redirects=False)
+    assert response.status_code in [302, 303, 307]
+    assert response.headers["location"] == f"{settings.WEBSITE_URL}/dashboard"
     
     # Assert cookies are set properly and are httpOnly
     cookies = response.cookies
@@ -145,8 +148,9 @@ def test_login_widget_success(client):
     # but we can verify the Set-Cookie headers in response.headers
     set_cookie_headers = response.headers.get_list("set-cookie")
     for cookie_header in set_cookie_headers:
-        assert "HttpOnly" in cookie_header
-        assert "SameSite=lax" in cookie_header or "SameSite=Lax" in cookie_header
+        assert "HttpOnly" in cookie_header or "httponly" in cookie_header.lower()
+        assert "SameSite=lax" in cookie_header or "samesite=lax" in cookie_header.lower()
+        assert "secure" in cookie_header.lower()
 
 def test_login_widget_invalid_hash(client):
     """Case 2: Invalid hash -> returns 401, does not set cookies."""
@@ -155,6 +159,7 @@ def test_login_widget_invalid_hash(client):
     
     response = client.get("/auth/telegram", params=params)
     assert response.status_code == 401
+    assert response.json()["detail"] == "Authentication failed"
     assert "recall_session" not in response.cookies
 
 def test_login_widget_stale_auth_date(client):
@@ -164,6 +169,7 @@ def test_login_widget_stale_auth_date(client):
     
     response = client.get("/auth/telegram", params=params)
     assert response.status_code == 401
+    assert response.json()["detail"] == "Authentication failed"
     assert "recall_session" not in response.cookies
 
 def test_protected_route_with_valid_jwt(client):
@@ -223,3 +229,164 @@ def test_search_endpoint_without_jwt(client):
     response = client.post("/api/search", json={"query": "fastapi", "limit": 5})
     assert response.status_code == 401
     assert "Not authenticated" in response.json()["detail"]
+
+def test_compare_digest_usage_and_no_double_equals():
+    """Verify that hmac.compare_digest() is used for hash verification and flags ==."""
+    import os
+    auth_file_path = os.path.join(os.path.dirname(__file__), "../routes/auth.py")
+    with open(auth_file_path, "r", encoding="utf-8") as f:
+        content = f.read()
+        
+    assert "compare_digest" in content, "Must use hmac.compare_digest() for hash verification."
+    
+    # Check that we do not use == for hash comparison in lines containing hash
+    lines = content.splitlines()
+    for i, line in enumerate(lines):
+        if "hash" in line and "==" in line:
+            # ignore comments or mock flow checks
+            if "#" not in line and "mock" not in line:
+                pytest.fail(f"Potential unsafe hash comparison with == at line {i+1}: {line}")
+
+# ---------------------------------------------------------------------------
+# Google OAuth Tests
+# ---------------------------------------------------------------------------
+
+def test_google_oauth_initiate_authenticated(client):
+    """Case 1: Authenticated user -> GET /auth/google redirects to Google's consent screen."""
+    payload = {
+        "sub": "42",
+        "chat_id": "12345",
+        "exp": int(time.time()) + 3600
+    }
+    token = generate_jwt(payload, settings.JWT_SECRET)
+    
+    response = client.get("/auth/google", cookies={"recall_session": token}, follow_redirects=False)
+    assert response.status_code in [302, 303, 307]
+    location = response.headers["location"]
+    assert "accounts.google.com/o/oauth2/v2/auth" in location
+    assert "scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive.file" in location
+    assert "access_type=offline" in location
+    assert "prompt=consent" in location
+    assert "state=" in location
+
+
+def test_google_oauth_initiate_with_query_param(client):
+    """Case 2: Unauthenticated user with chat_id query param -> GET /auth/google redirects to Google."""
+    response = client.get("/auth/google?chat_id=98765", follow_redirects=False)
+    assert response.status_code in [302, 303, 307]
+    location = response.headers["location"]
+    assert "accounts.google.com/o/oauth2/v2/auth" in location
+    assert "chat_id" not in location  # chat_id is in state JWT, not plaintext query parameter
+    assert "state=" in location
+
+
+def test_google_oauth_initiate_unauthenticated_missing_chat_id(client):
+    """Case 3: Unauthenticated user without query param -> GET /auth/google returns 401."""
+    response = client.get("/auth/google")
+    assert response.status_code == 401
+    assert "Missing telegram_chat_id or not authenticated" in response.json()["detail"]
+
+
+def test_google_oauth_callback_success(client, mock_conn):
+    """Case 4: Valid OAuth Callback -> Exchanges code, encrypts refresh token, stores in DB, sends WS & Telegram message."""
+    # 1. Generate a valid state JWT
+    state_payload = {
+        "chat_id": "12345",
+        "exp": int(time.time()) + 600
+    }
+    state = generate_jwt(state_payload, settings.JWT_SECRET)
+    
+    # 2. Mock token exchange (httpx.post), WebSocket, and Telegram sendMessage
+    mock_token_resp = mock.Mock()
+    mock_token_resp.status_code = 200
+    mock_token_resp.json.return_value = {
+        "access_token": "mock_access_token_should_never_be_stored",
+        "refresh_token": "my_google_refresh_token_xyz"
+    }
+    
+    mock_post_results = []
+    
+    async def mock_async_post(url, **kwargs):
+        mock_post_results.append((url, kwargs))
+        if "oauth2.googleapis.com/token" in url:
+            return mock_token_resp
+        # If it's Telegram sendMessage API
+        mock_tg_resp = mock.Mock()
+        mock_tg_resp.status_code = 200
+        mock_tg_resp.raise_for_status = mock.Mock()
+        return mock_tg_resp
+        
+    # We mock the WS manager
+    from backend.routes.api import manager
+    with mock.patch.object(manager, "send_personal_message", new_callable=mock.AsyncMock) as mock_ws_send, \
+         mock.patch("httpx.AsyncClient.post", side_effect=mock_async_post):
+        
+        response = client.get(f"/auth/google/callback?state={state}&code=auth_code_123", follow_redirects=False)
+        
+        # 3. Assert redirection
+        assert response.status_code in [302, 303, 307]
+        assert response.headers["location"] == f"{settings.WEBSITE_URL}/dashboard"
+        
+        # 4. Verify token exchange call parameters
+        oauth_calls = [c for c in mock_post_results if "oauth2.googleapis.com/token" in c[0]]
+        assert len(oauth_calls) == 1
+        call_url, call_kwargs = oauth_calls[0]
+        call_data = call_kwargs.get("data", {})
+        assert call_data.get("code") == "auth_code_123"
+        assert call_data.get("client_id") == settings.GOOGLE_CLIENT_ID
+        assert call_data.get("client_secret") == settings.GOOGLE_CLIENT_SECRET
+        assert call_data.get("grant_type") == "authorization_code"
+        
+        # 5. Verify database update (checks that update is called and encrypted)
+        executed = mock_conn.cursor().executed
+        update_queries = [q for q in executed if "UPDATE users" in q[0]]
+        assert len(update_queries) == 1
+        query_str, query_params = update_queries[0]
+        
+        encrypted_token = query_params[0]
+        assert query_params[1] == "12345"  # telegram_chat_id
+        
+        # Verify the refresh token is encrypted at rest using Fernet and decrypting it returns original token
+        from backend.services.encryption import decrypt
+        decrypted_token = decrypt(encrypted_token)
+        assert decrypted_token == "my_google_refresh_token_xyz"
+        
+        # 6. Verify WS event sent to user_id
+        mock_ws_send.assert_called_once_with({
+            "type": "google_connected"
+        }, 42)  # internal user ID mock returns 42
+        
+        # 7. Verify Telegram message sent
+        tg_calls = [c for c in mock_post_results if "api.telegram.org/bot" in c[0]]
+        assert len(tg_calls) == 1
+        tg_url, tg_kwargs = tg_calls[0]
+        tg_payload = tg_kwargs.get("json", {})
+        assert tg_payload.get("chat_id") == "12345"
+        assert "Google Drive connected!" in tg_payload.get("text")
+
+
+def test_google_oauth_callback_tampered_state(client):
+    """Case 5: Tampered state signature -> GET /auth/google/callback returns 401."""
+    state_payload = {
+        "chat_id": "12345",
+        "exp": int(time.time()) + 600
+    }
+    # Sign state token with wrong secret
+    tampered_state = generate_jwt(state_payload, "wrong_jwt_secret_12345678901234567890")
+    
+    response = client.get(f"/auth/google/callback?state={tampered_state}&code=auth_code_123")
+    assert response.status_code == 401
+    assert "State signature mismatch" in response.json()["detail"]
+
+
+def test_google_oauth_callback_expired_state(client):
+    """Case 6: Expired state state -> GET /auth/google/callback returns 401."""
+    state_payload = {
+        "chat_id": "12345",
+        "exp": int(time.time()) - 10  # expired 10 seconds ago
+    }
+    expired_state = generate_jwt(state_payload, settings.JWT_SECRET)
+    
+    response = client.get(f"/auth/google/callback?state={expired_state}&code=auth_code_123")
+    assert response.status_code == 401
+    assert "Expired state token" in response.json()["detail"]

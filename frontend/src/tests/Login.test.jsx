@@ -25,8 +25,8 @@ describe('Login Component', () => {
       expect(fetchSpy).toHaveBeenCalledWith('/auth/me');
     });
 
-    expect(screen.getByText('Recall')).toBeInTheDocument();
-    expect(screen.getByText('Your personal constellation mind map')).toBeInTheDocument();
+    expect(screen.getByText('✦ Recall')).toBeInTheDocument();
+    expect(screen.getByText('Your second brain. Zero friction.')).toBeInTheDocument();
     expect(screen.getByText('⚡ Developer Bypass Login')).toBeInTheDocument();
   });
 

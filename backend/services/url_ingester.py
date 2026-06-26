@@ -25,6 +25,12 @@ async def scrape_url(url: str) -> tuple[str, str]:
         }
         async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
             resp = await client.get(url, headers=headers)
+            
+            # Check for private Google Drive redirect to login screen
+            if "drive.google.com" in url.lower():
+                if "accounts.google.com" in str(resp.url) or "ServiceLogin" in resp.text:
+                    raise ValueError("private Google Drive link")
+
             if resp.status_code != 200:
                 logger.warning("Scraping URL %s returned status %d", url, resp.status_code)
                 return url, url
@@ -53,6 +59,8 @@ async def scrape_url(url: str) -> tuple[str, str]:
                 
             return title, clean_text[:10000] # Cap text content to prevent LLM token issues
     except Exception as e:
+        if isinstance(e, ValueError) and str(e) == "private Google Drive link":
+            raise
         logger.error("Failed to scrape URL %s: %s", url, e)
         return url, url
 

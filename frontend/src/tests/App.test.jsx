@@ -105,4 +105,58 @@ describe('App PWA and Session Tracking', () => {
       expect(mockPromptEvent.prompt).toHaveBeenCalled();
     });
   });
+
+  it('redirects unauthenticated users from /dashboard to /login', async () => {
+    vi.stubGlobal('location', { pathname: '/dashboard' });
+    const replaceSpy = vi.spyOn(window.history, 'replaceState');
+
+    vi.spyOn(window, 'fetch').mockImplementation(() =>
+      Promise.resolve({ ok: false, status: 401 })
+    );
+
+    render(
+      <ToastProvider>
+        <AuthProvider>
+          <App />
+        </AuthProvider>
+      </ToastProvider>
+    );
+
+    await waitFor(() => {
+      expect(replaceSpy).toHaveBeenCalledWith(expect.any(Object), '', '/login');
+    });
+
+    vi.unstubAllGlobals();
+  });
+
+  it('redirects authenticated users from /login to /dashboard', async () => {
+    vi.stubGlobal('location', { pathname: '/login' });
+    const replaceSpy = vi.spyOn(window.history, 'replaceState');
+
+    vi.spyOn(window, 'fetch').mockImplementation((url) => {
+      if (url === '/auth/me') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ id: 1, chat_id: '12345' }),
+        });
+      }
+      return Promise.resolve({ ok: false });
+    });
+
+    render(
+      <ToastProvider>
+        <AuthProvider>
+          <App />
+        </AuthProvider>
+      </ToastProvider>
+    );
+
+    await waitFor(() => {
+      expect(replaceSpy).toHaveBeenCalledWith(expect.any(Object), '', '/dashboard');
+    });
+
+    vi.unstubAllGlobals();
+  });
 });
+

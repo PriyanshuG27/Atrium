@@ -1,10 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { MagnifyingGlass, GoogleLogo, CloudX, SignOut, CaretDown, CaretUp, ShareNetwork, List, Gear } from '@phosphor-icons/react';
+import { MagnifyingGlass, GoogleLogo, CloudX, CloudArrowUp, SignOut, CaretDown, CaretUp, ShareNetwork, List, Gear } from '@phosphor-icons/react';
 import ConnectionStatus from './ConnectionStatus';
+import ConnectDriveCard from './ConnectDriveCard';
+import { useToast } from './Toast';
+import axios from '../api/client';
 
 export default function Header({ onSearch, dueQuizCount, viewMode = 'nodes', onViewModeChange, searchInputRef: externalSearchInputRef, searchQuery = '', onSettingsClick }) {
-  const { user, logout } = useAuth();
+  const { user, logout, checkAuth } = useAuth();
+  const { addToast } = useToast();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [searchVal, setSearchVal] = useState('');
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
@@ -12,6 +16,17 @@ export default function Header({ onSearch, dueQuizCount, viewMode = 'nodes', onV
   const internalSearchInputRef = useRef(null);
   const searchInputRef = externalSearchInputRef || internalSearchInputRef;
   const isFirstRender = useRef(true);
+
+  // Listen for message events (e.g. from OAuth popup)
+  useEffect(() => {
+    const handleMessage = (event) => {
+      if (event.data === 'google_connected') {
+        checkAuth();
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [checkAuth]);
 
   // Synchronize with external search query clearing
   useEffect(() => {
@@ -85,7 +100,7 @@ export default function Header({ onSearch, dueQuizCount, viewMode = 'nodes', onV
     const left = window.screen.width / 2 - width / 2;
     const top = window.screen.height / 2 - height / 2;
     window.open(
-      '/auth/google',
+      '/auth/google?popup=true',
       'Connect Google Drive',
       `width=${width},height=${height},top=${top},left=${left},scrollbars=yes`
     );
@@ -94,15 +109,32 @@ export default function Header({ onSearch, dueQuizCount, viewMode = 'nodes', onV
 
   const handleDisconnectDrive = async () => {
     try {
-      const res = await fetch('/api/drive', { method: 'DELETE' });
+      const res = await axios.delete('/api/drive');
       if (res.status === 204) {
-        alert('Google Drive disconnected.');
+        addToast('Google Drive disconnected.', 'success');
+        checkAuth();
       } else {
-        alert('Failed to disconnect Google Drive.');
+        addToast('Failed to disconnect Google Drive.', 'error');
       }
     } catch (err) {
       console.error('Disconnect Drive failed:', err);
-      alert('Error disconnecting Google Drive.');
+      addToast('Error disconnecting Google Drive.', 'error');
+    } finally {
+      setDropdownOpen(false);
+    }
+  };
+
+  const handleSyncDrive = async () => {
+    try {
+      const res = await axios.post('/api/drive/sync');
+      if (res.status === 202 || res.status === 200) {
+        addToast('Sync triggered successfully!', 'success');
+      } else {
+        addToast('Failed to trigger sync.', 'error');
+      }
+    } catch (err) {
+      console.error('Sync failed:', err);
+      addToast('Failed to trigger sync.', 'error');
     } finally {
       setDropdownOpen(false);
     }
@@ -208,14 +240,11 @@ export default function Header({ onSearch, dueQuizCount, viewMode = 'nodes', onV
               </button>
 
               {dropdownOpen && (
-                <div className="dropdown-menu glass-panel" role="menu">
+                <div className="dropdown-menu glass-panel" role="menu" style={{ width: '280px' }}>
                   <div className="dropdown-header" role="presentation">Drive Integration</div>
-                  <button className="dropdown-item" onClick={handleConnectDrive} role="menuitem">
-                    <GoogleLogo size={16} aria-hidden="true" /> Connect Google Drive
-                  </button>
-                  <button className="dropdown-item" onClick={handleDisconnectDrive} role="menuitem">
-                    <CloudX size={16} aria-hidden="true" /> Disconnect Drive
-                  </button>
+                  <div style={{ padding: '0.25rem 0.5rem' }}>
+                    <ConnectDriveCard />
+                  </div>
 
                   <div
                     className="dropdown-header"

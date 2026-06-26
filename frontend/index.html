@@ -8,6 +8,109 @@
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <style>
+        body {
+          background-color: #030307;
+          margin: 0;
+          font-family: system-ui, -apple-system, sans-serif;
+        }
+        .fallback-container {
+          min-height: 100vh;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 1.5rem;
+        }
+        .fallback-card-outer {
+          width: 100%;
+          max-width: 440px;
+          padding: 6px;
+          border-radius: 24px;
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .fallback-card-inner {
+          padding: 2.5rem 2rem;
+          border-radius: 18px;
+          background: rgba(7, 7, 15, 0.9);
+          border: 1px solid rgba(255, 255, 255, 0.03);
+          text-align: center;
+        }
+        .fallback-logo {
+          font-size: 32px;
+          font-weight: 700;
+          color: #F1F1F6;
+          margin: 0 0 0.5rem 0;
+        }
+        .fallback-tagline {
+          font-size: 18px;
+          color: #8E8E9F;
+          margin: 0 0 2rem 0;
+        }
+        .fallback-pills {
+          display: flex;
+          gap: 0.6rem;
+          margin-bottom: 2rem;
+          justify-content: center;
+        }
+        .fallback-pill {
+          padding: 0.4rem 0.8rem;
+          border-radius: 20px;
+          background: rgba(255, 255, 255, 0.04);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          font-size: 12px;
+          color: #F1F1F6;
+        }
+        .fallback-widget {
+          padding: 1.5rem;
+          border: 1px solid #00D4AA;
+          border-radius: 8px;
+          background: rgba(0, 212, 170, 0.02);
+          margin-bottom: 2rem;
+        }
+        .fallback-widget-title {
+          font-size: 0.9rem;
+          color: #F1F1F6;
+          margin: 0 0 1rem 0;
+        }
+        .fallback-widget-btn {
+          display: inline-block;
+          background: #6C63FF;
+          color: white;
+          padding: 0.6rem 1.2rem;
+          border-radius: 6px;
+          text-decoration: none;
+          font-weight: 600;
+          font-size: 0.875rem;
+        }
+        .fallback-footer {
+          font-size: 12px;
+          color: #8E8E9F;
+          margin: 0;
+        }
+      </style>
+      <div class="fallback-container">
+        <div class="fallback-card-outer">
+          <div class="fallback-card-inner">
+            <h1 class="fallback-logo">✦ Recall</h1>
+            <p class="fallback-tagline">Your second brain. Zero friction.</p>
+            <div class="fallback-pills">
+              <span class="fallback-pill">Voice Notes</span>
+              <span class="fallback-pill">Links</span>
+              <span class="fallback-pill">PDFs</span>
+            </div>
+            <div class="fallback-widget">
+              <h3 class="fallback-widget-title">To log in without JavaScript, open our bot in Telegram:</h3>
+              <a href="https://t.me/%VITE_BOT_USERNAME%" class="fallback-widget-btn" target="_blank" rel="noopener noreferrer">
+                Open Bot &amp; Authorize
+              </a>
+            </div>
+            <p class="fallback-footer">Free. No signup form. Works in &lt; 5 seconds.</p>
+          </div>
+        </div>
+      </div>
+    </noscript>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

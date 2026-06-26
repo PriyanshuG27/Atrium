@@ -337,6 +337,8 @@ export default function GraphCanvas({
         if (node.x === undefined || node.y === undefined) return;
         const isHovered = hoveredNodeIdRef.current === node.id;
         const isSelected = selectedNodeId === node.id;
+        
+        const ageInMs = node.created_at ? Date.now() - new Date(node.created_at).getTime() : Infinity;
         let opacity = 1.0;
         if (isHubSelected) {
           opacity = selectedHubMemberIds.has(node.id) ? 1.0 : 0.2;
@@ -344,16 +346,47 @@ export default function GraphCanvas({
           opacity = matchingNodeIds.has(node.id) ? 1.0 : 0.1;
         }
 
+        // Apply entry fade-in
+        if (ageInMs < 1200) {
+          opacity *= Math.max(0, Math.min(1, ageInMs / 1200));
+        }
+
         ctx.save();
         ctx.globalAlpha = opacity;
 
         // Calculate node degree for star glow sizing
         const degree = linksList.filter(l => l.source.id === node.id || l.target.id === node.id).length;
-        const radius = 8;
+        
+        // Gravitational ripple interaction from parent hubs
+        let hubPulseGlow = 0;
+        let hubPulseScale = 1.0;
+        if (!prefersReducedMotion && hubs) {
+          hubs.forEach(hub => {
+            if (hub.updated_at && hub.member_ids && hub.member_ids.includes(Number(node.id))) {
+              const elapsed = Date.now() - hub.updated_at;
+              if (elapsed < 2000) {
+                const hubNodeId = -hub.id;
+                const parentHubNode = nodesList.find(hn => hn.id === hubNodeId);
+                if (parentHubNode && parentHubNode.x !== undefined && parentHubNode.y !== undefined) {
+                  const dist = Math.hypot(node.x - parentHubNode.x, node.y - parentHubNode.y);
+                  const waveRadius = (elapsed / 2000) * 250;
+                  const distanceToWave = Math.abs(dist - waveRadius);
+                  if (distanceToWave < 30) {
+                    const factor = 1 - (distanceToWave / 30);
+                    hubPulseGlow = factor * 20;
+                    hubPulseScale = 1.0 + factor * 0.4;
+                  }
+                }
+              }
+            }
+          });
+        }
+
+        const radius = 8 * hubPulseScale;
         
         // 1. Draw Star Glow (radial gradient behind node)
         const glowScale = isHovered ? 1.3 : 1.0;
-        const glowRadius = radius * (1.5 + degree * 0.3) * glowScale;
+        const glowRadius = (radius * (1.5 + degree * 0.3) * glowScale) + hubPulseGlow;
         const radialGlow = ctx.createRadialGradient(node.x, node.y, radius * 0.2, node.x, node.y, glowRadius);
         const glowColor = getGlowColor(node.source_type);
         
@@ -364,6 +397,21 @@ export default function GraphCanvas({
         ctx.beginPath();
         ctx.arc(node.x, node.y, glowRadius, 0, Math.PI * 2);
         ctx.fill();
+
+        // Draw expanding pulse ring on entry (skip if prefers-reduced-motion is active)
+        if (ageInMs < 1200 && !prefersReducedMotion) {
+          const pulseProgress = ageInMs / 1200;
+          const pulseRadius = radius + pulseProgress * 30;
+          const pulseOpacity = 1 - pulseProgress;
+          
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, pulseRadius, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(0, 212, 170, ${pulseOpacity})`;
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          ctx.restore();
+        }
 
         // 2. Draw Frosted Glass Surface
         ctx.fillStyle = 'rgba(10, 10, 20, 0.8)';
@@ -381,7 +429,6 @@ export default function GraphCanvas({
         ctx.stroke();
 
         // Check if node is a pulse node (created < 5 min ago)
-        const ageInMs = node.created_at ? Date.now() - new Date(node.created_at).getTime() : Infinity;
         const isPulse = ageInMs < 5 * 60 * 1000 || node.type === 'pulse';
 
         if (isPulse) {
@@ -442,6 +489,23 @@ export default function GraphCanvas({
         ctx.globalAlpha = opacity;
 
         const radius = getNodeRadius(node, hubs);
+
+        // Gravitational ripple centered at the hub node
+        const hubElapsed = node.updated_at ? Date.now() - node.updated_at : Infinity;
+        if (hubElapsed < 2000 && !prefersReducedMotion) {
+          const rippleProgress = hubElapsed / 2000;
+          const maxRippleRadius = 250;
+          const rippleRadius = radius + rippleProgress * maxRippleRadius;
+          const rippleOpacity = (1 - rippleProgress) * 0.4;
+          
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, rippleRadius, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(0, 212, 170, ${rippleOpacity})`;
+          ctx.lineWidth = 3 * (1 - rippleProgress);
+          ctx.stroke();
+          ctx.restore();
+        }
         
         // 1. Draw Centroid Glow (mint-teal halo)
         const glowRadius = radius * (1.5 + (isHovered ? 0.5 : 0));

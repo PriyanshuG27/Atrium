@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAuth } from './context/AuthContext';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -123,7 +123,31 @@ function App() {
     };
   }, [addToast, removeToast]);
 
+  const [currentPath, setCurrentPath] = useState(window.location.pathname);
 
+  useEffect(() => {
+    const handlePopState = () => {
+      setCurrentPath(window.location.pathname);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  useEffect(() => {
+    if (!loading) {
+      if (user) {
+        if (window.location.pathname === '/login' || window.location.pathname === '/') {
+          window.history.replaceState({}, '', '/dashboard');
+          setCurrentPath('/dashboard');
+        }
+      } else {
+        if (window.location.pathname === '/dashboard') {
+          window.history.replaceState({}, '', '/login');
+          setCurrentPath('/login');
+        }
+      }
+    }
+  }, [user, loading]);
 
   if (loading) {
     return (

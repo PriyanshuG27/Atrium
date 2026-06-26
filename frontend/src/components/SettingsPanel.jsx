@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from './Toast';
 import axios from '../api/client';
 import { Gear, Trash, SignOut } from '@phosphor-icons/react';
+import ConnectDriveCard from './ConnectDriveCard';
 
 export default function SettingsPanel({ isOpen, onClose }) {
   const { logout } = useAuth();
@@ -244,14 +245,11 @@ export default function SettingsPanel({ isOpen, onClose }) {
                 <span>Quizzes Answered</span>
                 <span style={{ color: 'var(--color-text)', fontWeight: 600 }}>{stats.quizzes_answered}</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>Google Drive</span>
-                <span style={{ color: stats.drive_connected ? 'var(--color-secondary)' : 'var(--color-text-muted)' }}>
-                  {stats.drive_connected ? 'Connected' : 'Not Connected'}
-                </span>
-              </div>
             </div>
           </div>
+
+          {/* Google Drive Connection Card */}
+          <ConnectDriveCard />
 
           {/* Danger Zone */}
           <div style={{ borderTop: '1px solid var(--border-glass)', paddingTop: '1.5rem', marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '1rem' }}>

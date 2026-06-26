@@ -89,3 +89,20 @@ async def test_ingest_url_success(monkeypatch, mock_deps):
     assert params[3] == "Mock summary"
     assert params[4] == "Success Title"
     assert params[6] == ["url", "test"]
+
+@pytest.mark.asyncio
+async def test_scrape_url_private_google_drive(monkeypatch):
+    mock_resp = mock.Mock()
+    mock_resp.status_code = 200
+    mock_resp.url = "https://accounts.google.com/v3/signin/identifier?..."
+    mock_resp.text = "Sign in - Google Accounts"
+    
+    async def mock_get(*args, **kwargs):
+        return mock_resp
+        
+    monkeypatch.setattr("httpx.AsyncClient.get", mock_get)
+    
+    with pytest.raises(ValueError) as exc_info:
+        await scrape_url("https://drive.google.com/file/d/12345/view")
+        
+    assert "private Google Drive link" in str(exc_info.value)

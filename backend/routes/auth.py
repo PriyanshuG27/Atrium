@@ -9,15 +9,19 @@ import logging
 import hashlib
 import hmac
 import time
+import base64
 from typing import Optional
 from fastapi import APIRouter, Response, Request, HTTPException, Depends
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 import psycopg
+import httpx
 
 from backend.config import settings
 from backend.db.connection import get_db
 from backend.services.user_service import upsert_user
-from backend.middleware.twa_auth import generate_jwt, get_current_user, UserContext
+from backend.services.encryption import encrypt
+from backend.middleware.twa_auth import generate_jwt, verify_jwt, get_current_user, UserContext
 from backend.models.schemas import ErrorResponse
 
 logger = logging.getLogger(__name__)
@@ -60,7 +64,7 @@ async def auth_telegram(
             "recall_session",
             token,
             httponly=True,
-            secure=True,
+            secure=settings.ENV != "development",
             samesite="lax",
             max_age=7 * 86400
         )
@@ -68,7 +72,7 @@ async def auth_telegram(
             "jwt",
             token,
             httponly=True,
-            secure=True,
+            secure=settings.ENV != "development",
             samesite="lax",
             max_age=7 * 86400
         )
@@ -76,7 +80,7 @@ async def auth_telegram(
         return {"status": "ok", "message": "Mock login successful"}
 
     if "hash" not in params:
-        raise HTTPException(status_code=401, detail="Missing hash parameter")
+        raise HTTPException(status_code=401, detail="Authentication failed")
     received_hash = params.pop("hash")
     
     # 1. Sort parameter keys alphabetically
@@ -89,26 +93,26 @@ async def auth_telegram(
     # 3. Calculate expected hash using HMAC-SHA256
     expected_hash = hmac.new(secret_key, check_string.encode('utf-8'), hashlib.sha256).hexdigest()
     
-    # 4. Compare hashes
+    # 4. Compare hashes using constant-time comparison
     if not hmac.compare_digest(expected_hash, received_hash):
-        raise HTTPException(status_code=401, detail="Invalid signature")
+        raise HTTPException(status_code=401, detail="Authentication failed")
         
     # 5. Check auth_date within 1 day (86400 seconds)
     auth_date_str = params.get("auth_date")
     if not auth_date_str:
-        raise HTTPException(status_code=401, detail="Missing auth_date")
+        raise HTTPException(status_code=401, detail="Authentication failed")
     try:
         auth_date = int(auth_date_str)
     except ValueError:
-        raise HTTPException(status_code=401, detail="Invalid auth_date")
+        raise HTTPException(status_code=401, detail="Authentication failed")
         
     now = int(time.time())
     if abs(now - auth_date) > 86400:
-        raise HTTPException(status_code=401, detail="Expired authentication data")
+        raise HTTPException(status_code=401, detail="Authentication failed")
         
     telegram_chat_id = params.get("id")
     if not telegram_chat_id:
-        raise HTTPException(status_code=401, detail="Missing Telegram ID")
+        raise HTTPException(status_code=401, detail="Authentication failed")
         
     user_id = await upsert_user(telegram_chat_id, db)
     
@@ -120,24 +124,28 @@ async def auth_telegram(
     }
     token = generate_jwt(payload, settings.JWT_SECRET)
     
-    response.set_cookie(
+    # Redirect the authenticated user to WEBSITE_URL/dashboard
+    redirect_url = f"{settings.WEBSITE_URL}/dashboard"
+    redirect_response = RedirectResponse(url=redirect_url)
+    
+    redirect_response.set_cookie(
         "recall_session",
         token,
         httponly=True,
-        secure=True,
+        secure=settings.ENV != "development",
         samesite="lax",
-        max_age=7 * 86400
+        max_age=604800
     )
-    response.set_cookie(
+    redirect_response.set_cookie(
         "jwt",
         token,
         httponly=True,
-        secure=True,
+        secure=settings.ENV != "development",
         samesite="lax",
-        max_age=7 * 86400
+        max_age=604800
     )
     logger.info("User %d logged in via Telegram login widget.", user_id)
-    return {"status": "ok", "message": "Logged in"}
+    return redirect_response
 
 @router.post(
     "/logout",
@@ -156,12 +164,28 @@ async def auth_logout(response: Response):
     summary="Get current user profile",
     description="Returns current authenticated user details from cookies or headers.",
 )
-async def auth_me(user: UserContext = Depends(get_current_user)):
+async def auth_me(
+    request: Request,
+    user: UserContext = Depends(get_current_user),
+    db: psycopg.AsyncConnection = Depends(get_db)
+):
     """Return user context details."""
+    async with db.cursor() as cur:
+        await cur.execute(
+            "SELECT google_refresh_token, google_last_sync FROM users WHERE id = %s;",
+            (user.id,)
+        )
+        row = await cur.fetchone()
+    has_drive = row is not None and row[0] is not None
+    google_last_sync = row[1] if row else None
+    token = request.cookies.get("jwt") or request.cookies.get("recall_session")
     return {
         "status": "ok",
         "id": user.id,
-        "chat_id": user.telegram_chat_id
+        "chat_id": user.telegram_chat_id,
+        "drive_connected": has_drive,
+        "google_last_sync": google_last_sync.isoformat() if google_last_sync else None,
+        "token": token
     }
 
 @router.get(
@@ -169,30 +193,182 @@ async def auth_me(user: UserContext = Depends(get_current_user)):
     summary="Initiate Google OAuth flow",
     description="Redirects user to Google OAuth consent screen with drive.file scope.",
 )
-async def auth_google():
-    """Redirect to Google OAuth consent screen."""
-    return {"detail": "redirecting_to_google"}
+async def auth_google(
+    request: Request,
+    response: Response,
+    chat_id: Optional[str] = None,
+    popup: Optional[bool] = None,
+    db: psycopg.AsyncConnection = Depends(get_db)
+):
+    """Redirect to Google OAuth consent screen with drive.file scope."""
+    target_chat_id = chat_id
+    if not target_chat_id:
+        try:
+            user = await get_current_user(request, response, db)
+            target_chat_id = user.telegram_chat_id
+        except HTTPException:
+            raise HTTPException(status_code=401, detail="Missing telegram_chat_id or not authenticated")
+            
+    if not target_chat_id:
+        raise HTTPException(status_code=401, detail="Missing telegram_chat_id")
+        
+    if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_REDIRECT_URI:
+        raise HTTPException(status_code=500, detail="Google OAuth is not configured on the server")
+        
+    payload = {
+        "chat_id": str(target_chat_id),
+        "exp": int(time.time()) + 600
+    }
+    if popup:
+        payload["popup"] = True
+    state = generate_jwt(payload, settings.JWT_SECRET)
+    
+    import urllib.parse
+    params = {
+        "client_id": settings.GOOGLE_CLIENT_ID,
+        "redirect_uri": settings.GOOGLE_REDIRECT_URI,
+        "response_type": "code",
+        "scope": "https://www.googleapis.com/auth/drive.file",
+        "state": state,
+        "access_type": "offline",
+        "prompt": "consent",
+    }
+    
+    oauth_url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params)
+    return RedirectResponse(url=oauth_url)
 
 @router.get(
     "/google/callback",
-    response_model=LoginStatusResponse,
     summary="Google OAuth callback",
     description="Processes the OAuth callback, exchanges authorization code, and stores encrypted refresh token.",
-    responses={
-        400: {"model": ErrorResponse, "description": "OAuth code exchange failed."},
-    }
 )
 async def auth_google_callback(
-    user: UserContext = Depends(get_current_user)
+    request: Request,
+    db: psycopg.AsyncConnection = Depends(get_db)
 ):
     """Handle Google OAuth callback."""
+    state = request.query_params.get("state")
+    code = request.query_params.get("code")
+    
+    if not state:
+        raise HTTPException(status_code=401, detail="Missing state parameter")
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing authorization code")
+        
+    try:
+        # Timing-safe signature check
+        parts = state.split(".")
+        if len(parts) != 3:
+            raise HTTPException(status_code=401, detail="Invalid state token format")
+            
+        signing_input = f"{parts[0]}.{parts[1]}".encode('utf-8')
+        key = settings.JWT_SECRET.encode('utf-8')
+        expected_sig_bytes = hmac.new(key, signing_input, hashlib.sha256).digest()
+        
+        expected_sig = base64.urlsafe_b64encode(expected_sig_bytes).decode('utf-8').replace('=', '')
+        if not hmac.compare_digest(expected_sig, parts[2]):
+            raise HTTPException(status_code=401, detail="State signature mismatch")
+            
+        # Verify expiration and claims
+        payload = verify_jwt(state, settings.JWT_SECRET)
+    except ValueError:
+        # Expired token raises ValueError
+        raise HTTPException(status_code=401, detail="Expired state token")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid state token")
+        
+    chat_id = payload.get("chat_id")
+    if not chat_id:
+        raise HTTPException(status_code=401, detail="Invalid state payload")
+        
+    if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET or not settings.GOOGLE_REDIRECT_URI:
+        raise HTTPException(status_code=500, detail="Google OAuth is not configured on the server")
+        
+    # Exchange code for tokens
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "code": code,
+                    "client_id": settings.GOOGLE_CLIENT_ID,
+                    "client_secret": settings.GOOGLE_CLIENT_SECRET,
+                    "redirect_uri": settings.GOOGLE_REDIRECT_URI,
+                    "grant_type": "authorization_code",
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"}
+            )
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            logger.error("Google OAuth token exchange HTTP error: %s", e.response.text)
+            raise HTTPException(status_code=400, detail="Google OAuth code exchange failed")
+        except Exception as e:
+            logger.error("Google OAuth token exchange error: %s", e)
+            raise HTTPException(status_code=400, detail="Google OAuth code exchange failed")
+            
+    token_data = resp.json()
+    refresh_token = token_data.get("refresh_token")
+    if not refresh_token:
+        logger.error("No refresh token returned by Google OAuth")
+        raise HTTPException(status_code=400, detail="No refresh token returned")
+        
+    # Encrypt the refresh token
+    encrypted_refresh_token = encrypt(refresh_token)
+    
+    # Store the encrypted refresh token
+    user_id = await upsert_user(chat_id, db)
+    async with db.cursor() as cur:
+        await cur.execute(
+            """
+            UPDATE users
+            SET google_refresh_token = %s
+            WHERE telegram_chat_id = %s;
+            """,
+            (encrypted_refresh_token, str(chat_id))
+        )
+        await db.commit()
+        
+    # Broadcast WebSocket event
     try:
         from backend.routes.api import manager
         await manager.send_personal_message({
             "type": "google_connected"
-        }, user.id)
+        }, user_id)
     except Exception as ws_err:
         logger.error("Failed to broadcast google_connected WS message: %s", ws_err)
         
-    return {"status": "ok"}
+    # Send Telegram message
+    telegram_url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
+    telegram_payload = {
+        "chat_id": str(chat_id),
+        "text": "✅ Google Drive connected! Your knowledge will be backed up daily."
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            tg_resp = await client.post(telegram_url, json=telegram_payload)
+            tg_resp.raise_for_status()
+    except Exception as tg_err:
+        logger.error("Failed to send Telegram message: %s", tg_err)
+        
+    # Redirect to WEBSITE_URL/dashboard
+    is_popup = payload.get("popup", False)
+    if is_popup:
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse(content="""
+        <html>
+          <body>
+            <script>
+              if (window.opener) {
+                window.opener.postMessage("google_connected", "*");
+              }
+              window.close();
+            </script>
+          </body>
+        </html>
+        """)
+
+    redirect_url = f"{settings.WEBSITE_URL}/dashboard"
+    return RedirectResponse(url=redirect_url)
 

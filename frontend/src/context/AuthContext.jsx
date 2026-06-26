@@ -4,6 +4,7 @@ const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
+  const [token, setToken] = useState(null);
   const [loading, setLoading] = useState(true);
 
   // Fetch current user status on mount
@@ -16,13 +17,16 @@ export function AuthProvider({ children }) {
       const res = await fetch('/auth/me');
       if (res.ok) {
         const data = await res.json();
-        setUser({ id: data.id, chat_id: data.chat_id });
+        setUser({ id: data.id, chat_id: data.chat_id, drive_connected: data.drive_connected, google_last_sync: data.google_last_sync });
+        setToken(data.token || null);
       } else {
         setUser(null);
+        setToken(null);
       }
     } catch (err) {
       console.error('Authentication check failed:', err);
       setUser(null);
+      setToken(null);
     } finally {
       setLoading(false);
     }
@@ -30,6 +34,9 @@ export function AuthProvider({ children }) {
 
   const login = (userData) => {
     setUser(userData);
+    if (userData && userData.token) {
+      setToken(userData.token);
+    }
   };
 
   const logout = async () => {
@@ -42,11 +49,12 @@ export function AuthProvider({ children }) {
       localStorage.clear();
       sessionStorage.clear();
       setUser(null);
+      setToken(null);
     }
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, checkAuth }}>
+    <AuthContext.Provider value={{ user, token, loading, login, logout, checkAuth }}>
       {children}
     </AuthContext.Provider>
   );

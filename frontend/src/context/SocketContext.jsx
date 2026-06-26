@@ -6,7 +6,7 @@ import client from '../api/client';
 const SocketContext = createContext(null);
 
 export function SocketProvider({ children }) {
-  const { user } = useAuth();
+  const { user, checkAuth } = useAuth();
   const { addToast } = useToast();
   
   const [connectionStatus, setConnectionStatus] = useState('disconnected'); // 'connected' | 'connecting' | 'disconnected' | 'error' | 'failed'
@@ -59,6 +59,7 @@ export function SocketProvider({ children }) {
             window.dispatchEvent(new CustomEvent('online-refetch'));
           } else if (data.type === 'google_connected') {
             addToast('Google Drive connected!', 'success');
+            if (checkAuth) checkAuth();
           }
         } catch (err) {
           console.error('Failed to parse WebSocket message:', err);

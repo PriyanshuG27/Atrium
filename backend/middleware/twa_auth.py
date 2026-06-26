@@ -194,7 +194,7 @@ async def get_jwt_user(
                 "recall_session",
                 new_token,
                 httponly=True,
-                secure=True,
+                secure=settings.ENV != "development",
                 samesite="lax",
                 max_age=7 * 86400
             )
@@ -202,7 +202,7 @@ async def get_jwt_user(
                 "jwt",
                 new_token,
                 httponly=True,
-                secure=True,
+                secure=settings.ENV != "development",
                 samesite="lax",
                 max_age=7 * 86400
             )

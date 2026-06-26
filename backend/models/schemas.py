@@ -170,6 +170,7 @@ class UserMeResponse(BaseModel):
     drive_connected: bool = Field(..., description="Whether Google Drive is connected.")
     total_saves: int = Field(..., description="Total count of saved items.")
     quizzes_answered: int = Field(..., description="Total quizzes answered.")
+    google_last_sync: Optional[str] = Field(None, description="ISO-8601 formatted timestamp of the last successful Google Drive sync.")
 
 class UserMeUpdateRequest(BaseModel):
     timezone_offset: Optional[float] = Field(None, ge=-12.0, le=14.0, description="Timezone offset in hours.")

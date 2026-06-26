@@ -3,6 +3,28 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import Header from '../components/Header';
 import { AuthProvider, useAuth } from '../context/AuthContext';
+import axios from '../api/client';
+import { useToast } from '../components/Toast';
+
+// Mock axios client
+vi.mock('../api/client', () => {
+  return {
+    default: {
+      delete: vi.fn(),
+      post: vi.fn(),
+    },
+  };
+});
+
+// Mock useToast
+vi.mock('../components/Toast', () => {
+  return {
+    useToast: vi.fn(() => ({
+      addToast: vi.fn(),
+      removeToast: vi.fn(),
+    })),
+  };
+});
 
 // Helper component to seed context
 function SeedAuth({ user, children }) {
@@ -20,6 +42,8 @@ describe('Header', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     currentUser = null;
+
+    vi.spyOn(window, 'confirm').mockImplementation(() => true);
 
     fetchSpy = vi.spyOn(window, 'fetch').mockImplementation(async (url, options) => {
       if (url === '/auth/me') {
@@ -131,14 +155,19 @@ describe('Header', () => {
     fireEvent.click(screen.getByText(/Connect Google Drive/));
     expect(windowOpenSpy).toHaveBeenCalledWith(
       '/auth/google',
-      'Connect Google Drive',
-      expect.stringContaining('width=500')
+      'recall-drive-auth',
+      expect.stringContaining('width=600')
     );
   });
 
   it('disconnects Google Drive integration via DELETE /api/drive', async () => {
-    currentUser = { id: 42, chat_id: '99999' };
-    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    currentUser = { id: 42, chat_id: '99999', drive_connected: true };
+    const addToastSpy = vi.fn();
+    vi.mocked(useToast).mockReturnValue({
+      addToast: addToastSpy,
+      removeToast: vi.fn(),
+    });
+    axios.delete.mockResolvedValue({ status: 204 });
 
     render(
       <AuthProvider>
@@ -154,11 +183,42 @@ describe('Header', () => {
 
     fireEvent.click(screen.getByText('User 99999'));
     
-    fireEvent.click(screen.getByText(/Disconnect Drive/));
+    fireEvent.click(screen.getByText('Disconnect'));
     
     await waitFor(() => {
-      expect(fetchSpy).toHaveBeenCalledWith('/api/drive', { method: 'DELETE' });
-      expect(alertSpy).toHaveBeenCalledWith('Google Drive disconnected.');
+      expect(axios.delete).toHaveBeenCalledWith('/api/drive');
+      expect(addToastSpy).toHaveBeenCalledWith('Google Drive disconnected successfully.', 'success');
+    });
+  });
+
+  it('syncs Google Drive integration via POST /api/drive/sync', async () => {
+    currentUser = { id: 42, chat_id: '99999', drive_connected: true };
+    const addToastSpy = vi.fn();
+    vi.mocked(useToast).mockReturnValue({
+      addToast: addToastSpy,
+      removeToast: vi.fn(),
+    });
+    axios.post.mockResolvedValue({ status: 202 });
+
+    render(
+      <AuthProvider>
+        <SeedAuth user={currentUser}>
+          <Header />
+        </SeedAuth>
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('User 99999')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('User 99999'));
+    
+    fireEvent.click(screen.getByText('Sync Now'));
+    
+    await waitFor(() => {
+      expect(axios.post).toHaveBeenCalledWith('/api/drive/sync');
+      expect(addToastSpy).toHaveBeenCalledWith('Google Drive sync completed successfully!', 'success');
     });
   });
 

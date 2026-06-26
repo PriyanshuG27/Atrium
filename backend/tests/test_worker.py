@@ -129,6 +129,43 @@ async def test_process_url_task(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_process_url_task_private_google_drive(monkeypatch):
+    """Verify that a private Google Drive URL error is handled gracefully with instruction response."""
+    mock_pool = MockPool()
+    monkeypatch.setattr("backend.worker._pool", mock_pool)
+    
+    mock_redis = mock.AsyncMock()
+    monkeypatch.setattr("backend.worker.redis", mock_redis)
+    
+    monkeypatch.setattr("backend.worker.upsert_user", mock.AsyncMock(return_value=42))
+    
+    async def mock_ingest_error(*args, **kwargs):
+        raise ValueError("private Google Drive link")
+    monkeypatch.setattr("backend.worker.ingest_url", mock_ingest_error)
+    
+    mock_send = mock.AsyncMock()
+    monkeypatch.setattr("backend.worker.send_telegram_message", mock_send)
+    
+    task = {
+        "update_id": "1003",
+        "chat_id": "7732257445",
+        "content_type": "url",
+        "text": "https://drive.google.com/file/d/123/view"
+    }
+    
+    await process_task(task)
+    
+    # Verify no graph delete (since it didn't save)
+    assert not mock_redis.delete.called
+    
+    # Verify bot message sent warning the user
+    mock_send.assert_called_once()
+    called_text = mock_send.call_args[0][1]
+    assert "Google Drive file is private" in called_text
+    assert "Anyone with the link can view" in called_text
+
+
+@pytest.mark.asyncio
 async def test_process_pdf_task(monkeypatch):
     """Verify that a PDF task downloads, counts pages, calls ingest_pdf, and replies."""
     mock_pool = MockPool()
