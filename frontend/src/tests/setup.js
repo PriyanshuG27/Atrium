@@ -69,7 +69,13 @@ vi.mock('@phosphor-icons/react', () => {
     X: makeMock('X'),
     Bell: makeMock('Bell'),
     BookOpen: makeMock('BookOpen'),
-    TextT: makeMock('TextT')
+    TextT: makeMock('TextT'),
+    ChartBar: makeMock('ChartBar'),
+    Trophy: makeMock('Trophy'),
+    Hourglass: makeMock('Hourglass'),
+    Percent: makeMock('Percent'),
+    Compass: makeMock('Compass'),
+    Flame: makeMock('Flame')
   };
 });
 

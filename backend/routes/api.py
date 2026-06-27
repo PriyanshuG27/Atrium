@@ -6,7 +6,7 @@ Provides endpoints for items, search, graph visualization, quizzes, reminders, a
 All endpoints require bearerAuth or telegramInitData (applied via OpenAPI customizer).
 """
 
-from datetime import date
+from datetime import date, timedelta
 import logging
 from typing import List, Optional
 from fastapi import APIRouter, Path, Query, Response, status, Depends, HTTPException, BackgroundTasks
@@ -15,6 +15,7 @@ import psycopg
 
 from backend.middleware.twa_auth import get_current_user, UserContext
 from backend.db.connection import get_db
+from backend.services.sm2 import update_sm2
 from backend.models.schemas import (
     ItemResponse,
     ItemCreateRequest,
@@ -197,6 +198,11 @@ async def create_item(
             raise HTTPException(status_code=500, detail="Failed to save item to database")
         item_id = row[0]
         created_at = row[1]
+        
+        from backend.config import settings
+        if settings.ENV != "test":
+            from backend.services.user_service import get_and_update_user_streak
+            await get_and_update_user_streak(cur, user.id)
         await db.commit()
 
     # Invalidate graph cache
@@ -554,9 +560,47 @@ async def get_graph(
     description="Returns a list of quizzes due for review based on SM-2 scheduling.",
     responses={401: {"model": ErrorResponse}},
 )
-async def get_due_quizzes():
+async def get_due_quizzes(
+    user: UserContext = Depends(get_current_user),
+    db: psycopg.AsyncConnection = Depends(get_db),
+):
     """Get due quizzes."""
-    return []
+    async with db.cursor() as cur:
+        await cur.execute(
+            """
+            SELECT id, user_id, item_id, question, options, correct_index, explanation, ease_factor, interval_days, next_review, created_at
+            FROM quizzes
+            WHERE user_id = %s
+              AND next_review <= CURRENT_DATE
+            ORDER BY next_review ASC
+            LIMIT 10;
+            """,
+            (user.id,)
+        )
+        rows = await cur.fetchall()
+        
+    quizzes = []
+    for r in rows:
+        import json
+        opts = r[4]
+        if isinstance(opts, str):
+            opts = json.loads(opts)
+        quizzes.append(
+            QuizResponse(
+                id=r[0],
+                user_id=r[1],
+                item_id=r[2],
+                question=r[3],
+                options=opts,
+                correct_index=r[5],
+                explanation=r[6],
+                ease_factor=r[7],
+                interval_days=r[8],
+                next_review=r[9],
+                created_at=r[10],
+            )
+        )
+    return quizzes
 
 @router.post(
     "/quizzes/{id}/answer",
@@ -565,47 +609,176 @@ async def get_due_quizzes():
     summary="Submit quiz answer",
     description="Records response quality (0-5) and updates SM-2 scheduling parameters for the quiz.",
     responses={
+        400: {"model": ErrorResponse, "description": "Invalid response quality."},
         401: {"model": ErrorResponse},
+        403: {"model": ErrorResponse, "description": "Access denied."},
         404: {"model": ErrorResponse, "description": "Quiz not found."},
     },
 )
 async def answer_quiz(
     id: int = Path(..., description="Quiz ID."),
-    req: QuizAnswerRequest = ...,
+    req: QuizAnswerRequest = None,
+    user: UserContext = Depends(get_current_user),
+    db: psycopg.AsyncConnection = Depends(get_db),
 ):
     """Answer quiz."""
-    from datetime import datetime, timezone, date
-    return {
-        "id": id,
-        "user_id": 1,
-        "item_id": 1,
-        "question": "Stub question?",
-        "options": ["A", "B", "C", "D"],
-        "correct_index": 0,
-        "explanation": "Stub explanation",
-        "ease_factor": 2.5,
-        "interval_days": 1,
-        "next_review": date.today(),
-        "created_at": datetime.now(timezone.utc),
-    }
+    if req is None or not (0 <= req.quality <= 5):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Quality must be between 0 and 5."
+        )
+        
+    async with db.cursor() as cur:
+        # Fetch the quiz
+        await cur.execute(
+            """
+            SELECT id, user_id, item_id, question, options, correct_index, explanation, ease_factor, interval_days, next_review, created_at
+            FROM quizzes
+            WHERE id = %s AND user_id = %s;
+            """,
+            (id, user.id)
+        )
+        row = await cur.fetchone()
+        if not row:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Quiz not found."
+            )
+            
+        current_ef = row[7]
+        current_interval = row[8]
+        
+        # Calculate new SM-2 values
+        new_ef, new_interval = update_sm2(current_ef, current_interval, req.quality)
+        
+        # Server-side review date calculation
+        new_next_review = date.today() + timedelta(days=new_interval)
+        
+        # Update the quiz
+        await cur.execute(
+            """
+            UPDATE quizzes
+            SET ease_factor = %s,
+                interval_days = %s,
+                next_review = %s
+            WHERE id = %s AND user_id = %s;
+            """,
+            (new_ef, new_interval, new_next_review, id, user.id)
+        )
+        # Log to quiz_answers
+        await cur.execute(
+            """
+            INSERT INTO quiz_answers (user_id, quiz_id, quality)
+            VALUES (%s, %s, %s);
+            """,
+            (user.id, id, req.quality)
+        )
+        await db.commit()
+        
+        import json
+        opts = row[4]
+        if isinstance(opts, str):
+            opts = json.loads(opts)
+            
+        return QuizResponse(
+            id=row[0],
+            user_id=row[1],
+            item_id=row[2],
+            question=row[3],
+            options=opts,
+            correct_index=row[5],
+            explanation=row[6],
+            ease_factor=new_ef,
+            interval_days=new_interval,
+            next_review=new_next_review,
+            created_at=row[10],
+        )
 
 @router.get(
     "/quizzes/stats",
     response_model=QuizStatsResponse,
     tags=["quizzes"],
     summary="Get quiz stats",
-    description="Returns aggregated quiz statistics (total, due, reviews, average ease, streak) for the user.",
+    description="Returns aggregated quiz statistics (total, due, reviews, average ease, mastered definition) for the user.",
     responses={401: {"model": ErrorResponse}},
 )
-async def get_quiz_stats():
+async def get_quiz_stats(
+    user: UserContext = Depends(get_current_user),
+    db: psycopg.AsyncConnection = Depends(get_db),
+):
     """Get quiz statistics."""
-    return {
-        "total_quizzes": 0,
-        "due_today": 0,
-        "completed_reviews": 0,
-        "average_ease_factor": 2.5,
-        "streak": 0,
-    }
+    async with db.cursor() as cur:
+        await cur.execute(
+            """
+            WITH stats AS (
+              SELECT
+                (SELECT COUNT(*) FROM quizzes WHERE user_id = %s) AS total,
+                (SELECT COUNT(*) FROM quizzes WHERE user_id = %s AND next_review <= CURRENT_DATE) AS due_today,
+                (SELECT COUNT(*) FROM quiz_answers WHERE user_id = %s) AS answered_all_time,
+                (SELECT COALESCE(AVG(ease_factor), 2.5) FROM quizzes WHERE user_id = %s) AS avg_ease_factor,
+                (SELECT COUNT(*) FROM quizzes WHERE user_id = %s AND ease_factor >= 2.5 AND interval_days >= 7) AS mastered
+            ),
+            history_days AS (
+              SELECT 
+                d::date AS review_date,
+                TO_CHAR(d, 'Dy') AS day_name
+              FROM generate_series(CURRENT_DATE - INTERVAL '6 days', CURRENT_DATE, '1 day') d
+            ),
+            history_counts AS (
+              SELECT 
+                hd.review_date,
+                hd.day_name,
+                COUNT(qa.id) AS count
+              FROM history_days hd
+              LEFT JOIN quiz_answers qa 
+                ON qa.answered_at::date = hd.review_date AND qa.user_id = %s
+              GROUP BY hd.review_date, hd.day_name
+              ORDER BY hd.review_date ASC
+            ),
+            history_json AS (
+              SELECT COALESCE(json_agg(json_build_object('date', review_date, 'day', day_name, 'count', count)), '[]'::json) AS last_7_days
+              FROM history_counts
+            )
+            SELECT 
+              s.total,
+              s.due_today,
+              s.answered_all_time,
+              s.avg_ease_factor,
+              s.mastered,
+              hj.last_7_days
+            FROM stats s, history_json hj;
+            """,
+            (user.id, user.id, user.id, user.id, user.id, user.id)
+        )
+        row = await cur.fetchone()
+        if not row:
+            return {
+                "total": 0,
+                "due_today": 0,
+                "answered_all_time": 0,
+                "avg_ease_factor": 0.0,
+                "mastered": 0,
+                "mastered_definition": "ease_factor >= 2.5 AND interval_days >= 7",
+                "last_7_days": [],
+            }
+        
+        total, due_today, answered_all_time, avg_ease_factor, mastered, last_7_days = row
+        
+        import json
+        if isinstance(last_7_days, str):
+            history_data = json.loads(last_7_days)
+        else:
+            history_data = last_7_days
+            
+        return {
+            "total": total,
+            "due_today": due_today,
+            "answered_all_time": answered_all_time,
+            "avg_ease_factor": float(avg_ease_factor) if avg_ease_factor is not None else 0.0,
+            "mastered": mastered,
+            "mastered_definition": "ease_factor >= 2.5 AND interval_days >= 7",
+            "last_7_days": history_data,
+        }
 
 # ---------------------------------------------------------------------------
 # Reminders Group
@@ -921,9 +1094,12 @@ async def get_user_me(
             )
         
         db_offset = row[0] or 0
-        streak = row[1] or 0
         has_drive = row[2] is not None
         google_last_sync = row[3]
+
+        from backend.services.user_service import get_and_update_user_streak
+        streak = await get_and_update_user_streak(cur, user.id)
+        await db.commit()
 
         # Convert minutes (stored in DB) to hours for API layer (float division)
         offset_hours = round(db_offset / 60.0, 2)
@@ -944,6 +1120,31 @@ async def get_user_me(
         quizzes_row = await cur.fetchone()
         quizzes_answered = quizzes_row[0] if quizzes_row else 0
 
+        # last_7_days_activity (UTC-based)
+        await cur.execute(
+            """
+            WITH days AS (
+              SELECT generate_series(timezone('utc', now())::date - 6, timezone('utc', now())::date, '1 day')::date AS day
+            )
+            SELECT d.day, COUNT(i.id) > 0 AS has_activity
+            FROM days d
+            LEFT JOIN items i ON i.user_id = %s AND i.created_at::date = d.day
+            GROUP BY d.day
+            ORDER BY d.day;
+            """,
+            (user.id,)
+        )
+        activity_rows = await cur.fetchall()
+        last_7_days_activity = [row[1] for row in activity_rows]
+
+        # last_activity_date (UTC-based)
+        await cur.execute(
+            "SELECT MAX(created_at) FROM items WHERE user_id = %s;",
+            (user.id,)
+        )
+        last_activity_row = await cur.fetchone()
+        last_activity_date = last_activity_row[0] if last_activity_row else None
+
         return {
             "timezone_offset": offset_hours,
             "streak_count": streak,
@@ -951,6 +1152,8 @@ async def get_user_me(
             "google_last_sync": google_last_sync.isoformat() if google_last_sync else None,
             "total_saves": total_saves,
             "quizzes_answered": quizzes_answered,
+            "last_7_days_activity": last_7_days_activity,
+            "last_activity_date": last_activity_date,
         }
 
 @router.patch(
@@ -1005,9 +1208,12 @@ async def update_user_me(
         )
         row = await cur.fetchone()
         db_offset = row[0] or 0
-        streak = row[1] or 0
         has_drive = row[2] is not None
         google_last_sync = row[3]
+
+        from backend.services.user_service import get_and_update_user_streak
+        streak = await get_and_update_user_streak(cur, user.id)
+        await db.commit()
         offset_hours = round(db_offset / 60.0, 2)
 
         # Total saves
@@ -1026,6 +1232,31 @@ async def update_user_me(
         quizzes_row = await cur.fetchone()
         quizzes_answered = quizzes_row[0] if quizzes_row else 0
 
+        # last_7_days_activity (UTC-based)
+        await cur.execute(
+            """
+            WITH days AS (
+              SELECT generate_series(timezone('utc', now())::date - 6, timezone('utc', now())::date, '1 day')::date AS day
+            )
+            SELECT d.day, COUNT(i.id) > 0 AS has_activity
+            FROM days d
+            LEFT JOIN items i ON i.user_id = %s AND i.created_at::date = d.day
+            GROUP BY d.day
+            ORDER BY d.day;
+            """,
+            (user.id,)
+        )
+        activity_rows = await cur.fetchall()
+        last_7_days_activity = [row[1] for row in activity_rows]
+
+        # last_activity_date (UTC-based)
+        await cur.execute(
+            "SELECT MAX(created_at) FROM items WHERE user_id = %s;",
+            (user.id,)
+        )
+        last_activity_row = await cur.fetchone()
+        last_activity_date = last_activity_row[0] if last_activity_row else None
+
         return {
             "timezone_offset": offset_hours,
             "streak_count": streak,
@@ -1033,6 +1264,8 @@ async def update_user_me(
             "google_last_sync": google_last_sync.isoformat() if google_last_sync else None,
             "total_saves": total_saves,
             "quizzes_answered": quizzes_answered,
+            "last_7_days_activity": last_7_days_activity,
+            "last_activity_date": last_activity_date,
         }
 
 @router.delete(

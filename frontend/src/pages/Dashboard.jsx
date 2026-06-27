@@ -13,6 +13,7 @@ import NodePanel from '../components/NodePanel';
 import useKeyboardShortcuts from '../hooks/useKeyboardShortcuts';
 import KeyboardShortcutsModal from '../components/KeyboardShortcutsModal';
 import SettingsPanel from '../components/SettingsPanel';
+import QuizStatsPanel from '../components/QuizStatsPanel';
 
 function layoutNodes(nodes, edges, hubs) {
   const width = 1200;
@@ -139,6 +140,7 @@ export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showShortcutsModal, setShowShortcutsModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showStats, setShowStats] = useState(false);
   const searchInputRef = React.useRef(null);
 
   const handleEscape = () => {
@@ -146,6 +148,8 @@ export default function Dashboard() {
       setShowShortcutsModal(false);
     } else if (showSettings) {
       setShowSettings(false);
+    } else if (showStats) {
+      setShowStats(false);
     } else if (selectedNode) {
       setSelectedNode(null);
     } else {
@@ -452,6 +456,17 @@ export default function Dashboard() {
   // Fetch due quizzes count and check items on first load
   useEffect(() => {
     initializeDashboard();
+  }, []);
+
+  // Listen for quiz answered events to update due count
+  useEffect(() => {
+    const handleQuizAnswered = () => {
+      fetchDueQuizzes();
+    };
+    window.addEventListener('quiz-answered', handleQuizAnswered);
+    return () => {
+      window.removeEventListener('quiz-answered', handleQuizAnswered);
+    };
   }, []);
 
   // Listen for online refetch events
@@ -782,6 +797,7 @@ export default function Dashboard() {
         searchInputRef={searchInputRef}
         searchQuery={searchQuery}
         onSettingsClick={() => setShowSettings(true)}
+        onStatsClick={() => setShowStats(true)}
       />
 
       <main id="main-content" tabIndex={-1} style={{ outline: 'none' }}>
@@ -947,6 +963,14 @@ export default function Dashboard() {
         <SettingsPanel
           isOpen={showSettings}
           onClose={() => setShowSettings(false)}
+        />
+      </ErrorBoundary>
+
+      {/* Quiz Statistics Side Panel */}
+      <ErrorBoundary>
+        <QuizStatsPanel
+          isOpen={showStats}
+          onClose={() => setShowStats(false)}
         />
       </ErrorBoundary>
     </div>

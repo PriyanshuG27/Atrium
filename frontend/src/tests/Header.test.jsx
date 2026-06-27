@@ -74,6 +74,29 @@ describe('Header', () => {
           status: 204,
         };
       }
+      if (url === '/api/quizzes/stats') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            total: 10,
+            due_today: 3,
+            answered_all_time: 25,
+            avg_ease_factor: 2.7,
+            mastered: 4,
+            mastered_definition: "ease_factor >= 2.5 AND interval_days >= 7",
+            last_7_days: [
+              { day: 'Mon', date: '2026-06-22', count: 2 },
+              { day: 'Tue', date: '2026-06-23', count: 0 },
+              { day: 'Wed', date: '2026-06-24', count: 5 },
+              { day: 'Thu', date: '2026-06-25', count: 1 },
+              { day: 'Fri', date: '2026-06-26', count: 0 },
+              { day: 'Sat', date: '2026-06-27', count: 3 },
+              { day: 'Sun', date: '2026-06-28', count: 4 }
+            ]
+          })
+        };
+      }
       return { ok: false, status: 404 };
     });
   });
@@ -244,5 +267,30 @@ describe('Header', () => {
     await waitFor(() => {
       expect(screen.queryByText('User 99999')).not.toBeInTheDocument();
     });
+  });
+
+  it('renders quiz stats card and triggers onStatsClick on click', async () => {
+    currentUser = { id: 42, chat_id: '99999' };
+    const onStatsClickMock = vi.fn();
+
+    render(
+      <AuthProvider>
+        <SeedAuth user={currentUser}>
+          <Header onStatsClick={onStatsClickMock} />
+        </SeedAuth>
+      </AuthProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Due:')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('3')).toBeInTheDocument();
+    expect(screen.getByText('4')).toBeInTheDocument();
+    expect(screen.getByText('2.7')).toBeInTheDocument();
+
+    const statsCard = screen.getByTitle('View detailed quiz performance history');
+    fireEvent.click(statsCard);
+    expect(onStatsClickMock).toHaveBeenCalled();
   });
 });

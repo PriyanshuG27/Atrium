@@ -207,13 +207,31 @@ export default function NodePanel({
     }
   };
 
-  const handleSelectOption = (idx) => {
+  const handleSelectOption = async (idx) => {
     setSelectedOptionIdx(idx);
     setQuizAnswered(true);
-    if (idx === displayNode.quiz.correct_index) {
+    const isCorrect = (idx === displayNode.quiz.correct_index);
+    if (isCorrect) {
       addToast('Correct answer!', 'success');
     } else {
       addToast('Incorrect answer, try again!', 'error');
+    }
+
+    try {
+      const quizId = displayNode.quiz?.id || displayNode.quiz_id;
+      if (quizId) {
+        const quality = isCorrect ? 5 : 2;
+        await fetch(`/api/quizzes/${quizId}/answer`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ quality })
+        });
+        window.dispatchEvent(new CustomEvent('quiz-answered'));
+      }
+    } catch (err) {
+      console.error('Failed to log quiz response:', err);
     }
   };
 

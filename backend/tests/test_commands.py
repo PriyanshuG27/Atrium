@@ -3,7 +3,7 @@ import pytest
 import json
 import asyncio
 import httpx
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 import unittest.mock as mock
 from fastapi.testclient import TestClient
 
@@ -70,8 +70,28 @@ class MockDbState:
             }
         ]
         self.quizzes = [
-            {"id": 100, "user_id": 1},
-            {"id": 101, "user_id": 1}
+            {
+                "id": 100,
+                "user_id": 1,
+                "question": "What is 2+2?",
+                "options": json.dumps(["3", "4", "5", "6"]),
+                "correct_index": 1,
+                "explanation": "Because 2+2=4",
+                "ease_factor": 2.5,
+                "interval_days": 1,
+                "next_review": date.today()
+            },
+            {
+                "id": 101,
+                "user_id": 1,
+                "question": "What is the capital of Spain?",
+                "options": json.dumps(["Barcelona", "Madrid", "Seville", "Valencia"]),
+                "correct_index": 1,
+                "explanation": "Madrid is the capital.",
+                "ease_factor": 2.5,
+                "interval_days": 1,
+                "next_review": date.today()
+            }
         ]
 
 class StatefulMockCursor:
@@ -156,6 +176,56 @@ class StatefulMockCursor:
             u_id = params[0]
             streak = self.state.streak_counts.get(u_id, 0)
             self._rows = [(streak,)]
+
+        elif "FROM QUIZZES" in query_upper and "QUESTION" in query_upper and "SELECT ID," in query_upper:
+            u_id = params[0]
+            user_quizzes = [q for q in self.state.quizzes if q["user_id"] == u_id]
+            if user_quizzes:
+                quiz = user_quizzes[0]
+                self._rows = [(
+                    quiz["id"],
+                    quiz["question"],
+                    quiz["options"],
+                    quiz["correct_index"],
+                    quiz["explanation"]
+                )]
+
+        elif "FROM QUIZZES" in query_upper and "EASE_FACTOR" in query_upper:
+            quiz_id = params[0]
+            if len(params) > 1:
+                u_id = params[1]
+                found = [q for q in self.state.quizzes if q["id"] == quiz_id and q["user_id"] == u_id]
+            else:
+                found = [q for q in self.state.quizzes if q["id"] == quiz_id]
+            if found:
+                quiz = found[0]
+                self._rows = [(
+                    quiz.get("user_id"),
+                    quiz["ease_factor"],
+                    quiz["interval_days"],
+                    quiz["correct_index"],
+                    quiz["explanation"],
+                    quiz["question"],
+                    quiz["options"],
+                    quiz["next_review"]
+                )]
+
+        elif "UPDATE QUIZZES" in query_upper:
+            if len(params) == 5:
+                ef, interval, next_rev, q_id, u_id = params
+                for q in self.state.quizzes:
+                    if q["id"] == q_id and q["user_id"] == u_id:
+                        q["ease_factor"] = ef
+                        q["interval_days"] = interval
+                        q["next_review"] = next_rev
+            else:
+                ef, interval, next_rev, q_id = params
+                for q in self.state.quizzes:
+                    if q["id"] == q_id:
+                        q["ease_factor"] = ef
+                        q["interval_days"] = interval
+                        q["next_review"] = next_rev
+            self.rowcount = 1
 
     async def fetchone(self):
         if self._last_val is not None:
@@ -363,3 +433,120 @@ def test_command_file_clickable_link(client, mock_telegram_ack):
     assert response.status_code == 200
     assert response.json()["detail"] == "file_processed"
     mock_telegram_ack.assert_called_once_with("12345", "📝 Saved Note:\nHello Recall Note")
+
+def test_command_quiz_success(client, db_state):
+    # Send /quiz command when due quiz exists
+    # We patch the bot's post request inside webhook
+    with mock.patch("backend.routes.webhook.http_client.post", new_callable=mock.AsyncMock) as mock_post:
+        payload = make_telegram_update(2015, 12345, "/quiz")
+        response = client.post("/webhook", json=payload)
+        
+        assert response.status_code == 200
+        assert response.json()["detail"] == "quiz_processed"
+        mock_post.assert_called_once()
+        _, kwargs = mock_post.call_args
+        json_payload = kwargs["json"]
+        assert json_payload["chat_id"] == "12345"
+        assert "What is 2+2?" in json_payload["text"]
+        assert "inline_keyboard" in json_payload["reply_markup"]
+        assert len(json_payload["reply_markup"]["inline_keyboard"]) == 2
+        assert len(json_payload["reply_markup"]["inline_keyboard"][0]) == 2
+        assert len(json_payload["reply_markup"]["inline_keyboard"][1]) == 2
+
+def test_command_quiz_empty(client, db_state, mock_telegram_ack):
+    # Clear quizzes from state for user 1
+    db_state.quizzes = []
+    payload = make_telegram_update(2016, 12345, "/quiz")
+    response = client.post("/webhook", json=payload)
+    
+    assert response.status_code == 200
+    assert response.json()["detail"] == "quiz_processed"
+    mock_telegram_ack.assert_called_once_with("12345", "🎉 No quizzes due! Come back tomorrow.")
+
+def test_callback_query_quiz_correct(client, db_state):
+    # Setup callback query update
+    callback_payload = {
+        "update_id": 2017,
+        "callback_query": {
+            "id": "cb_123",
+            "from": {"id": 12345},
+            "message": {
+                "message_id": 999,
+                "chat": {"id": 12345},
+                "text": "What is 2+2?"
+            },
+            "data": "quiz:100:1" # Correct option is index 1
+        }
+    }
+    
+    # Pre-set quiz in db state
+    db_state.quizzes = [
+        {
+            "id": 100,
+            "user_id": 1,
+            "question": "What is 2+2?",
+            "options": json.dumps(["3", "4", "5", "6"]),
+            "correct_index": 1,
+            "explanation": "Because 2+2=4",
+            "ease_factor": 2.5,
+            "interval_days": 1,
+            "next_review": date.today()
+        }
+    ]
+    
+    with mock.patch("backend.routes.webhook.http_client.post", new_callable=mock.AsyncMock) as mock_post:
+        response = client.post("/webhook", json=callback_payload)
+        
+        assert response.status_code == 200
+        assert response.json()["detail"] == "callback_query_processed"
+        # 2 HTTP posts: 1 for answerCallbackQuery, 1 for editMessageText
+        assert mock_post.call_count == 2
+        
+        # Verify correct was derived and saved
+        updated_quiz = db_state.quizzes[0]
+        # Correct (quality=5) -> new_ef = 2.6, new_interval = 3
+        assert updated_quiz["ease_factor"] == 2.6
+        assert updated_quiz["interval_days"] == 3
+
+def test_callback_query_quiz_incorrect(client, db_state):
+    # Setup callback query update
+    callback_payload = {
+        "update_id": 2018,
+        "callback_query": {
+            "id": "cb_124",
+            "from": {"id": 12345},
+            "message": {
+                "message_id": 999,
+                "chat": {"id": 12345},
+                "text": "What is 2+2?"
+            },
+            "data": "quiz:100:0" # Incorrect option is index 0
+        }
+    }
+    
+    db_state.quizzes = [
+        {
+            "id": 100,
+            "user_id": 1,
+            "question": "What is 2+2?",
+            "options": json.dumps(["3", "4", "5", "6"]),
+            "correct_index": 1,
+            "explanation": "Because 2+2=4",
+            "ease_factor": 2.5,
+            "interval_days": 1,
+            "next_review": date.today()
+        }
+    ]
+    
+    with mock.patch("backend.routes.webhook.http_client.post", new_callable=mock.AsyncMock) as mock_post:
+        response = client.post("/webhook", json=callback_payload)
+        
+        assert response.status_code == 200
+        assert response.json()["detail"] == "callback_query_processed"
+        
+        # Verify incorrect was derived and saved
+        updated_quiz = db_state.quizzes[0]
+        # Incorrect (quality=1) -> new_ef = max(1.3, 2.5 - 0.8) = 1.7, new_interval = 1
+        assert updated_quiz["ease_factor"] == 1.7
+        assert updated_quiz["interval_days"] == 1
+

@@ -156,3 +156,13 @@ CREATE OR REPLACE TRIGGER trigger_cascade_delete_item_chunks
 BEFORE DELETE ON items
 FOR EACH ROW
 EXECUTE FUNCTION cascade_delete_item_chunks();
+
+
+-- 12. QUIZ ANSWERS TABLE
+CREATE TABLE IF NOT EXISTS quiz_answers (
+    id SERIAL PRIMARY KEY,
+    user_id INT REFERENCES users(id) ON DELETE CASCADE,
+    quiz_id INT REFERENCES quizzes(id) ON DELETE CASCADE,
+    quality INT NOT NULL,
+    answered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

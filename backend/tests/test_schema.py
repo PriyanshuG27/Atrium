@@ -93,14 +93,26 @@ def test_pydantic_schemas_validation():
 
     # 5. QuizStatsResponse
     stats_data = {
-        "total_quizzes": 10,
+        "total": 10,
         "due_today": 2,
-        "completed_reviews": 5,
-        "average_ease_factor": 2.6,
-        "streak": 3
+        "answered_all_time": 5,
+        "avg_ease_factor": 2.6,
+        "mastered": 3,
+        "mastered_definition": "ease_factor >= 2.5 AND interval_days >= 7",
+        "last_7_days": [
+            {"date": "2026-06-20", "day": "Sat", "count": 2},
+            {"date": "2026-06-21", "day": "Sun", "count": 1},
+            {"date": "2026-06-22", "day": "Mon", "count": 0},
+            {"date": "2026-06-23", "day": "Tue", "count": 4},
+            {"date": "2026-06-24", "day": "Wed", "count": 3},
+            {"date": "2026-06-25", "day": "Thu", "count": 2},
+            {"date": "2026-06-26", "day": "Fri", "count": 5}
+        ]
     }
     stats_model = QuizStatsResponse(**stats_data)
-    assert stats_model.streak == 3
+    assert stats_model.total == 10
+    assert stats_model.answered_all_time == 5
+    assert len(stats_model.last_7_days) == 7
 
     # 6. ReminderResponse
     reminder_data = {

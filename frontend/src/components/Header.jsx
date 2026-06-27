@@ -5,8 +5,10 @@ import ConnectionStatus from './ConnectionStatus';
 import ConnectDriveCard from './ConnectDriveCard';
 import { useToast } from './Toast';
 import axios from '../api/client';
+import StreakBadge from './StreakBadge';
+import StreakPanel from './StreakPanel';
 
-export default function Header({ onSearch, dueQuizCount, viewMode = 'nodes', onViewModeChange, searchInputRef: externalSearchInputRef, searchQuery = '', onSettingsClick }) {
+export default function Header({ onSearch, dueQuizCount, viewMode = 'nodes', onViewModeChange, searchInputRef: externalSearchInputRef, searchQuery = '', onSettingsClick, onStatsClick }) {
   const { user, logout, checkAuth } = useAuth();
   const { addToast } = useToast();
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -16,6 +18,55 @@ export default function Header({ onSearch, dueQuizCount, viewMode = 'nodes', onV
   const internalSearchInputRef = useRef(null);
   const searchInputRef = externalSearchInputRef || internalSearchInputRef;
   const isFirstRender = useRef(true);
+  const [stats, setStats] = useState(null);
+  const [profileData, setProfileData] = useState(null);
+  const [streakPanelOpen, setStreakPanelOpen] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const fetchStats = async () => {
+      try {
+        const res = await fetch('/api/quizzes/stats');
+        if (res.ok) {
+          const data = await res.json();
+          setStats(data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch quiz stats in header:', err);
+      }
+    };
+
+    const fetchProfile = async () => {
+      try {
+        const res = await fetch('/api/me');
+        if (res.ok) {
+          const data = await res.json();
+          setProfileData(data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch profile settings in header:', err);
+      }
+    };
+
+    fetchStats();
+    fetchProfile();
+
+    const handleUpdate = () => {
+      fetchStats();
+      fetchProfile();
+    };
+
+    window.addEventListener('quiz-answered', handleUpdate);
+    window.addEventListener('online-refetch', handleUpdate);
+    window.addEventListener('items-updated', handleUpdate);
+    return () => {
+      window.removeEventListener('quiz-answered', handleUpdate);
+      window.removeEventListener('online-refetch', handleUpdate);
+      window.removeEventListener('items-updated', handleUpdate);
+    };
+  }, [user]);
+
 
   // Listen for message events (e.g. from OAuth popup)
   useEffect(() => {
@@ -213,12 +264,50 @@ export default function Header({ onSearch, dueQuizCount, viewMode = 'nodes', onV
               </button>
             </div>
 
-            <button className="quiz-badge-btn">
+            <button className="quiz-badge-btn" onClick={onStatsClick}>
               <span>Quiz</span>
               {dueQuizCount > 0 && (
                 <span className="quiz-badge-count">{dueQuizCount}</span>
               )}
             </button>
+
+            {stats && (
+              <div 
+                className="quiz-stats-card" 
+                onClick={onStatsClick}
+                title="View detailed quiz performance history"
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onStatsClick && onStatsClick();
+                  }
+                }}
+              >
+                <span>Due: <span className="stat-val">{stats.due_today}</span></span>
+                <span style={{ color: 'rgba(255,255,255,0.12)' }}>|</span>
+                <span>Mastered: <span className="stat-val">{stats.mastered}</span></span>
+                <span style={{ color: 'rgba(255,255,255,0.12)' }}>|</span>
+                <span>Avg ease: <span className="stat-val">{stats.avg_ease_factor.toFixed(1)}</span></span>
+              </div>
+            )}
+
+            {profileData && (
+              <div style={{ position: 'relative' }}>
+                <StreakBadge 
+                  streakCount={profileData.streak_count} 
+                  onClick={() => setStreakPanelOpen(!streakPanelOpen)} 
+                />
+                <StreakPanel 
+                  isOpen={streakPanelOpen}
+                  onClose={() => setStreakPanelOpen(false)}
+                  streakCount={profileData.streak_count}
+                  lastActivityDate={profileData.last_activity_date}
+                  last7DaysActivity={profileData.last_7_days_activity}
+                />
+              </div>
+            )}
 
             <ConnectionStatus />
 

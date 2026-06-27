@@ -4,9 +4,11 @@ import asyncio
 import httpx
 import json
 from typing import Optional, Tuple
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, Request, BackgroundTasks
 from pydantic import BaseModel
+from backend.services.sm2 import update_sm2
 
 from backend.config import settings
 from backend.db.connection import get_db
@@ -176,13 +178,20 @@ async def telegram_webhook(
         update = await request.json()
         update_id = update.get("update_id")
         message = update.get("message")
+        callback_query = update.get("callback_query")
         
-        if update_id is None or not message:
-            logger.warning("Received invalid/empty Telegram update (missing update_id or message).")
+        if update_id is None or (not message and not callback_query):
+            logger.warning("Received invalid/empty Telegram update (missing update_id or message/callback_query).")
             return {"status": "ok", "detail": "invalid_update"}
             
         update_id_str = str(update_id)
-        chat_id = str(message.get("chat", {}).get("id"))
+        
+        if callback_query:
+            message = callback_query.get("message", {})
+            chat_id = str(message.get("chat", {}).get("id"))
+        else:
+            chat_id = str(message.get("chat", {}).get("id"))
+            
         if not chat_id:
             logger.warning("Received update_id %s with missing chat ID.", update_id_str)
             return {"status": "ok", "detail": "invalid_chat"}
@@ -204,6 +213,196 @@ async def telegram_webhook(
             
         # 4. Rate limit check
         await check_rate_limit(chat_id)
+        
+        # 4.2 Handle Callback Query
+        if callback_query:
+            callback_query_id = callback_query.get("id")
+            data = callback_query.get("data", "")
+            user_id = await upsert_user(chat_id, db)
+            
+            if data == "quiz:next":
+                # Acknowledge callback
+                url_ans = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
+                payload_ans = {
+                    "callback_query_id": callback_query_id
+                }
+                background_tasks.add_task(http_client.post, url_ans, json=payload_ans)
+                
+                async with db.cursor() as cur:
+                    await cur.execute(
+                        """
+                        SELECT id, question, options, correct_index, explanation
+                        FROM quizzes
+                        WHERE user_id = %s
+                          AND next_review <= CURRENT_DATE
+                        ORDER BY next_review ASC
+                        LIMIT 1;
+                        """,
+                        (user_id,)
+                    )
+                    row = await cur.fetchone()
+                    
+                url_edit = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/editMessageText"
+                if not row:
+                    payload_edit = {
+                        "chat_id": chat_id,
+                        "message_id": callback_query["message"]["message_id"],
+                        "text": "🎉 No quizzes due! Come back tomorrow.",
+                        "parse_mode": "HTML",
+                        "reply_markup": {"inline_keyboard": []}
+                    }
+                    background_tasks.add_task(http_client.post, url_edit, json=payload_edit)
+                    logger.info("Processed quiz:next: no quizzes left for chat_id %s", chat_id)
+                else:
+                    quiz_id, question, options_val, correct_index, explanation = row
+                    if isinstance(options_val, str):
+                        opts = json.loads(options_val)
+                    else:
+                        opts = options_val
+                        
+                    inline_keyboard = [
+                        [
+                            {"text": f"A. {opts[0]}", "callback_data": f"quiz:{quiz_id}:0"},
+                            {"text": f"B. {opts[1]}", "callback_data": f"quiz:{quiz_id}:1"}
+                        ],
+                        [
+                            {"text": f"C. {opts[2]}", "callback_data": f"quiz:{quiz_id}:2"},
+                            {"text": f"D. {opts[3]}", "callback_data": f"quiz:{quiz_id}:3"}
+                        ]
+                    ]
+                    
+                    payload_edit = {
+                        "chat_id": chat_id,
+                        "message_id": callback_query["message"]["message_id"],
+                        "text": f"<b>{question}</b>",
+                        "parse_mode": "HTML",
+                        "reply_markup": {
+                            "inline_keyboard": inline_keyboard
+                        }
+                    }
+                    background_tasks.add_task(http_client.post, url_edit, json=payload_edit)
+                    logger.info("Processed quiz:next: loaded next quiz %d for chat_id %s", quiz_id, chat_id)
+                    
+                return {"status": "ok", "detail": "callback_query_processed"}
+                
+            elif data.startswith("quiz:"):
+                parts = data.split(":")
+                if len(parts) == 3:
+                    try:
+                        quiz_id = int(parts[1])
+                        selected_idx = int(parts[2])
+                    except ValueError:
+                        # Silently ignore parsing errors
+                        url_ans = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
+                        background_tasks.add_task(http_client.post, url_ans, json={"callback_query_id": callback_query_id})
+                        return {"status": "ok", "detail": "callback_query_invalid_params"}
+                        
+                    async with db.cursor() as cur:
+                        # Ownership check + fetch quiz data in one go
+                        await cur.execute(
+                            """
+                            SELECT user_id, ease_factor, interval_days, correct_index, explanation, question, options, next_review
+                            FROM quizzes
+                            WHERE id = %s;
+                            """,
+                            (quiz_id,)
+                        )
+                        row = await cur.fetchone()
+                        
+                        if not row:
+                            # Silently ignore if quiz doesn't exist
+                            url_ans = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
+                            background_tasks.add_task(http_client.post, url_ans, json={"callback_query_id": callback_query_id})
+                            logger.info("Stale callback/non-existent quiz ID %d: silently ignored", quiz_id)
+                            return {"status": "ok", "detail": "quiz_not_found"}
+                            
+                        owner_id, ease_factor, interval_days, correct_index, explanation, question, options, next_review = row
+                        
+                        # Confirm user ownership
+                        if owner_id != user_id:
+                            # Reject cross-user interaction
+                            url_ans = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
+                            background_tasks.add_task(
+                                http_client.post,
+                                url_ans,
+                                json={"callback_query_id": callback_query_id, "text": "This quiz does not belong to you."}
+                            )
+                            logger.warning("Rejected cross-user quiz answer submission: user_id %d vs owner_id %d", user_id, owner_id)
+                            return {"status": "ok", "detail": "quiz_ownership_rejected"}
+                            
+                        # Idempotency / stale button check
+                        # If next_review is in the future, it has already been answered
+                        if next_review > date.today():
+                            # Silently ignore stale callback
+                            url_ans = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
+                            background_tasks.add_task(http_client.post, url_ans, json={"callback_query_id": callback_query_id})
+                            logger.info("Stale callback for already answered quiz ID %d: silently ignored", quiz_id)
+                            return {"status": "ok", "detail": "stale_callback_ignored"}
+                            
+                        is_correct = (selected_idx == correct_index)
+                        quality = 5 if is_correct else 2
+                        
+                        new_ef, new_interval = update_sm2(ease_factor, interval_days, quality)
+                        new_next_review = date.today() + timedelta(days=new_interval)
+                        
+                        await cur.execute(
+                            """
+                            UPDATE quizzes
+                            SET ease_factor = %s,
+                                interval_days = %s,
+                                next_review = %s
+                            WHERE id = %s;
+                            """,
+                            (new_ef, new_interval, new_next_review, quiz_id)
+                        )
+                        # Log to quiz_answers
+                        await cur.execute(
+                            """
+                            INSERT INTO quiz_answers (user_id, quiz_id, quality)
+                            VALUES (%s, %s, %s);
+                            """,
+                            (user_id, quiz_id, quality)
+                        )
+                        await db.commit()
+                        
+                        # Acknowledge callback query
+                        url_ans = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
+                        payload_ans = {
+                            "callback_query_id": callback_query_id,
+                            "text": "Correct! 🎉" if is_correct else "Incorrect. ❌"
+                        }
+                        background_tasks.add_task(http_client.post, url_ans, json=payload_ans)
+                        
+                        # Format option choices
+                        if isinstance(options, str):
+                            opts = json.loads(options)
+                        else:
+                            opts = options
+                            
+                        correct_option = opts[correct_index] if 0 <= correct_index < len(opts) else ""
+                        explanation_text = explanation or ""
+                        
+                        if is_correct:
+                            result_text = f"✅ Correct!\n\n{explanation_text}\n\nNext review: {new_next_review.strftime('%Y-%m-%d')}"
+                        else:
+                            result_text = f"❌ The answer was {correct_option}\n\n{explanation_text}\n\nReview again in 1 day."
+                            
+                        url_edit = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/editMessageText"
+                        payload_edit = {
+                            "chat_id": chat_id,
+                            "message_id": callback_query["message"]["message_id"],
+                            "text": result_text,
+                            "parse_mode": "HTML",
+                            "reply_markup": {
+                                "inline_keyboard": [
+                                    [{"text": "Next Quiz →", "callback_data": "quiz:next"}]
+                                ]
+                            }
+                        }
+                        background_tasks.add_task(http_client.post, url_edit, json=payload_edit)
+                        logger.info("Processed callback_query answer for quiz %d, user %d", quiz_id, user_id)
+                        
+            return {"status": "ok", "detail": "callback_query_processed"}
         
         # 4.5 Check for bot commands
         text_content = message.get("text", "")
@@ -275,6 +474,57 @@ async def telegram_webhook(
                 background_tasks.add_task(send_telegram_ack, chat_id, tags_msg)
                 logger.info("Processed /tags command for chat_id %s, returned %d tags", chat_id, len(rows))
                 return {"status": "ok", "detail": "tags_processed"}
+
+            elif command_part == "/quiz":
+                async with db.cursor() as cur:
+                    await cur.execute(
+                        """
+                        SELECT id, question, options, correct_index, explanation
+                        FROM quizzes
+                        WHERE user_id = %s
+                          AND next_review <= CURRENT_DATE
+                        ORDER BY next_review ASC
+                        LIMIT 1;
+                        """,
+                        (user_id,)
+                    )
+                    row = await cur.fetchone()
+                    
+                if not row:
+                    quiz_msg = "🎉 No quizzes due! Come back tomorrow."
+                    background_tasks.add_task(send_telegram_ack, chat_id, quiz_msg)
+                    logger.info("Processed /quiz: no quizzes due for chat_id %s", chat_id)
+                else:
+                    quiz_id, question, options_val, correct_index, explanation = row
+                    if isinstance(options_val, str):
+                        opts = json.loads(options_val)
+                    else:
+                        opts = options_val
+                        
+                    inline_keyboard = [
+                        [
+                            {"text": f"A. {opts[0]}", "callback_data": f"quiz:{quiz_id}:0"},
+                            {"text": f"B. {opts[1]}", "callback_data": f"quiz:{quiz_id}:1"}
+                        ],
+                        [
+                            {"text": f"C. {opts[2]}", "callback_data": f"quiz:{quiz_id}:2"},
+                            {"text": f"D. {opts[3]}", "callback_data": f"quiz:{quiz_id}:3"}
+                        ]
+                    ]
+                        
+                    url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
+                    payload = {
+                        "chat_id": chat_id,
+                        "text": f"<b>{question}</b>",
+                        "parse_mode": "HTML",
+                        "reply_markup": {
+                            "inline_keyboard": inline_keyboard
+                        }
+                    }
+                    background_tasks.add_task(http_client.post, url, json=payload)
+                    logger.info("Processed /quiz: sent due quiz %d to chat_id %s", quiz_id, chat_id)
+                    
+                return {"status": "ok", "detail": "quiz_processed"}
                 
             elif command_part in ("/file", "/get"):
                 if not args:
@@ -476,12 +726,9 @@ async def telegram_webhook(
                     quiz_row = await cur.fetchone()
                     quizzes_answered = quiz_row[0] if quiz_row else 0
                     
-                    await cur.execute(
-                        "SELECT streak_count FROM users WHERE id = %s;",
-                        (user_id,)
-                    )
-                    user_row = await cur.fetchone()
-                    streak_count = user_row[0] if user_row else 0
+                    from backend.services.user_service import get_and_update_user_streak
+                    streak_count = await get_and_update_user_streak(cur, user_id)
+                    await db.commit()
                     
                 total_saves = 0
                 links_count = 0
@@ -517,6 +764,17 @@ async def telegram_webhook(
                 background_tasks.add_task(send_telegram_ack, chat_id, stats_msg)
                 logger.info("Processed /stats for chat_id %s", chat_id)
                 return {"status": "ok", "detail": "stats_sent"}
+
+            elif command_part == "/streak":
+                async with db.cursor() as cur:
+                    from backend.services.user_service import get_and_update_user_streak
+                    streak_count = await get_and_update_user_streak(cur, user_id)
+                    await db.commit()
+                
+                streak_msg = f"Current streak: 🔥 {streak_count} days"
+                background_tasks.add_task(send_telegram_ack, chat_id, streak_msg)
+                logger.info("Processed /streak for chat_id %s", chat_id)
+                return {"status": "ok", "detail": "streak_sent"}
                 
             else:
                 unknown_msg = "Unknown command. Type /help to see all commands."

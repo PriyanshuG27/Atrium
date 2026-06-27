@@ -1399,5 +1399,32 @@ textarea:focus-visible,
   }
 }
 
+/* Quiz Statistics Card (Header) */
+.quiz-stats-card {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-glass);
+  border-radius: 6px;
+  padding: 0.25rem 0.75rem;
+  height: 32px;
+  color: var(--color-text-muted);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s var(--transition-cinema);
+}
 
+.quiz-stats-card:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--color-primary);
+  color: var(--color-text);
+  transform: translateY(-1px);
+}
 
+.quiz-stats-card span.stat-val {
+  color: var(--color-text);
+  font-weight: 600;
+}

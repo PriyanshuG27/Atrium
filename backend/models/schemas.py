@@ -8,7 +8,7 @@ Ensures proper response structures and that raw_text never leaks.
 from __future__ import annotations
 from pydantic import BaseModel, Field
 from typing import List, Optional
-from datetime import datetime, date
+from datetime import datetime, date as datetime_date
 
 # ---------------------------------------------------------------------------
 # Items schemas
@@ -124,18 +124,25 @@ class QuizResponse(BaseModel):
     explanation: Optional[str] = Field(None, description="LLM-generated explanation.")
     ease_factor: float = Field(..., description="SM-2 ease factor.")
     interval_days: int = Field(..., description="SM-2 interval in days.")
-    next_review: date = Field(..., description="Scheduled review date.")
+    next_review: datetime_date = Field(..., description="Scheduled review date.")
     created_at: datetime = Field(..., description="Quiz creation timestamp.")
 
 class QuizAnswerRequest(BaseModel):
     quality: int = Field(..., ge=0, le=5, description="SM-2 response quality score (0 to 5).")
 
+class QuizHistoryDay(BaseModel):
+    day: str = Field(..., description="Day name abbreviation (e.g. Mon, Tue).")
+    date: datetime_date = Field(..., description="Date of the tracking day.")
+    count: int = Field(..., description="Number of quizzes answered.")
+
 class QuizStatsResponse(BaseModel):
-    total_quizzes: int = Field(..., description="Total quizzes created.")
+    total: int = Field(..., description="Total quizzes created.")
     due_today: int = Field(..., description="Quizzes due for review today.")
-    completed_reviews: int = Field(..., description="Number of reviewed quizzes.")
-    average_ease_factor: float = Field(..., description="Average SM-2 ease factor.")
-    streak: int = Field(..., description="Current review streak count.")
+    answered_all_time: int = Field(..., description="Total reviews answered all time.")
+    avg_ease_factor: float = Field(..., description="Average SM-2 ease factor.")
+    mastered: int = Field(..., description="Number of mastered quizzes.")
+    mastered_definition: str = Field(..., description="Definition of mastered.")
+    last_7_days: List[QuizHistoryDay] = Field(..., description="Quiz activity over the last 7 days.")
 
 # ---------------------------------------------------------------------------
 # Reminders schemas
@@ -171,6 +178,8 @@ class UserMeResponse(BaseModel):
     total_saves: int = Field(..., description="Total count of saved items.")
     quizzes_answered: int = Field(..., description="Total quizzes answered.")
     google_last_sync: Optional[str] = Field(None, description="ISO-8601 formatted timestamp of the last successful Google Drive sync.")
+    last_7_days_activity: List[bool] = Field(..., description="Active status for each of the last 7 days (UTC based).")
+    last_activity_date: Optional[datetime] = Field(None, description="ISO-8601 formatted timestamp of the user's last saved item.")
 
 class UserMeUpdateRequest(BaseModel):
     timezone_offset: Optional[float] = Field(None, ge=-12.0, le=14.0, description="Timezone offset in hours.")

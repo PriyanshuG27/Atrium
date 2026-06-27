@@ -54,7 +54,18 @@ class MockCursor:
             return (42, "123456789")
         if "SELECT ID FROM USERS" in last_query:
             return (42,)
+        if "SELECT MAX(CREATED_AT) FROM ITEMS" in last_query:
+            from datetime import datetime
+            return (datetime(2026, 6, 26, 12, 0, 0),)
         return None
+
+    async def fetchall(self):
+        last_query = self.query_history[-1][0].upper()
+        if "WITH DAYS AS" in last_query or "GENERATE_SERIES" in last_query:
+            from datetime import date, timedelta
+            today = date.today()
+            return [(today - timedelta(days=i), i % 2 == 0) for i in range(6, -1, -1)]
+        return []
 
 class MockConnection:
     def __init__(self):
@@ -102,6 +113,8 @@ def test_get_settings(client, override_db, auth_cookie):
     assert data["drive_connected"] is True
     assert data["total_saves"] == 10
     assert data["quizzes_answered"] == 4
+    assert data["last_7_days_activity"] == [True, False, True, False, True, False, True]
+    assert data["last_activity_date"] is not None
 
 def test_patch_settings(client, override_db, auth_cookie):
     response = client.patch("/api/me", json={"timezone_offset": 3}, cookies=auth_cookie)
