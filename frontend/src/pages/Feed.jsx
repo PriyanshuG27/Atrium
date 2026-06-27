@@ -7,7 +7,9 @@ import {
   Note, 
   DotsThree, 
   Trash, 
-  Eye 
+  Eye,
+  ShareNetwork,
+  SquaresFour
 } from '@phosphor-icons/react';
 import EmptyState from '../components/EmptyState';
 import { useToast } from '../components/Toast';
@@ -39,7 +41,8 @@ const iconMap = {
   voice: <Microphone size={16} />,
   pdf: <FilePdf size={16} />,
   image: <ImageIcon size={16} />,
-  text: <Note size={16} />
+  text: <Note size={16} />,
+  hub: <ShareNetwork size={16} />
 };
 
 const DEFAULT_ACTIVE_NODES = [];
@@ -54,6 +57,7 @@ export default function Feed({ onNodeClick, onViewInGraph, searchQuery = '', mem
   const [isFirstLoad, setIsFirstLoad] = useState(true);
 
   // Filters
+  const [activeMainTab, setActiveMainTab] = useState('items'); // 'items' | 'hubs'
   const [sourceType, setSourceType] = useState('all');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
@@ -112,6 +116,33 @@ export default function Feed({ onNodeClick, onViewInGraph, searchQuery = '', mem
 
   // Fetch items list
   const fetchItems = useCallback(async (pageNum, isReset = false) => {
+    if (activeMainTab === 'hubs') {
+      setLoading(true);
+      try {
+        let matched = activeNodes.filter(n => n.source_type === 'hub' || n.id < 0);
+        if (tagFilter) {
+          matched = matched.filter(item => item.tags && item.tags.includes(tagFilter));
+        }
+        if (fromDate) {
+          const fDate = new Date(fromDate);
+          matched = matched.filter(item => new Date(item.created_at) >= fDate);
+        }
+        if (toDate) {
+          const tDate = new Date(toDate);
+          matched = matched.filter(item => new Date(item.created_at) <= tDate);
+        }
+        setItems(matched);
+        setTotalPages(1);
+        setHasMore(false);
+      } catch (err) {
+        console.error('Failed to filter hubs locally:', err);
+      } finally {
+        setLoading(false);
+        setIsFirstLoad(false);
+      }
+      return;
+    }
+
     if (memberIdsFilter) {
       setLoading(true);
       try {
@@ -216,13 +247,13 @@ export default function Feed({ onNodeClick, onViewInGraph, searchQuery = '', mem
       setLoading(false);
       setIsFirstLoad(false);
     }
-  }, [sourceType, tagFilter, fromDate, toDate, searchQuery, memberIdsFilter, activeNodes]);
+  }, [activeMainTab, sourceType, tagFilter, fromDate, toDate, searchQuery, memberIdsFilter, activeNodes]);
 
   // Reset page and refetch when filters change
   useEffect(() => {
     setPage(1);
     fetchItems(1, true);
-  }, [sourceType, tagFilter, fromDate, toDate, searchQuery, fetchItems]);
+  }, [activeMainTab, sourceType, tagFilter, fromDate, toDate, searchQuery, fetchItems]);
 
   // Refetch items when internet reconnects
   useEffect(() => {
@@ -245,6 +276,10 @@ export default function Feed({ onNodeClick, onViewInGraph, searchQuery = '', mem
   const handleDeleteItem = async (e, itemId) => {
     e.stopPropagation();
     setActiveMenuId(null);
+    if (itemId < 0) {
+      addToast('Cannot delete a semantic hub centroid node.', 'warning');
+      return;
+    }
     if (!confirm('Are you sure you want to delete this item?')) return;
 
     try {
@@ -291,17 +326,59 @@ export default function Feed({ onNodeClick, onViewInGraph, searchQuery = '', mem
       )}
       {/* Filter Bar */}
       <div className="filter-bar glass-card">
-        <div className="filter-group">
-          {['all', 'url', 'voice', 'pdf', 'image', 'text'].map((type) => (
-            <button
-              key={type}
-              onClick={() => setSourceType(type)}
-              className={`filter-btn ${sourceType === type ? 'active' : ''}`}
-            >
-              {type === 'all' ? 'All' : type === 'url' ? 'Links' : type === 'voice' ? 'Voice' : type === 'pdf' ? 'PDFs' : type === 'image' ? 'Images' : 'Text'}
-            </button>
-          ))}
+        {/* Main Tab Switcher (Items vs Hubs) */}
+        <div className="main-tab-switcher">
+          <button
+            onClick={() => {
+              setActiveMainTab('items');
+              setSourceType('all');
+            }}
+            className={`main-tab-btn ${activeMainTab === 'items' ? 'active' : ''}`}
+          >
+            <SquaresFour size={15} weight="bold" />
+            <span>All Items</span>
+          </button>
+          <button
+            onClick={() => {
+              setActiveMainTab('hubs');
+              setSourceType('all');
+            }}
+            className={`main-tab-btn ${activeMainTab === 'hubs' ? 'active' : ''}`}
+          >
+            <ShareNetwork size={15} weight="bold" />
+            <span>Hubs</span>
+          </button>
         </div>
+
+        {/* Sub-Filters (only visible when All Items is active) */}
+        {activeMainTab === 'items' && (
+          <div className="filter-group">
+            {['all', 'url', 'voice', 'pdf', 'image', 'text'].map((type) => {
+              const getIcon = () => {
+                switch (type) {
+                  case 'all': return null; // keep "All" text clean
+                  case 'url': return <LinkIcon size={13} weight="bold" />;
+                  case 'voice': return <Microphone size={13} weight="bold" />;
+                  case 'pdf': return <FilePdf size={13} weight="bold" />;
+                  case 'image': return <ImageIcon size={13} weight="bold" />;
+                  case 'text': return <Note size={13} weight="bold" />;
+                  default: return null;
+                }
+              };
+              const label = type === 'all' ? 'All' : type === 'url' ? 'Links' : type === 'voice' ? 'Voice' : type === 'pdf' ? 'PDFs' : type === 'image' ? 'Images' : 'Text';
+              return (
+                <button
+                  key={type}
+                  onClick={() => setSourceType(type)}
+                  className={`filter-btn sub-filter-btn ${sourceType === type ? 'active' : ''}`}
+                >
+                  {getIcon()}
+                  <span>{label}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         <div className="filter-inputs">
           {/* Date range picker */}

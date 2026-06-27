@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { MagnifyingGlass, GoogleLogo, CloudX, CloudArrowUp, SignOut, CaretDown, CaretUp, ShareNetwork, List, Gear } from '@phosphor-icons/react';
+import { MagnifyingGlass, GoogleLogo, CloudX, CloudArrowUp, SignOut, CaretDown, CaretUp, ShareNetwork, List, Gear, Bell } from '@phosphor-icons/react';
 import ConnectionStatus from './ConnectionStatus';
 import ConnectDriveCard from './ConnectDriveCard';
 import { useToast } from './Toast';
@@ -8,7 +8,7 @@ import axios from '../api/client';
 import StreakBadge from './StreakBadge';
 import StreakPanel from './StreakPanel';
 
-export default function Header({ onSearch, dueQuizCount, viewMode = 'nodes', onViewModeChange, searchInputRef: externalSearchInputRef, searchQuery = '', onSettingsClick, onStatsClick }) {
+export default function Header({ onSearch, dueQuizCount, viewMode = 'graph', onViewModeChange, searchInputRef: externalSearchInputRef, searchQuery = '', onSettingsClick, onStatsClick }) {
   const { user, logout, checkAuth } = useAuth();
   const { addToast } = useToast();
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -242,18 +242,11 @@ export default function Header({ onSearch, dueQuizCount, viewMode = 'nodes', onV
           <>
             <div className="view-toggle">
               <button 
-                className={`toggle-btn ${viewMode === 'nodes' ? 'active' : ''}`}
-                onClick={() => onViewModeChange && onViewModeChange('nodes')}
-                aria-label="Switch to Nodes View"
+                className={`toggle-btn ${viewMode === 'graph' ? 'active' : ''}`}
+                onClick={() => onViewModeChange && onViewModeChange('graph')}
+                aria-label="Switch to Graph View"
               >
-                🌌 Nodes
-              </button>
-              <button 
-                className={`toggle-btn ${viewMode === 'hubs' ? 'active' : ''}`}
-                onClick={() => onViewModeChange && onViewModeChange('hubs')}
-                aria-label="Switch to Hubs View"
-              >
-                🌐 Hubs
+                🌌 Graph
               </button>
               <button 
                 className={`toggle-btn ${viewMode === 'feed' ? 'active' : ''}`}
@@ -345,6 +338,16 @@ export default function Header({ onSearch, dueQuizCount, viewMode = 'nodes', onV
                   >
                     Account
                   </div>
+                  <button
+                    className="dropdown-item"
+                    onClick={() => {
+                      onViewModeChange && onViewModeChange('reminders');
+                      setDropdownOpen(false);
+                    }}
+                    role="menuitem"
+                  >
+                    <Bell size={16} aria-hidden="true" /> Reminders
+                  </button>
                   <button
                     className="dropdown-item"
                     onClick={() => {

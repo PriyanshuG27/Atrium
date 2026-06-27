@@ -7,27 +7,74 @@ function getNodeRadius(node, hubs = []) {
     const hubId = node.id < 0 ? -node.id : node.id;
     const hub = hubs.find(h => h.id === hubId);
     const memberCount = hub?.member_ids?.length || 0;
-    return Math.max(20, 20 + memberCount * 0.8);
+    return Math.max(14, 14 + Math.min(10, memberCount) * 0.4);
   }
-  return 8;
+  return 6;
 }
 
-// Helper to get source type glow color
-function getGlowColor(sourceType) {
+function getSourceColor(sourceType) {
   switch (sourceType) {
     case 'url':
-      return 'rgba(0, 242, 254, 0.4)'; // Neon Cyan
+      return '#00F2FE'; // Neon Cyan
     case 'pdf':
-      return 'rgba(255, 8, 68, 0.4)';  // Ruby Crimson
+      return '#FF0844'; // Ruby Crimson
     case 'voice':
-      return 'rgba(177, 0, 255, 0.4)'; // Electric Purple
+      return '#B100FF'; // Electric Purple
     case 'image':
     case 'photo':
-      return 'rgba(0, 255, 135, 0.4)'; // Neon Mint
+      return '#00FF87'; // Neon Mint
     case 'text':
-      return 'rgba(249, 212, 35, 0.4)';  // Golden Amber
+      return '#F9D423'; // Golden Amber
     default:
-      return 'rgba(108, 99, 255, 0.4)'; // Electric Indigo / Primary Glow
+      return '#6C63FF'; // Electric Indigo
+  }
+}
+
+// Helper to draw geometric shapes based on source type to avoid standard "electrons/atoms" circles
+function drawNodeShape(ctx, x, y, radius, sourceType) {
+  ctx.beginPath();
+  
+  // Safe guard for primitive mock canvas contexts in unit test environments
+  if (typeof ctx.lineTo !== 'function' || typeof ctx.moveTo !== 'function') {
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    return;
+  }
+
+  switch (sourceType) {
+    case 'url': // Hexagon
+      for (let i = 0; i < 6; i++) {
+        const angle = (i / 6) * 2 * Math.PI;
+        ctx.lineTo(x + radius * 1.15 * Math.cos(angle), y + radius * 1.15 * Math.sin(angle));
+      }
+      ctx.closePath();
+      break;
+    case 'pdf': // Document card shape (drawn with lineTo for test mock compatibility)
+      ctx.moveTo(x - radius * 0.8, y - radius * 1.1);
+      ctx.lineTo(x + radius * 0.8, y - radius * 1.1);
+      ctx.lineTo(x + radius * 0.8, y + radius * 1.1);
+      ctx.lineTo(x - radius * 0.8, y + radius * 1.1);
+      ctx.closePath();
+      break;
+    case 'voice': // Perfect circle
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      break;
+    case 'image':
+    case 'photo': // Diamond
+      ctx.moveTo(x, y - radius * 1.25);
+      ctx.lineTo(x + radius * 1.25, y);
+      ctx.lineTo(x, y + radius * 1.25);
+      ctx.lineTo(x - radius * 1.25, y);
+      ctx.closePath();
+      break;
+    case 'text': // Triangle
+      for (let i = 0; i < 3; i++) {
+        const angle = (i / 3) * 2 * Math.PI - Math.PI / 2;
+        ctx.lineTo(x + radius * 1.25 * Math.cos(angle), y + radius * 1.25 * Math.sin(angle));
+      }
+      ctx.closePath();
+      break;
+    default:
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
   }
 }
 
@@ -51,11 +98,17 @@ export default function GraphCanvas({
   const clickHandler = onNodeClick || handleNodeClick;
 
   const isHubsMode = mode === 'hubs';
-  const displayNodes = isHubsMode
-    ? activeNodes.filter(n => n.type === 'hub' || n.id < 0)
-    : activeNodes.filter(n => n.id > 0);
+  const isGraphMode = mode === 'graph';
+  const displayNodes = isGraphMode
+    ? activeNodes
+    : isHubsMode
+      ? activeNodes.filter(n => n.type === 'hub' || n.id < 0)
+      : activeNodes.filter(n => n.id > 0);
 
   const displayEdges = useMemo(() => {
+    if (isGraphMode) {
+      return edges;
+    }
     if (!isHubsMode) {
       // In nodes mode, only keep item-to-item similarity edges
       return edges.filter(edge => {
@@ -96,7 +149,7 @@ export default function GraphCanvas({
       }
     });
     return Array.from(hubEdgesMap.values());
-  }, [edges, hubs, isHubsMode]);
+  }, [edges, hubs, isHubsMode, isGraphMode]);
 
   // Local pan and zoom states in case parent does not manage them
   const [localPan, setLocalPan] = useState(pan);
@@ -227,8 +280,8 @@ export default function GraphCanvas({
 
       // Update offsets for rotations and dashes
       if (!prefersReducedMotion) {
-        rotAngleRef.current += 0.000785 * dt; // slow rotating hub halo (360 deg every 8s)
-        flowOffsetRef.current += 0.15 * dt; // flowing pulse offset
+        rotAngleRef.current += 0.0005 * dt; // slow rotating hub halo
+        flowOffsetRef.current += 0.1 * dt; // flowing pulse offset
       }
 
       // 1. Clear Canvas
@@ -239,11 +292,10 @@ export default function GraphCanvas({
       ctx.translate(panRef.current.x, panRef.current.y);
       ctx.scale(zoomRef.current, zoomRef.current);
 
-      // 3. Separate nodes into Hubs and Orbitals for drawing order
       const nodesList = nodesRef.current;
       const linksList = linksRef.current;
 
-      // Check if a hub is selected (Click hub: highlight all member nodes; dim non-members to 20% opacity)
+      // Check if a hub is selected
       const isHubSelected = selectedNodeId !== null && selectedNodeId < 0;
       const selectedHubMemberIds = new Set();
       if (isHubSelected) {
@@ -268,8 +320,8 @@ export default function GraphCanvas({
         }
       });
 
-      // 4. Draw Edges (Quadratic Bezier Curves)
-      linksList.forEach(link => {
+      // 4. Draw Edges
+      linksList.forEach((link, idx) => {
         const sourceNode = link.source;
         const targetNode = link.target;
         if (!sourceNode || !targetNode || sourceNode.x === undefined || targetNode.x === undefined) return;
@@ -279,57 +331,105 @@ export default function GraphCanvas({
         const x2 = targetNode.x;
         const y2 = targetNode.y;
 
+        const isHubConnection = sourceNode.id < 0 || targetNode.id < 0;
+
+        // Calculate control point for curved bezier line
         const midX = (x1 + x2) / 2;
         const midY = (y1 + y2) / 2;
-        const controlX = midX + (y2 - y1) * 0.05;
-        const controlY = midY - (x2 - x1) * 0.05;
+        const controlX = midX + (y2 - y1) * 0.04;
+        const controlY = midY - (x2 - x1) * 0.04;
 
-        // Determine edge activation based on search-matching logic
-        let isEdgeMatched = false;
-        if (matchingNodeIds === null) {
-          isEdgeMatched = true;
-        } else {
-          const isSourceHub = sourceNode.id < 0;
-          const isTargetHub = targetNode.id < 0;
-          if (isSourceHub && !isTargetHub) {
-            isEdgeMatched = matchingNodeIds.has(targetNode.id);
-          } else if (!isSourceHub && isTargetHub) {
-            isEdgeMatched = matchingNodeIds.has(sourceNode.id);
+        // Edge opacity and glow based on matching/selection
+        let opacity = 0.12;
+        let isHighlighted = false;
+
+        if (isHubSelected) {
+          if (sourceNode.id === selectedNodeId || targetNode.id === selectedNodeId) {
+            isHighlighted = true;
+            opacity = 0.85;
           } else {
-            isEdgeMatched = matchingNodeIds.has(sourceNode.id) && matchingNodeIds.has(targetNode.id);
+            opacity = 0.02;
+          }
+        } else if (matchingNodeIds !== null) {
+          const sMatched = matchingNodeIds.has(sourceNode.id);
+          const tMatched = matchingNodeIds.has(targetNode.id);
+          if (isHubConnection) {
+            const memberId = sourceNode.id < 0 ? targetNode.id : sourceNode.id;
+            if (matchingNodeIds.has(memberId)) {
+              isHighlighted = true;
+              opacity = 0.75;
+            } else {
+              opacity = 0.02;
+            }
+          } else {
+            if (sMatched && tMatched) {
+              isHighlighted = true;
+              opacity = 0.65;
+            } else {
+              opacity = 0.02;
+            }
+          }
+        } else {
+          if (isHubConnection) {
+            opacity = 0.35; // Make hub edges clearly visible by default
+          } else {
+            opacity = 0.18; // Similarity edges visible but clean
           }
         }
+
+        const sourceColor = sourceNode.id < 0 ? '#00D4AA' : getSourceColor(sourceNode.source_type);
+        const targetColor = targetNode.id < 0 ? '#00D4AA' : getSourceColor(targetNode.source_type);
 
         ctx.save();
+        ctx.globalAlpha = opacity;
         ctx.beginPath();
+
+        // Draw curved bezier line with a beautiful linear gradient between the two node colors!
         ctx.moveTo(x1, y1);
         ctx.quadraticCurveTo(controlX, controlY, x2, y2);
-
-        if (isEdgeMatched) {
-          ctx.strokeStyle = 'rgba(0, 212, 170, 0.65)';
-          ctx.lineWidth = 2;
-          ctx.shadowBlur = 8;
-          ctx.shadowColor = '#00D4AA';
-          ctx.stroke();
-
-          // Secondary flowing dashed path
-          if (!prefersReducedMotion) {
-            ctx.shadowBlur = 0;
-            ctx.strokeStyle = 'rgba(0, 212, 170, 0.9)';
-            ctx.lineWidth = 1.5;
-            ctx.setLineDash([4, 8]);
-            ctx.lineDashOffset = -flowOffsetRef.current;
-            ctx.beginPath();
-            ctx.moveTo(x1, y1);
-            ctx.quadraticCurveTo(controlX, controlY, x2, y2);
-            ctx.stroke();
-          }
-        } else {
-          ctx.strokeStyle = 'rgba(0, 212, 170, 0.15)';
-          ctx.lineWidth = 1;
-          ctx.stroke();
+        
+        let strokeStyle = sourceColor;
+        if (typeof ctx.createLinearGradient === 'function') {
+          const edgeGrad = ctx.createLinearGradient(x1, y1, x2, y2);
+          edgeGrad.addColorStop(0, sourceColor);
+          edgeGrad.addColorStop(1, targetColor);
+          strokeStyle = edgeGrad;
         }
+        
+        ctx.strokeStyle = strokeStyle;
+        ctx.lineWidth = isHighlighted ? 2.0 : 1.0;
+
+        if (isHighlighted) {
+          ctx.shadowBlur = 6;
+          ctx.shadowColor = isHubConnection ? '#00D4AA' : '#6C63FF';
+        }
+        
+        ctx.stroke();
         ctx.restore();
+
+        // Draw flowing pulse particle (skip if prefers-reduced-motion is active)
+        if (!prefersReducedMotion && (isHighlighted || (matchingNodeIds === null && opacity > 0.1))) {
+          // Flow from source to target (t goes from 0.0 to 1.0)
+          const speed = 0.0006;
+          const t = (timestamp * speed + idx * 0.15) % 1.0;
+          const mt = 1 - t;
+          
+          // Quadratic bezier interpolation formula
+          const px = mt * mt * x1 + 2 * mt * t * controlX + t * t * x2;
+          const py = mt * mt * y1 + 2 * mt * t * controlY + t * t * y2;
+
+          ctx.save();
+          ctx.globalAlpha = opacity * 1.3;
+          ctx.beginPath();
+          ctx.arc(px, py, 1.8, 0, Math.PI * 2);
+          
+          // Pulse particle color: mix color or use white core with connection glow
+          ctx.fillStyle = '#FFFFFF';
+          ctx.shadowBlur = 8;
+          ctx.shadowColor = targetColor;
+          ctx.fill();
+          ctx.restore();
+        }
       });
 
       // 5. Draw Orbital Nodes (Standard Items)
@@ -337,123 +437,62 @@ export default function GraphCanvas({
         if (node.x === undefined || node.y === undefined) return;
         const isHovered = hoveredNodeIdRef.current === node.id;
         const isSelected = selectedNodeId === node.id;
+        const color = getSourceColor(node.source_type);
         
-        const ageInMs = node.created_at ? Date.now() - new Date(node.created_at).getTime() : Infinity;
         let opacity = 1.0;
         if (isHubSelected) {
-          opacity = selectedHubMemberIds.has(node.id) ? 1.0 : 0.2;
+          opacity = selectedHubMemberIds.has(node.id) ? 1.0 : 0.15;
         } else if (matchingNodeIds !== null) {
           opacity = matchingNodeIds.has(node.id) ? 1.0 : 0.1;
-        }
-
-        // Apply entry fade-in
-        if (ageInMs < 1200) {
-          opacity *= Math.max(0, Math.min(1, ageInMs / 1200));
         }
 
         ctx.save();
         ctx.globalAlpha = opacity;
 
-        // Calculate node degree for star glow sizing
-        const degree = linksList.filter(l => l.source.id === node.id || l.target.id === node.id).length;
-        
-        // Gravitational ripple interaction from parent hubs
-        let hubPulseGlow = 0;
-        let hubPulseScale = 1.0;
-        if (!prefersReducedMotion && hubs) {
-          hubs.forEach(hub => {
-            if (hub.updated_at && hub.member_ids && hub.member_ids.includes(Number(node.id))) {
-              const elapsed = Date.now() - hub.updated_at;
-              if (elapsed < 2000) {
-                const hubNodeId = -hub.id;
-                const parentHubNode = nodesList.find(hn => hn.id === hubNodeId);
-                if (parentHubNode && parentHubNode.x !== undefined && parentHubNode.y !== undefined) {
-                  const dist = Math.hypot(node.x - parentHubNode.x, node.y - parentHubNode.y);
-                  const waveRadius = (elapsed / 2000) * 250;
-                  const distanceToWave = Math.abs(dist - waveRadius);
-                  if (distanceToWave < 30) {
-                    const factor = 1 - (distanceToWave / 30);
-                    hubPulseGlow = factor * 20;
-                    hubPulseScale = 1.0 + factor * 0.4;
-                  }
-                }
-              }
-            }
-          });
-        }
+        const baseRadius = 6;
+        const radius = (isHovered || isSelected ? 8 : baseRadius);
 
-        const radius = 8 * hubPulseScale;
-        
-        // 1. Draw Star Glow (radial gradient behind node)
-        const glowScale = isHovered ? 1.3 : 1.0;
-        const glowRadius = (radius * (1.5 + degree * 0.3) * glowScale) + hubPulseGlow;
-        const radialGlow = ctx.createRadialGradient(node.x, node.y, radius * 0.2, node.x, node.y, glowRadius);
-        const glowColor = getGlowColor(node.source_type);
-        
-        radialGlow.addColorStop(0, glowColor);
-        radialGlow.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        
-        ctx.fillStyle = radialGlow;
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, glowRadius, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Draw expanding pulse ring on entry (skip if prefers-reduced-motion is active)
-        if (ageInMs < 1200 && !prefersReducedMotion) {
-          const pulseProgress = ageInMs / 1200;
-          const pulseRadius = radius + pulseProgress * 30;
-          const pulseOpacity = 1 - pulseProgress;
+        // A. Draw Star Glow (radial gradient behind node)
+        const glowRadius = radius * (isHovered || isSelected ? 3.5 : 2.2);
+        if (typeof ctx.createRadialGradient === 'function') {
+          const radialGlow = ctx.createRadialGradient(node.x, node.y, radius * 0.2, node.x, node.y, glowRadius);
+          radialGlow.addColorStop(0, `${color}66`); // 40% opacity glow
+          radialGlow.addColorStop(0.5, `${color}1A`); // 10% opacity glow
+          radialGlow.addColorStop(1, 'rgba(0, 0, 0, 0)');
           
-          ctx.save();
+          ctx.fillStyle = radialGlow;
           ctx.beginPath();
-          ctx.arc(node.x, node.y, pulseRadius, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(0, 212, 170, ${pulseOpacity})`;
-          ctx.lineWidth = 2;
-          ctx.stroke();
-          ctx.restore();
+          ctx.arc(node.x, node.y, glowRadius, 0, Math.PI * 2);
+          ctx.fill();
         }
 
-        // 2. Draw Frosted Glass Surface
-        ctx.fillStyle = 'rgba(10, 10, 20, 0.8)';
-        ctx.strokeStyle = isHovered || isSelected ? 'rgba(108, 99, 255, 0.6)' : 'rgba(255, 255, 255, 0.12)';
-        ctx.lineWidth = isSelected ? 2.5 : 1.5;
+        // B. Draw Custom Geometric Star Shape
+        ctx.strokeStyle = color;
+        ctx.lineWidth = isSelected ? 2.2 : 1.2;
         
         if (isHovered || isSelected) {
-          ctx.shadowBlur = 12;
-          ctx.shadowColor = '#6C63FF';
+          ctx.shadowBlur = 10;
+          ctx.shadowColor = color;
+        } else {
+          ctx.shadowBlur = 4;
+          ctx.shadowColor = color;
         }
 
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
+        // Fill with a nice solid colored glass core
+        ctx.fillStyle = 'rgba(7, 7, 15, 0.9)'; // Dark center to stand out
+        drawNodeShape(ctx, node.x, node.y, radius, node.source_type);
         ctx.fill();
         ctx.stroke();
 
-        // Check if node is a pulse node (created < 5 min ago)
-        const isPulse = ageInMs < 5 * 60 * 1000 || node.type === 'pulse';
+        // C. Draw a small bright white center dot inside the geometric shape to make it sparkle like a star!
+        ctx.fillStyle = '#FFFFFF';
+        ctx.shadowBlur = 0; // reset
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, 2, 0, Math.PI * 2);
+        ctx.fill();
 
-        if (isPulse) {
-          // White Core
-          ctx.fillStyle = '#ffffff';
-          ctx.beginPath();
-          ctx.arc(node.x, node.y, radius * 0.6, 0, Math.PI * 2);
-          ctx.fill();
-
-          // Concentric ripple animation (skip if prefers-reduced-motion is active)
-          if (!prefersReducedMotion) {
-            const rippleProgress = (timestamp % 1500) / 1500;
-            const rippleRadius = radius + rippleProgress * 24;
-            const rippleOpacity = 1 - rippleProgress;
-            ctx.beginPath();
-            ctx.arc(node.x, node.y, rippleRadius, 0, Math.PI * 2);
-            ctx.strokeStyle = `rgba(255, 255, 255, ${rippleOpacity})`;
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
-          }
-        }
-
-        // Draw Canvas labels for hovered/selected nodes
+        // D. Draw Labels for hovered/selected nodes
         if (isHovered || isSelected) {
-          ctx.shadowBlur = 0;
           ctx.font = '500 11px Inter';
           ctx.fillStyle = '#F1F1F6';
           ctx.textAlign = 'center';
@@ -463,24 +502,21 @@ export default function GraphCanvas({
         ctx.restore();
       });
 
-      // 6. Draw Hub Nodes (Louvain Centroids) - drawn ABOVE orbital nodes
+      // 6. Draw Hub Centroid Nodes (Louvain Communities)
       hubsList.forEach(node => {
         if (node.x === undefined || node.y === undefined) return;
         const isHovered = hoveredNodeIdRef.current === node.id;
         const isSelected = selectedNodeId === node.id;
+        
         let opacity = 1.0;
         if (isHubSelected) {
-          opacity = node.id === selectedNodeId ? 1.0 : 0.2;
+          opacity = node.id === selectedNodeId ? 1.0 : 0.15;
         } else if (matchingNodeIds !== null) {
-          const isMatched = (
-            node.id < 0
-              ? [...matchingNodeIds].some(mId => 
-                  linksList.some(l => 
-                    (l.source.id === node.id && l.target.id === mId) ||
-                    (l.target.id === node.id && l.source.id === mId)
-                  )
-                )
-              : matchingNodeIds.has(node.id)
+          const isMatched = [...matchingNodeIds].some(mId => 
+            linksList.some(l => 
+              (l.source.id === node.id && l.target.id === mId) ||
+              (l.target.id === node.id && l.source.id === mId)
+            )
           );
           opacity = isMatched ? 1.0 : 0.1;
         }
@@ -490,41 +526,25 @@ export default function GraphCanvas({
 
         const radius = getNodeRadius(node, hubs);
 
-        // Gravitational ripple centered at the hub node
-        const hubElapsed = node.updated_at ? Date.now() - node.updated_at : Infinity;
-        if (hubElapsed < 2000 && !prefersReducedMotion) {
-          const rippleProgress = hubElapsed / 2000;
-          const maxRippleRadius = 250;
-          const rippleRadius = radius + rippleProgress * maxRippleRadius;
-          const rippleOpacity = (1 - rippleProgress) * 0.4;
-          
-          ctx.save();
+        // A. Draw Centroid Glow (neon mint halo)
+        const glowRadius = radius * (isHovered || isSelected ? 2.5 : 1.8);
+        if (typeof ctx.createRadialGradient === 'function') {
+          const radialGlow = ctx.createRadialGradient(node.x, node.y, radius * 0.1, node.x, node.y, glowRadius);
+          radialGlow.addColorStop(0, 'rgba(0, 212, 170, 0.2)');
+          radialGlow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+          ctx.fillStyle = radialGlow;
           ctx.beginPath();
-          ctx.arc(node.x, node.y, rippleRadius, 0, Math.PI * 2);
-          ctx.strokeStyle = `rgba(0, 212, 170, ${rippleOpacity})`;
-          ctx.lineWidth = 3 * (1 - rippleProgress);
-          ctx.stroke();
-          ctx.restore();
+          ctx.arc(node.x, node.y, glowRadius, 0, Math.PI * 2);
+          ctx.fill();
         }
-        
-        // 1. Draw Centroid Glow (mint-teal halo)
-        const glowRadius = radius * (1.5 + (isHovered ? 0.5 : 0));
-        const radialGlow = ctx.createRadialGradient(node.x, node.y, radius * 0.2, node.x, node.y, glowRadius);
-        radialGlow.addColorStop(0, 'rgba(0, 212, 170, 0.25)');
-        radialGlow.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        
-        ctx.fillStyle = radialGlow;
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, glowRadius, 0, Math.PI * 2);
-        ctx.fill();
 
-        // 2. Draw Frosted Surface (teal borders)
-        ctx.fillStyle = 'rgba(10, 10, 20, 0.85)';
-        ctx.strokeStyle = '#00D4AA';
-        ctx.lineWidth = isSelected ? 3 : 2;
+        // B. Draw Clean Transparent Ring Surface
+        ctx.fillStyle = 'rgba(7, 7, 15, 0.4)'; // transparent glass core
+        ctx.strokeStyle = '#00D4AA'; // Neon mint border
+        ctx.lineWidth = isSelected ? 2.5 : 1.5;
 
         if (isHovered || isSelected) {
-          ctx.shadowBlur = 12;
+          ctx.shadowBlur = 8;
           ctx.shadowColor = '#00D4AA';
         }
 
@@ -533,28 +553,26 @@ export default function GraphCanvas({
         ctx.fill();
         ctx.stroke();
 
-        // 3. Draw Slow-Rotating Outer Dashed Ring
+        // C. Draw Slow-Rotating Outer Dashed Ring
         ctx.shadowBlur = 0;
-        ctx.strokeStyle = 'rgba(0, 212, 170, 0.4)';
+        ctx.strokeStyle = 'rgba(0, 212, 170, 0.3)';
         ctx.lineWidth = 1;
         ctx.setLineDash([4, 6]);
-        ctx.lineDashOffset = 0;
         ctx.beginPath();
-        ctx.arc(node.x, node.y, radius + 8, rotAngleRef.current, rotAngleRef.current + Math.PI * 2);
+        ctx.arc(node.x, node.y, radius + 6, rotAngleRef.current, rotAngleRef.current + Math.PI * 2);
         ctx.stroke();
 
-        // Draw label for Hub centroids on canvas (staggered if close to others)
+        // D. Draw label for Hub centroids on canvas (collision-aware placement)
         ctx.font = '600 10px JetBrains Mono';
-        ctx.fillStyle = isHovered ? '#00D4AA' : '#8E8E9F';
+        ctx.fillStyle = isHovered || isSelected ? '#00D4AA' : '#8E8E9F';
         ctx.textAlign = 'center';
         
-        let labelY = node.y + radius + 20;
+        let labelY = node.y + radius + 18;
         const closeHub = hubsList.find(other => {
           if (other.id === node.id || other.x === undefined || other.y === undefined) return false;
-          const dx = node.x - other.x;
-          const dy = node.y - other.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          return dist < 120;
+          const dx = Math.abs(node.x - other.x);
+          const dy = Math.abs(node.y - other.y);
+          return dx < 240 && dy < 50; // horizontal collision zone is 240px, vertical is 50px
         });
         if (closeHub) {
           const isAbove = node.id < closeHub.id;

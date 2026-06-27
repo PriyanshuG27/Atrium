@@ -21,7 +21,7 @@ function getErrorMessage(error) {
     return 'Connection lost — check your internet';
   }
   
-  const { status } = error.response;
+  const { status, data } = error.response;
   switch (status) {
     case 400:
       return 'Invalid request details provided.';
@@ -31,8 +31,12 @@ function getErrorMessage(error) {
       return 'Access denied — you do not have permission';
     case 404:
       return 'Requested resource not found';
-    case 429:
-      return 'Too many requests — please wait';
+    case 429: {
+      const retryAfter = data?.retry_after;
+      return retryAfter 
+        ? `Too many requests — please retry in ${retryAfter}s.`
+        : 'Too many requests — please wait';
+    }
     case 503:
       return 'Server unavailable — retrying in 30 s';
     default:
@@ -69,7 +73,11 @@ client.interceptors.response.use(
     // 3. 429 Too Many Requests
     else if (status === 429) {
       if (toastHandler) {
-        toastHandler('Too many requests — please wait', 'warning');
+        const retryAfter = response.data?.retry_after;
+        const msg = retryAfter 
+          ? `Too many requests — please retry in ${retryAfter}s.` 
+          : 'Too many requests — please wait';
+        toastHandler(msg, 'warning');
       }
     } 
     // 4. 503 Service Unavailable

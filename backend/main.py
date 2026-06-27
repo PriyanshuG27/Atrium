@@ -319,8 +319,21 @@ app.add_middleware(
 
 
 # ---------------------------------------------------------------------------
-# Global exception handler — NEVER expose internal details to clients
-# ---------------------------------------------------------------------------
+from backend.services.rate_limiter import RateLimitExceeded
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    retry_seconds = int(exc.retry_after)
+    return JSONResponse(
+        status_code=429,
+        headers={"Retry-After": str(retry_seconds)},
+        content={
+            "error": "rate_limit_exceeded",
+            "retry_after": retry_seconds
+        }
+    )
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """

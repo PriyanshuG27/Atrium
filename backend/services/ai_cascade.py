@@ -181,26 +181,43 @@ class AICascade:
         ]
         return await self._call_groq_llm(messages, temperature=0.2, timeout=10.0)
 
-    async def _call_gemini_label(self, text: str) -> Optional[str]:
+    async def _call_gemini_llm(self, prompt: str, temperature: float = 0.2, timeout: float = 20.0) -> Optional[str]:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key={settings.GEMINI_API_KEY}"
         payload = {
             "contents": [
                 {
                     "parts": [
-                        {"text": "You are a precise classifier. What single theme connects these items? Answer in 4 words or less. Do not write anything else. Keep your answer brief and descriptive.\n\nSummaries of items:\n\n" + text}
+                        {"text": prompt}
                     ]
                 }
             ],
             "generationConfig": {
-                "temperature": 0.2
+                "temperature": temperature
             }
         }
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(url, json=payload)
-            if resp.status_code == 200:
-                data = resp.json()
-                return data["candidates"][0]["content"]["parts"][0]["text"]
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(url, json=payload)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    usage = data.get("usageMetadata", {})
+                    if usage:
+                        logger.info(
+                            "Gemini API token usage: prompt=%s, candidate=%s, total=%s",
+                            usage.get("promptTokenCount"),
+                            usage.get("candidatesTokenCount"),
+                            usage.get("totalTokenCount")
+                        )
+                    return data["candidates"][0]["content"]["parts"][0]["text"]
+                else:
+                    logger.warning("Gemini call failed with status %d: %s", resp.status_code, resp.text)
+        except Exception as e:
+            logger.warning("Gemini call failed with exception: %s", e)
         return None
+
+    async def _call_gemini_label(self, text: str) -> Optional[str]:
+        prompt = "You are a precise classifier. What single theme connects these items? Answer in 4 words or less. Do not write anything else. Keep your answer brief and descriptive.\n\nSummaries of items:\n\n" + text
+        return await self._call_gemini_llm(prompt, temperature=0.2, timeout=15.0)
 
     async def _call_modal_summary(self, text: str) -> Optional[str]:
         url = "https://pri27--llama-summary.modal.run/summarize"
@@ -228,6 +245,15 @@ class AICascade:
                     resp = await client.post(url, json=payload, headers=headers)
                     if resp.status_code == 200:
                         data = resp.json()
+                        usage = data.get("usage", {})
+                        if usage:
+                            logger.info(
+                                "Groq API token usage for model %s: prompt=%s, completion=%s, total=%s",
+                                model,
+                                usage.get("prompt_tokens"),
+                                usage.get("completion_tokens"),
+                                usage.get("total_tokens")
+                            )
                         return data["choices"][0]["message"]["content"]
                     elif resp.status_code == 429:
                         logger.warning("Groq model %s rate limited (429). Mapped keys/organization TPM exceeded.", model)
@@ -254,24 +280,9 @@ class AICascade:
         return await self._call_groq_llm(messages, temperature=0.3, timeout=15.0)
 
     async def _call_gemini_summary(self, text: str) -> Optional[str]:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key={settings.GEMINI_API_KEY}"
-        # Truncate text to prevent long timeouts (~25,000 tokens)
         truncated_text = text[:100000]
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {"text": f"{SUMMARIZE_SYSTEM_PROMPT}\n\nSummarize the following text:\n\n{truncated_text}"}
-                    ]
-                }
-            ]
-        }
-        async with httpx.AsyncClient(timeout=40.0) as client:
-            resp = await client.post(url, json=payload)
-            if resp.status_code == 200:
-                data = resp.json()
-                return data["candidates"][0]["content"]["parts"][0]["text"]
-        return None
+        prompt = f"{SUMMARIZE_SYSTEM_PROMPT}\n\nSummarize the following text:\n\n{truncated_text}"
+        return await self._call_gemini_llm(prompt, temperature=0.3, timeout=40.0)
 
     async def _generate_tags_llm(self, content: str, summary: str) -> List[str]:
         # Determine provider to use for tag generation
@@ -310,20 +321,7 @@ class AICascade:
             ]
             response_text = await self._call_groq_llm(messages, temperature=0.2, timeout=15.0)
         elif provider == "gemini" and settings.GEMINI_API_KEY:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key={settings.GEMINI_API_KEY}"
-            payload = {
-                "contents": [
-                    {
-                        "parts": [
-                            {"text": f"{prompt}\n\nContent context:\n{context}"}
-                        ]
-                    }
-                ]
-            }
-            async with httpx.AsyncClient(timeout=20.0) as client:
-                resp = await client.post(url, json=payload)
-                if resp.status_code == 200:
-                    response_text = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
+            response_text = await self._call_gemini_llm(f"{prompt}\n\nContent context:\n{context}", temperature=0.2, timeout=20.0)
 
         if not response_text:
             return []
@@ -611,25 +609,7 @@ class AICascade:
         return await self._call_groq_llm(messages, temperature=0.0, timeout=15.0)
 
     async def _call_gemini_rag(self, prompt: str) -> Optional[str]:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key={settings.GEMINI_API_KEY}"
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {"text": prompt}
-                    ]
-                }
-            ],
-            "generationConfig": {
-                "temperature": 0.0
-            }
-        }
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.post(url, json=payload)
-            if resp.status_code == 200:
-                data = resp.json()
-                return data["candidates"][0]["content"]["parts"][0]["text"]
-        return None
+        return await self._call_gemini_llm(prompt, temperature=0.0, timeout=20.0)
 
     def _strip_thinking(self, text: str) -> str:
         if not text:

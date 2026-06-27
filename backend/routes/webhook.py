@@ -4,7 +4,7 @@ import asyncio
 import httpx
 import json
 from typing import Optional, Tuple
-from datetime import date, timedelta
+from datetime import date, datetime, timezone, time as dt_time, timedelta
 
 from fastapi import APIRouter, Depends, Request, BackgroundTasks
 from pydantic import BaseModel
@@ -407,7 +407,6 @@ async def telegram_webhook(
         # 4.5 Check for bot commands
         text_content = message.get("text", "")
         if text_content and text_content.strip().startswith("/"):
-            from datetime import datetime, timezone
             user_id = await upsert_user(chat_id, db)
             
             cleaned_text = text_content.strip()
@@ -431,18 +430,24 @@ async def telegram_webhook(
                 
             elif command_part == "/help":
                 help_msg = (
-                    "📚 Recall Commands:\n"
+                    "📚 Recall Commands:\n\n"
+                    "⚙️ Account & Setup:\n"
                     "/start — Set up your account\n"
-                    "/search <query> — Find saved items\n"
-                    "/list — Show your last 10 saves\n"
-                    "/file <id> — Retrieve a saved file, link, or note by ID\n"
-                    "/delete <id> — Delete an item by ID\n"
-                    "/quiz — Get a due quiz question\n"
-                    "/remind <time> <message> — Set a reminder (e.g. /remind 2h Review ML notes)\n"
-                    "/stats — Your knowledge stats\n"
-                    "/streak — Current save streak\n"
                     "/connect_drive — Connect Google Drive backup\n"
-                    "/tags — Show your top tags"
+                    "/digest — Toggle daily morning digests (enabled/disabled)\n\n"
+                    "🔍 Search & Retrieval:\n"
+                    "/search <query> — Search saved items\n"
+                    "/list — Show your last 10 saves\n"
+                    "/file <id> — Retrieve a saved item by ID\n"
+                    "/tags — Show your top tags\n"
+                    "/delete <id> — Delete an item by ID\n\n"
+                    "⏰ Learning & Reminders:\n"
+                    "/remind <time> <message> — Set a reminder (e.g., /remind 2h Review ML notes)\n"
+                    "/remind <time> <item_id> — Set a reminder for an item (e.g., /remind tomorrow morning 123)\n"
+                    "/quiz — Get a due quiz question\n"
+                    "/streak — Show your daily save streak\n"
+                    "/stats — View your knowledge stats\n\n"
+                    "💡 Tip: Forward me any link, document, text, voice note, or image and I will save it automatically!"
                 )
                 background_tasks.add_task(send_telegram_ack, chat_id, help_msg)
                 logger.info("Processed /help for chat_id %s", chat_id)
@@ -767,14 +772,158 @@ async def telegram_webhook(
 
             elif command_part == "/streak":
                 async with db.cursor() as cur:
-                    from backend.services.user_service import get_and_update_user_streak
-                    streak_count = await get_and_update_user_streak(cur, user_id)
+                    await cur.execute(
+                        """
+                        SELECT streak_count, last_activity_date
+                        FROM users
+                        WHERE id = %s;
+                        """,
+                        (user_id,)
+                    )
+                    row = await cur.fetchone()
+                    streak_count = row[0] if (row and row[0] is not None) else 0
                     await db.commit()
                 
-                streak_msg = f"Current streak: 🔥 {streak_count} days"
+                streak_msg = f"🔥 {streak_count} day streak! Keep saving knowledge."
                 background_tasks.add_task(send_telegram_ack, chat_id, streak_msg)
                 logger.info("Processed /streak for chat_id %s", chat_id)
                 return {"status": "ok", "detail": "streak_sent"}
+
+            elif command_part == "/digest":
+                async with db.cursor() as cur:
+                    await cur.execute(
+                        "SELECT digest_enabled FROM users WHERE id = %s;",
+                        (user_id,)
+                    )
+                    row = await cur.fetchone()
+                    current_status = row[0] if (row and row[0] is not None) else True
+                    
+                    new_status = not current_status
+                    await cur.execute(
+                        "UPDATE users SET digest_enabled = %s WHERE id = %s;",
+                        (new_status, user_id)
+                    )
+                    await db.commit()
+                    
+                if new_status:
+                    digest_msg = "📬 Daily digest enabled! You will receive morning summaries at 08:00 AM local time."
+                else:
+                    digest_msg = "📬 Daily digest disabled. You will no longer receive morning summaries."
+                    
+                background_tasks.add_task(send_telegram_ack, chat_id, digest_msg)
+                logger.info("Processed /digest for chat_id %s, set to %s", chat_id, new_status)
+                return {"status": "ok", "detail": "digest_toggled"}
+
+            elif command_part == "/remind":
+                if not args:
+                    remind_err = "Sorry, I didn't understand that time.\n\nTry:\n/remind 2h Read those notes"
+                    background_tasks.add_task(send_telegram_ack, chat_id, remind_err)
+                    return {"status": "ok", "detail": "remind_invalid"}
+                    
+                from backend.services.reminder_service import parse_time_expression, create_reminder
+                delta, absolute_format, message = parse_time_expression(args)
+                
+                if delta is None and absolute_format is None:
+                    remind_err = "Sorry, I didn't understand that time.\n\nTry:\n/remind 2h Read those notes"
+                    background_tasks.add_task(send_telegram_ack, chat_id, remind_err)
+                    return {"status": "ok", "detail": "remind_invalid"}
+                    
+                if not message:
+                    remind_err = "Please provide a message for your reminder.\n\nTry:\n/remind 2h Read those notes"
+                    background_tasks.add_task(send_telegram_ack, chat_id, remind_err)
+                    return {"status": "ok", "detail": "remind_invalid"}
+                
+                # Detect if the reminder references a saved item ID
+                cleaned_msg = message.strip()
+                item_id_ref = None
+                item_found = False
+                item_title = ""
+                
+                # Check different reference formats:
+                if cleaned_msg.isdigit():
+                    item_id_ref = int(cleaned_msg)
+                elif cleaned_msg.lower().startswith("item:") and cleaned_msg[5:].strip().isdigit():
+                    item_id_ref = int(cleaned_msg[5:].strip())
+                elif cleaned_msg.lower().startswith("file:") and cleaned_msg[5:].strip().isdigit():
+                    item_id_ref = int(cleaned_msg[5:].strip())
+                elif cleaned_msg.startswith("/file_") and cleaned_msg[6:].strip().isdigit():
+                    item_id_ref = int(cleaned_msg[6:].strip())
+                elif cleaned_msg.startswith("/get_") and cleaned_msg[5:].strip().isdigit():
+                    item_id_ref = int(cleaned_msg[5:].strip())
+                
+                if item_id_ref is not None:
+                    async with db.cursor() as cur:
+                        await cur.execute(
+                            "SELECT title FROM items WHERE id = %s AND user_id = %s;",
+                            (item_id_ref, user_id)
+                        )
+                        item_row = await cur.fetchone()
+                        if item_row:
+                            item_title = item_row[0] or "Untitled Item"
+                            message = f"Review Item: {item_title}\nRetrieve: /file_{item_id_ref}"
+                            item_found = True
+                
+                # Fetch user's timezone_offset
+                async with db.cursor() as cur:
+                    await cur.execute(
+                        "SELECT timezone_offset FROM users WHERE id = %s;",
+                        (user_id,)
+                    )
+                    user_row = await cur.fetchone()
+                    timezone_offset = user_row[0] if (user_row and user_row[0] is not None) else 0
+                    
+                # Calculate remind_at in UTC
+                if delta is not None:
+                    remind_at_utc = datetime.now(timezone.utc) + delta
+                else:
+                    utc_now = datetime.now(timezone.utc)
+                    user_local = utc_now + timedelta(minutes=timezone_offset)
+                    
+                    if absolute_format in ("tomorrow", "tomorrow_morning"):
+                        target_date = user_local.date() + timedelta(days=1)
+                        target_local_dt = datetime.combine(target_date, dt_time(9, 0))
+                    elif absolute_format == "tomorrow_evening":
+                        target_date = user_local.date() + timedelta(days=1)
+                        target_local_dt = datetime.combine(target_date, dt_time(19, 0))
+                    elif absolute_format == "next_week":
+                        target_date = user_local.date() + timedelta(days=7)
+                        target_local_dt = datetime.combine(target_date, dt_time(9, 0))
+                    else:
+                        remind_err = "Sorry, I didn't understand that time.\n\nTry:\n/remind 2h Read those notes"
+                        background_tasks.add_task(send_telegram_ack, chat_id, remind_err)
+                        return {"status": "ok", "detail": "remind_invalid"}
+                        
+                    remind_at_utc = target_local_dt - timedelta(minutes=timezone_offset)
+                    remind_at_utc = remind_at_utc.replace(tzinfo=timezone.utc)
+                
+                try:
+                    reminder_id, final_message, was_truncated = await create_reminder(
+                        user_id, message, remind_at_utc, db
+                    )
+                    await db.commit()
+                except ValueError as val_err:
+                    background_tasks.add_task(send_telegram_ack, chat_id, str(val_err))
+                    return {"status": "ok", "detail": "remind_limit_exceeded"}
+                except Exception as err:
+                    logger.error("Failed to create reminder: %s", err)
+                    background_tasks.add_task(send_telegram_ack, chat_id, "Failed to set reminder. Please try again.")
+                    return {"status": "ok", "detail": "remind_failed"}
+                
+                # Format response datetime in user's local timezone
+                user_local_target = remind_at_utc + timedelta(minutes=timezone_offset)
+                formatted_dt = user_local_target.strftime("%d %b %Y at %H:%M")
+                
+                if item_found:
+                    reply_msg = f"⏰ Reminder set for item '{item_title}' on {formatted_dt} ✓"
+                else:
+                    reply_msg = f"⏰ Reminder set for {formatted_dt} ✓"
+                    
+                if was_truncated:
+                    reply_msg += "\n(Note: Your reminder message was truncated to 500 characters.)"
+                    
+                background_tasks.add_task(send_telegram_ack, chat_id, reply_msg)
+                logger.info("Processed /remind: created reminder %d for user %d", reminder_id, user_id)
+                return {"status": "ok", "detail": "remind_processed"}
                 
             else:
                 unknown_msg = "Unknown command. Type /help to see all commands."

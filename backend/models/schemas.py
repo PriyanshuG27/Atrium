@@ -180,6 +180,8 @@ class UserMeResponse(BaseModel):
     google_last_sync: Optional[str] = Field(None, description="ISO-8601 formatted timestamp of the last successful Google Drive sync.")
     last_7_days_activity: List[bool] = Field(..., description="Active status for each of the last 7 days (UTC based).")
     last_activity_date: Optional[datetime] = Field(None, description="ISO-8601 formatted timestamp of the user's last saved item.")
+    digest_enabled: bool = Field(True, description="Whether the user wants daily digests.")
 
 class UserMeUpdateRequest(BaseModel):
     timezone_offset: Optional[float] = Field(None, ge=-12.0, le=14.0, description="Timezone offset in hours.")
+    digest_enabled: Optional[bool] = Field(None, description="Whether to enable or disable daily morning digests.")

@@ -6,7 +6,7 @@ Provides endpoints for items, search, graph visualization, quizzes, reminders, a
 All endpoints require bearerAuth or telegramInitData (applied via OpenAPI customizer).
 """
 
-from datetime import date, timedelta
+from datetime import date, datetime, timezone, timedelta
 import logging
 from typing import List, Optional
 from fastapi import APIRouter, Path, Query, Response, status, Depends, HTTPException, BackgroundTasks
@@ -16,6 +16,7 @@ import psycopg
 from backend.middleware.twa_auth import get_current_user, UserContext
 from backend.db.connection import get_db
 from backend.services.sm2 import update_sm2
+from backend.services.rate_limiter import rate_limit
 from backend.models.schemas import (
     ItemResponse,
     ItemCreateRequest,
@@ -57,6 +58,7 @@ router = APIRouter(prefix="/api", tags=["api"])
         400: {"model": ErrorResponse, "description": "Invalid query parameters."},
         401: {"model": ErrorResponse, "description": "Not authenticated."},
     },
+    dependencies=[Depends(rate_limit("items", 120))],
 )
 async def get_items(
     page: int = Query(1, ge=1, description="Page number for pagination."),
@@ -333,6 +335,7 @@ from datetime import datetime, timezone
     summary="Search items with RAG",
     description="Performs a hybrid search and generates a synthesised RAG answer if at least 3 sources are found.",
     responses={401: {"model": ErrorResponse}},
+    dependencies=[Depends(rate_limit("search", 60))],
 )
 async def search_items(
     req: SearchRequest,
@@ -392,6 +395,7 @@ async def search_items(
     summary="Get mind map graph",
     description="Returns nodes (items, semantic hubs) and edges (similarity links) for graph visualization.",
     responses={401: {"model": ErrorResponse}},
+    dependencies=[Depends(rate_limit("graph", 30))],
 )
 async def get_graph(
     user: UserContext = Depends(get_current_user),
@@ -614,6 +618,7 @@ async def get_due_quizzes(
         403: {"model": ErrorResponse, "description": "Access denied."},
         404: {"model": ErrorResponse, "description": "Quiz not found."},
     },
+    dependencies=[Depends(rate_limit("quiz_answer", 120))],
 )
 async def answer_quiz(
     id: int = Path(..., description="Quiz ID."),
@@ -788,12 +793,39 @@ async def get_quiz_stats(
     response_model=List[ReminderResponse],
     tags=["reminders"],
     summary="Get reminders",
-    description="Returns all reminders configured by the user (up to 20 limit).",
+    description="Returns all reminders configured by the user.",
     responses={401: {"model": ErrorResponse}},
 )
-async def get_reminders():
-    """Get reminders."""
-    return []
+async def get_reminders(
+    user: UserContext = Depends(get_current_user),
+    db: psycopg.AsyncConnection = Depends(get_db),
+):
+    async with db.cursor() as cur:
+        await cur.execute(
+            """
+            SELECT id, user_id, item_id, message, remind_at, status, created_at
+            FROM reminders
+            WHERE user_id = %s
+            ORDER BY remind_at ASC;
+            """,
+            (user.id,)
+        )
+        rows = await cur.fetchall()
+        
+    reminders = []
+    for r_id, r_user_id, r_item_id, r_message, r_remind_at, r_status, r_created_at in rows:
+        reminders.append(
+            ReminderResponse(
+                id=r_id,
+                user_id=r_user_id,
+                item_id=r_item_id,
+                message=r_message,
+                remind_at=r_remind_at,
+                status=r_status,
+                created_at=r_created_at
+            )
+        )
+    return reminders
 
 @router.post(
     "/reminders",
@@ -802,20 +834,79 @@ async def get_reminders():
     tags=["reminders"],
     summary="Create reminder",
     description="Saves a new reminder message scheduled for a specific UTC timestamp.",
-    responses={401: {"model": ErrorResponse}},
+    responses={
+        400: {"model": ErrorResponse, "description": "Invalid time or active reminders limit reached."},
+        401: {"model": ErrorResponse, "description": "Not authenticated."},
+    },
 )
-async def create_reminder(req: ReminderCreateRequest):
-    """Create a new reminder."""
+async def create_new_reminder(
+    req: ReminderCreateRequest,
+    user: UserContext = Depends(get_current_user),
+    db: psycopg.AsyncConnection = Depends(get_db),
+):
     from datetime import datetime, timezone
-    return {
-        "id": 1,
-        "user_id": 1,
-        "item_id": req.item_id,
-        "message": req.message,
-        "remind_at": req.remind_at,
-        "status": "pending",
-        "created_at": datetime.now(timezone.utc),
-    }
+    from backend.services.reminder_service import create_reminder
+    
+    # 1. Normalize and validate remind_at
+    remind_at = req.remind_at
+    if remind_at.tzinfo is None:
+        remind_at = remind_at.replace(tzinfo=timezone.utc)
+    else:
+        remind_at = remind_at.astimezone(timezone.utc)
+        
+    now = datetime.now(timezone.utc)
+    if remind_at <= now:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reminder time must be in the future."
+        )
+        
+    try:
+        reminder_id, final_message, was_truncated = await create_reminder(
+            user.id, req.message, remind_at, db
+        )
+        await db.commit()
+    except ValueError as val_err:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(val_err)
+        )
+    except Exception as err:
+        logger.error("Failed to create reminder via API: %s", err)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create reminder."
+        )
+        
+    # Fetch the newly created reminder details
+    async with db.cursor() as cur:
+        await cur.execute(
+            """
+            SELECT id, user_id, item_id, message, remind_at, status, created_at
+            FROM reminders
+            WHERE id = %s AND user_id = %s;
+            """,
+            (reminder_id, user.id)
+        )
+        row = await cur.fetchone()
+        
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve created reminder."
+        )
+        
+    r_id, r_user_id, r_item_id, r_message, r_remind_at, r_status, r_created_at = row
+        
+    return ReminderResponse(
+        id=r_id,
+        user_id=r_user_id,
+        item_id=r_item_id,
+        message=r_message,
+        remind_at=r_remind_at,
+        status=r_status,
+        created_at=r_created_at
+    )
 
 @router.delete(
     "/reminders/{id}",
@@ -830,8 +921,27 @@ async def create_reminder(req: ReminderCreateRequest):
 )
 async def delete_reminder(
     id: int = Path(..., description="Reminder ID to delete."),
+    user: UserContext = Depends(get_current_user),
+    db: psycopg.AsyncConnection = Depends(get_db),
 ):
-    """Delete a reminder."""
+    async with db.cursor() as cur:
+        await cur.execute(
+            """
+            DELETE FROM reminders
+            WHERE id = %s AND user_id = %s
+            RETURNING id;
+            """,
+            (id, user.id)
+        )
+        row = await cur.fetchone()
+        await db.commit()
+        
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Reminder not found."
+        )
+        
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 # ---------------------------------------------------------------------------
@@ -847,6 +957,7 @@ async def delete_reminder(
         401: {"model": ErrorResponse},
         429: {"model": ErrorResponse, "description": "Sync limit exceeded (max 5 requests per hour)."},
     },
+    dependencies=[Depends(rate_limit("sync", 5, 3600))],
 )
 async def sync_drive(
     background_tasks: BackgroundTasks,
@@ -1083,7 +1194,7 @@ async def get_user_me(
 ):
     async with db.cursor() as cur:
         await cur.execute(
-            "SELECT timezone_offset, streak_count, google_refresh_token, google_last_sync FROM users WHERE id = %s;",
+            "SELECT timezone_offset, streak_count, google_refresh_token, google_last_sync, digest_enabled FROM users WHERE id = %s;",
             (user.id,)
         )
         row = await cur.fetchone()
@@ -1096,6 +1207,7 @@ async def get_user_me(
         db_offset = row[0] or 0
         has_drive = row[2] is not None
         google_last_sync = row[3]
+        digest_enabled = row[4] if row[4] is not None else True
 
         from backend.services.user_service import get_and_update_user_streak
         streak = await get_and_update_user_streak(cur, user.id)
@@ -1145,6 +1257,11 @@ async def get_user_me(
         last_activity_row = await cur.fetchone()
         last_activity_date = last_activity_row[0] if last_activity_row else None
 
+        if google_last_sync and google_last_sync.tzinfo is None:
+            google_last_sync = google_last_sync.replace(tzinfo=timezone.utc)
+        if last_activity_date and last_activity_date.tzinfo is None:
+            last_activity_date = last_activity_date.replace(tzinfo=timezone.utc)
+
         return {
             "timezone_offset": offset_hours,
             "streak_count": streak,
@@ -1154,6 +1271,7 @@ async def get_user_me(
             "quizzes_answered": quizzes_answered,
             "last_7_days_activity": last_7_days_activity,
             "last_activity_date": last_activity_date,
+            "digest_enabled": digest_enabled,
         }
 
 @router.patch(
@@ -1195,6 +1313,10 @@ async def update_user_me(
             update_fields.append("timezone_offset = %s")
             params.append(offset_minutes)
 
+        if req.digest_enabled is not None:
+            update_fields.append("digest_enabled = %s")
+            params.append(req.digest_enabled)
+
         if update_fields:
             params.append(user.id)
             query = f"UPDATE users SET {', '.join(update_fields)} WHERE id = %s;"
@@ -1203,13 +1325,14 @@ async def update_user_me(
 
         # Fetch the updated user details
         await cur.execute(
-            "SELECT timezone_offset, streak_count, google_refresh_token, google_last_sync FROM users WHERE id = %s;",
+            "SELECT timezone_offset, streak_count, google_refresh_token, google_last_sync, digest_enabled FROM users WHERE id = %s;",
             (user.id,)
         )
         row = await cur.fetchone()
         db_offset = row[0] or 0
         has_drive = row[2] is not None
         google_last_sync = row[3]
+        digest_enabled = row[4] if row[4] is not None else True
 
         from backend.services.user_service import get_and_update_user_streak
         streak = await get_and_update_user_streak(cur, user.id)
@@ -1257,6 +1380,11 @@ async def update_user_me(
         last_activity_row = await cur.fetchone()
         last_activity_date = last_activity_row[0] if last_activity_row else None
 
+        if google_last_sync and google_last_sync.tzinfo is None:
+            google_last_sync = google_last_sync.replace(tzinfo=timezone.utc)
+        if last_activity_date and last_activity_date.tzinfo is None:
+            last_activity_date = last_activity_date.replace(tzinfo=timezone.utc)
+
         return {
             "timezone_offset": offset_hours,
             "streak_count": streak,
@@ -1266,6 +1394,7 @@ async def update_user_me(
             "quizzes_answered": quizzes_answered,
             "last_7_days_activity": last_7_days_activity,
             "last_activity_date": last_activity_date,
+            "digest_enabled": digest_enabled,
         }
 
 @router.delete(

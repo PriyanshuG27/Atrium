@@ -42,8 +42,8 @@ class MockCursor:
         
     async def fetchone(self):
         last_query = self.query_history[-1][0].upper()
-        if "SELECT TIMEZONE_OFFSET, STREAK_COUNT, GOOGLE_REFRESH_TOKEN, GOOGLE_LAST_SYNC FROM USERS" in last_query:
-            return (self.mock_timezone_offset, 5, "mock_google_token", None)
+        if "SELECT TIMEZONE_OFFSET, STREAK_COUNT, GOOGLE_REFRESH_TOKEN, GOOGLE_LAST_SYNC" in last_query:
+            return (self.mock_timezone_offset, 5, "mock_google_token", None, True)
         if "SELECT COUNT(*) FROM ITEMS" in last_query:
             return (10,)
         if "SELECT COUNT(*) FROM QUIZZES" in last_query:

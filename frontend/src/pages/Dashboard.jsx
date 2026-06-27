@@ -3,6 +3,7 @@ import axios from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import Header from '../components/Header';
 import Feed from './Feed';
+import Reminders from './Reminders';
 import EmptyState from '../components/EmptyState';
 import { GraphSkeleton, FeedCardSkeleton, NodePanelSkeleton } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
@@ -171,7 +172,7 @@ export default function Dashboard() {
       setViewMode('feed');
     },
     onSwitchToGraph: () => {
-      setViewMode('nodes');
+      setViewMode('graph');
     },
     onShowShortcuts: () => {
       setShowShortcutsModal(true);
@@ -180,7 +181,7 @@ export default function Dashboard() {
   const [matchingNodeIds, setMatchingNodeIds] = useState(null);
   const [dueQuizCount, setDueQuizCount] = useState(0);
   const [selectedNode, setSelectedNode] = useState(null);
-  const [viewMode, setViewMode] = useState('nodes');
+  const [viewMode, setViewMode] = useState('graph');
   const [isFirstLoad, setIsFirstLoad] = useState(true);
   const [hasItems, setHasItems] = useState(false);
   const [loadingNodeDetail, setLoadingNodeDetail] = useState(false);
@@ -224,7 +225,7 @@ export default function Dashboard() {
 
 
   const handleViewInGraph = (item) => {
-    setViewMode('nodes');
+    setViewMode('graph');
     setSelectedNode(item);
   };
 
@@ -803,8 +804,12 @@ export default function Dashboard() {
       <main id="main-content" tabIndex={-1} style={{ outline: 'none' }}>
 
       {/* Main Canvas View Area / Skeletons / Empty States */}
-      {isFirstLoad ? (
-        (viewMode === 'nodes' || viewMode === 'hubs') ? (
+      {viewMode === 'reminders' ? (
+        <ErrorBoundary>
+          <Reminders />
+        </ErrorBoundary>
+      ) : isFirstLoad ? (
+        viewMode === 'graph' ? (
           <div className="graph-canvas-container" style={{ padding: '2rem' }}>
             <GraphSkeleton />
           </div>
@@ -823,7 +828,7 @@ export default function Dashboard() {
           </div>
           <EmptyState variant="graph" />
         </>
-      ) : (viewMode === 'nodes' || viewMode === 'hubs') ? (
+      ) : viewMode === 'graph' ? (
         <div className="graph-canvas-container" ref={canvasRef} style={{ overflow: 'hidden' }}>
           {/* Placeholder welcome message required by Dashboard.test.jsx */}
           <div style={{ display: 'none' }}>
@@ -844,7 +849,7 @@ export default function Dashboard() {
                 zoom={zoom}
                 handleNodeClick={handleNodeClick}
                 selectedNodeId={selectedNode ? selectedNode.id : null}
-                mode={viewMode === 'hubs' ? 'hubs' : 'nodes'}
+                mode={viewMode}
                 hubs={hubs}
               />
             </ErrorBoundary>

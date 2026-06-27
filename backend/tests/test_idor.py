@@ -138,3 +138,47 @@ def test_delete_other_user_item_idor_prevented(client):
     assert "DELETE FROM items" in item_query
     assert "user_id = %s" in item_query
     assert item_params == (5, 100)
+
+
+class ReminderRecordingCursor(RecordingCursor):
+    async def fetchone(self):
+        last_query = self.executed[-1][0].lower() if self.executed else ""
+        if "users" in last_query:
+            return (self.user_id, "123456789")
+        if "delete from reminders" in last_query:
+            return self.delete_returning_row
+        return None
+
+
+def test_delete_own_reminder_success(client):
+    """User deletes their own reminder -> returns 204."""
+    global current_cursor
+    current_cursor = ReminderRecordingCursor(user_id=42, delete_returning_row=(10,))
+    
+    token = get_auth_token(user_id=42)
+    response = client.delete("/api/reminders/10", cookies={"recall_session": token})
+    
+    assert response.status_code == 204
+    assert len(current_cursor.executed) == 2
+    
+    del_query, del_params = current_cursor.executed[1]
+    assert "DELETE FROM reminders" in del_query
+    assert "user_id = %s" in del_query
+    assert del_params == (10, 42)
+
+
+def test_delete_other_user_reminder_idor_prevented(client):
+    """User B attempts to delete User A's reminder -> returns 404."""
+    global current_cursor
+    current_cursor = ReminderRecordingCursor(user_id=100, delete_returning_row=None)
+    
+    token = get_auth_token(user_id=100)
+    response = client.delete("/api/reminders/10", cookies={"recall_session": token})
+    
+    assert response.status_code == 404
+    assert len(current_cursor.executed) == 2
+    
+    del_query, del_params = current_cursor.executed[1]
+    assert "DELETE FROM reminders" in del_query
+    assert "user_id = %s" in del_query
+    assert del_params == (10, 100)

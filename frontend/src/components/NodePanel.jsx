@@ -193,7 +193,8 @@ export default function NodePanel({
         })
       });
       if (res.ok) {
-        addToast('Reminder configured successfully!', 'success');
+        const formattedDate = new Date(reminderTime).toLocaleString();
+        addToast(`Reminder set for ${formattedDate}`, 'success');
         setShowReminderInput(false);
       } else {
         const errData = await res.json();
@@ -489,13 +490,13 @@ export default function NodePanel({
                       required
                     />
                   </div>
-                  <button 
+                   <button 
                     type="submit" 
                     disabled={savingReminder}
                     className="btn btn-primary"
                     style={{ width: '100%', minHeight: '44px' }}
                   >
-                    {savingReminder ? 'Saving...' : 'Save Reminder'}
+                    {savingReminder ? 'Confirming...' : 'Confirm'}
                   </button>
                 </form>
               )}

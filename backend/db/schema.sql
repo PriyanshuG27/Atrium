@@ -18,12 +18,14 @@ CREATE TABLE IF NOT EXISTS users (
     timezone_offset      INT DEFAULT 0,     -- UTC offset in minutes
     streak_count         INT DEFAULT 0,
     last_activity_date   DATE,
+    digest_enabled       BOOLEAN DEFAULT TRUE,
     drive_nudge_sent     BOOLEAN DEFAULT FALSE,
     created_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Ensure the column exists if the users table already exists
+-- Ensure the columns exist if the users table already exists
 ALTER TABLE users ADD COLUMN IF NOT EXISTS google_last_sync TIMESTAMP;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS digest_enabled BOOLEAN DEFAULT TRUE;
 
 
 -- 3. ITEMS TABLE (Partitioned by Range on created_at)

@@ -497,6 +497,17 @@ async def process_task(task: Dict[str, Any]) -> None:
                 logger.warning("Worker received unsupported content type '%s' on update_id=%s. Discarding.", content_type, update_id)
                 return
             
+            # Update user streak
+            if item_id:
+                try:
+                    from backend.services.streak_service import update_streak
+                    async with _pool.connection() as streak_conn:
+                        await streak_conn.execute("SET statement_timeout = '30s'")
+                        await update_streak(user_id, streak_conn)
+                        await streak_conn.commit()
+                except Exception as streak_err:
+                    logger.error("Failed to update user streak: %s", streak_err)
+
             # Invalidate graph cache
             try:
                 await redis.delete(f"graph:{user_id}")
@@ -552,6 +563,11 @@ async def process_task(task: Dict[str, Any]) -> None:
                         await fallback_conn.execute("SET statement_timeout = '30s'")
                         await write_to_dlq(user_id, task_payload, error_message, fallback_conn)
                         await save_minimal_bookmark(user_id, content_type or "unknown", file_id, text_content, fallback_conn)
+                        try:
+                            from backend.services.streak_service import update_streak
+                            await update_streak(user_id, fallback_conn)
+                        except Exception as streak_err:
+                            logger.error("Failed to update fallback user streak: %s", streak_err)
                         await fallback_conn.commit()
                         
                     await send_failure_message(chat_id, content_type or "unknown")

@@ -105,7 +105,7 @@ describe('NodePanel Component', () => {
       json: async () => ({ status: 'success' })
     });
     
-    const saveBtn = screen.getByRole('button', { name: /Save Reminder/i });
+    const saveBtn = screen.getByRole('button', { name: /Confirm/i });
     fireEvent.click(saveBtn);
     
     // Expect fetch to be called
