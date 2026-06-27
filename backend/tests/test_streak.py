@@ -107,3 +107,13 @@ async def test_update_streak_user_missing():
     streak = await update_streak(999, conn)
     assert streak == 0
     assert state.updated_streak is None
+
+@pytest.mark.asyncio
+async def test_update_streak_none_streak_count():
+    # User exists but streak_count is None
+    state = MockDbState(streak_count=None, last_activity_date=None)
+    conn = MockConnection(state)
+    
+    streak = await update_streak(1, conn)
+    assert streak == 1
+    assert state.updated_streak == 1

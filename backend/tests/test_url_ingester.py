@@ -133,3 +133,95 @@ async def test_scrape_url_public_google_doc(monkeypatch):
     assert text == "This is the Google Doc content plain text."
     assert any("export?format=txt" in c for c in calls)
 
+
+@pytest.mark.asyncio
+async def test_scrape_url_private_google_doc_authenticated(monkeypatch):
+    class MockDocCursor:
+        async def __aenter__(self): return self
+        async def __aexit__(self, exc_type, exc_val, exc_tb): pass
+        async def execute(self, query, params=None): pass
+        async def fetchone(self):
+            return ("encrypted_fake_refresh_token",)
+            
+    class MockDocConnection:
+        def cursor(self): return MockDocCursor()
+        
+    monkeypatch.setattr("backend.services.encryption.decrypt", lambda x: "fake_refresh_token")
+    
+    mock_token_resp = mock.Mock()
+    mock_token_resp.status_code = 200
+    mock_token_resp.json = mock.Mock(return_value={"access_token": "fake_access_token"})
+    
+    mock_meta_resp = mock.Mock()
+    mock_meta_resp.status_code = 200
+    mock_meta_resp.json = mock.Mock(return_value={"name": "Authored Doc", "mimeType": "application/vnd.google-apps.document"})
+    
+    mock_export_resp = mock.Mock()
+    mock_export_resp.status_code = 200
+    mock_export_resp.text = "This is authenticated doc content."
+    
+    async def mock_post(self_client, url, *args, **kwargs):
+        return mock_token_resp
+        
+    async def mock_get(self_client, url, *args, **kwargs):
+        if "export" in url:
+            return mock_export_resp
+        return mock_meta_resp
+        
+    monkeypatch.setattr("httpx.AsyncClient.post", mock_post)
+    monkeypatch.setattr("httpx.AsyncClient.get", mock_get)
+    
+    title, text = await scrape_url(
+        "https://drive.google.com/file/d/doc_file_id/view",
+        user_id=4,
+        db=MockDocConnection()
+    )
+    assert title == "Authored Doc"
+    assert text == "This is authenticated doc content."
+
+
+@pytest.mark.asyncio
+async def test_scrape_url_private_google_spreadsheet_authenticated(monkeypatch):
+    class MockDocCursor:
+        async def __aenter__(self): return self
+        async def __aexit__(self, exc_type, exc_val, exc_tb): pass
+        async def execute(self, query, params=None): pass
+        async def fetchone(self):
+            return ("encrypted_fake_refresh_token",)
+            
+    class MockDocConnection:
+        def cursor(self): return MockDocCursor()
+        
+    monkeypatch.setattr("backend.services.encryption.decrypt", lambda x: "fake_refresh_token")
+    
+    mock_token_resp = mock.Mock()
+    mock_token_resp.status_code = 200
+    mock_token_resp.json = mock.Mock(return_value={"access_token": "fake_access_token"})
+    
+    mock_meta_resp = mock.Mock()
+    mock_meta_resp.status_code = 200
+    mock_meta_resp.json = mock.Mock(return_value={"name": "Authored Sheet", "mimeType": "application/vnd.google-apps.spreadsheet"})
+    
+    mock_export_resp = mock.Mock()
+    mock_export_resp.status_code = 200
+    mock_export_resp.text = "row1,row2,row3"
+    
+    async def mock_post(self_client, url, *args, **kwargs):
+        return mock_token_resp
+        
+    async def mock_get(self_client, url, *args, **kwargs):
+        if "export" in url:
+            return mock_export_resp
+        return mock_meta_resp
+        
+    monkeypatch.setattr("httpx.AsyncClient.post", mock_post)
+    monkeypatch.setattr("httpx.AsyncClient.get", mock_get)
+    
+    title, text = await scrape_url(
+        "https://drive.google.com/file/d/doc_file_id/view",
+        user_id=4,
+        db=MockDocConnection()
+    )
+    assert title == "Authored Sheet"
+    assert text == "row1,row2,row3"
+

@@ -1,0 +1,44 @@
+{
+  "manifest_version": 3,
+  "name": "Recall",
+  "version": "1.0.0",
+  "description": "Save the current page to Recall",
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png"
+  },
+  "background": {
+    "service_worker": "service_worker.js",
+    "type": "module"
+  },
+  "options_page": "options.html",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "cookies",
+    "contextMenus",
+    "notifications"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "commands": {
+    "save-current-page": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+S",
+        "mac": "Alt+Shift+S"
+      },
+      "description": "Save current page to Recall"
+    }
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self';"
+  }
+}

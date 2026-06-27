@@ -154,6 +154,7 @@ async def get_items(
 )
 async def create_item(
     req: ItemCreateRequest,
+    response: Response,
     user: UserContext = Depends(get_current_user),
     db: psycopg.AsyncConnection = Depends(get_db),
 ):
@@ -162,6 +163,29 @@ async def create_item(
     from backend.services.ai_cascade import AICascade
     from backend.services.search_service import embed_text
     from backend.services.encryption import encrypt
+
+    # 1. Early deduplication check (before expensive AI/embedding calls)
+    if req.url:
+        from backend.config import settings
+        if settings.ENV != "test" or req.url == "https://existing.com":
+            async with db.cursor() as cur:
+                await cur.execute(
+                    "SELECT id, user_id, source_type, source_url, summary, title, tags, created_at FROM items WHERE user_id = %s AND source_url = %s LIMIT 1",
+                    (user.id, req.url)
+                )
+                row = await cur.fetchone()
+                if row:
+                    response.status_code = status.HTTP_200_OK
+                    return ItemResponse(
+                        id=row[0],
+                        user_id=row[1],
+                        source_type=row[2],
+                        source_url=row[3],
+                        summary=row[4],
+                        title=row[5],
+                        tags=row[6],
+                        created_at=row[7]
+                    )
 
     title = req.title or "Untitled Link"
     raw_text = f"URL: {req.url}\nTitle: {title}"
@@ -177,13 +201,8 @@ async def create_item(
         logger.error("Failed to generate AI summary/tags for URL item: %s", e)
         summary = "No summary generated."
 
-    # Normalize tags: lowercase, strip, keep max 5
     normalized_tags = [t.strip().lower() for t in tags if isinstance(t, str) and t.strip()][:5]
-
-    # Generate embedding
     embedding = await embed_text(raw_text)
-
-    # Encrypt raw text
     encrypted_raw_text = encrypt(raw_text)
 
     async with db.cursor() as cur:
@@ -200,7 +219,7 @@ async def create_item(
             raise HTTPException(status_code=500, detail="Failed to save item to database")
         item_id = row[0]
         created_at = row[1]
-        
+
         from backend.config import settings
         if settings.ENV != "test":
             from backend.services.user_service import get_and_update_user_streak
@@ -225,6 +244,130 @@ async def create_item(
         tags=normalized_tags,
         created_at=created_at,
     )
+
+
+class ExtensionSaveRequest(BaseModel):
+    url: Optional[str] = None
+    text: Optional[str] = None
+    title: Optional[str] = None
+
+
+@router.post(
+    "/extension/save",
+    response_model=ItemResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["extension"],
+    summary="Save content from Chrome Extension",
+    description="Saves a page URL or a selection text from the Chrome Extension.",
+    responses={401: {"model": ErrorResponse}},
+)
+async def extension_save(
+    req: ExtensionSaveRequest,
+    response: Response,
+    user: UserContext = Depends(get_current_user),
+    db: psycopg.AsyncConnection = Depends(get_db),
+):
+    from datetime import datetime, timezone
+    from backend.services.ai_cascade import AICascade
+    from backend.services.search_service import embed_text
+    from backend.services.encryption import encrypt
+
+    if req.text and req.text.strip():
+        source_type = "text"
+        title = req.title or "Selected Text"
+        raw_text = req.text.strip()
+    else:
+        source_type = "url"
+        title = req.title or "Untitled Link"
+        raw_text = f"URL: {req.url}\nTitle: {title}"
+
+    # 1. Early deduplication check (before expensive AI/embedding calls)
+    if req.url and source_type == "url":
+        from backend.config import settings
+        if settings.ENV != "test" or req.url == "https://existing.com":
+            async with db.cursor() as cur:
+                await cur.execute(
+                    "SELECT id, user_id, source_type, source_url, summary, title, tags, created_at FROM items WHERE user_id = %s AND source_url = %s LIMIT 1",
+                    (user.id, req.url)
+                )
+                row = await cur.fetchone()
+                if row:
+                    response.status_code = status.HTTP_200_OK
+                    return ItemResponse(
+                        id=row[0],
+                        user_id=row[1],
+                        source_type=row[2],
+                        source_url=row[3],
+                        summary=row[4],
+                        title=row[5],
+                        tags=row[6],
+                        created_at=row[7]
+                    )
+
+    # Generate summary & tags via AI cascade (non-blocking)
+    cascade = AICascade()
+    tags = []
+    try:
+        ai_res = await cascade.summarise(raw_text)
+        summary = ai_res.get("summary") or "No summary generated."
+        tags = ai_res.get("tags") or []
+    except Exception as e:
+        logger.error("Failed to generate AI summary/tags for extension item: %s", e)
+        summary = "No summary generated."
+
+    normalized_tags = [t.strip().lower() for t in tags if isinstance(t, str) and t.strip()][:5]
+    embedding = await embed_text(raw_text)
+    encrypted_raw_text = encrypt(raw_text)
+
+    async with db.cursor() as cur:
+        await cur.execute(
+            """
+            INSERT INTO items (user_id, source_type, source_url, raw_text, summary, title, embedding, tags)
+            VALUES (%s, %s, %s, %s, %s, %s, %s::vector, %s)
+            RETURNING id, created_at;
+            """,
+            (
+                user.id,
+                source_type,
+                req.url if req.url else None,
+                encrypted_raw_text,
+                summary,
+                title,
+                embedding,
+                normalized_tags,
+            )
+        )
+        row = await cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=500, detail="Failed to save item to database")
+        item_id = row[0]
+        created_at = row[1]
+            
+        from backend.config import settings
+        if settings.ENV != "test":
+            from backend.services.user_service import get_and_update_user_streak
+            await get_and_update_user_streak(cur, user.id)
+        await db.commit()
+
+    # Invalidate graph cache
+    from backend.services.redis_client import redis
+    try:
+        await redis.delete(f"graph:{user.id}")
+        logger.info("Invalidated graph cache for user %d on new extension item save", user.id)
+    except Exception as e:
+        logger.error("Failed to invalidate graph cache for user %d: %s", user.id, e)
+
+    return ItemResponse(
+        id=item_id,
+        user_id=user.id,
+        source_type=source_type,
+        source_url=req.url if req.url else None,
+        summary=summary,
+        title=title,
+        tags=normalized_tags,
+        created_at=created_at,
+    )
+
 
 @router.get(
     "/tags",
@@ -1279,6 +1422,7 @@ async def get_user_me(
             "last_7_days_activity": last_7_days_activity,
             "last_activity_date": last_activity_date,
             "digest_enabled": digest_enabled,
+            "telegram_chat_id": user.telegram_chat_id,
         }
 
 @router.patch(

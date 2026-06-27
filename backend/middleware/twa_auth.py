@@ -150,24 +150,21 @@ async def get_twa_user(
     return UserContext(id=row[0], telegram_chat_id=str(row[1]))
 
 
-async def get_jwt_user(
+async def get_jwt_user_by_token(
+    token: str,
     request: Request,
     response: Response,
-    db: psycopg.AsyncConnection = Depends(get_db)
+    db: psycopg.AsyncConnection,
+    set_cookies: bool = True
 ) -> UserContext:
-    """FastAPI dependency for verifying JWT stored in 'recall_session' or 'jwt' cookie."""
-    token = request.cookies.get("recall_session") or request.cookies.get("jwt")
-    if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-        
     try:
         payload = verify_jwt(token, settings.JWT_SECRET)
     except Exception:
-        raise HTTPException(status_code=401, detail="Not authenticated", headers=CookieDict())
+        raise HTTPException(status_code=401, detail="Not authenticated", headers=CookieDict() if set_cookies else None)
         
     user_id = payload.get("sub")
     if not user_id:
-        raise HTTPException(status_code=401, detail="Not authenticated", headers=CookieDict())
+        raise HTTPException(status_code=401, detail="Not authenticated", headers=CookieDict() if set_cookies else None)
         
     async with db.cursor() as cur:
         await cur.execute(
@@ -177,37 +174,49 @@ async def get_jwt_user(
         row = await cur.fetchone()
         
     if not row:
-        raise HTTPException(status_code=401, detail="Not authenticated", headers=CookieDict())
+        raise HTTPException(status_code=401, detail="Not authenticated", headers=CookieDict() if set_cookies else None)
         
-    # Auto-refresh JWT if < 1 day (86400 seconds) remaining
-    exp = payload.get("exp")
-    if exp is not None:
-        now = time.time()
-        if exp - now < 86400:
-            new_payload = {
-                "sub": str(user_id),
-                "chat_id": payload.get("chat_id"),
-                "exp": int(now) + 7 * 86400
-            }
-            new_token = generate_jwt(new_payload, settings.JWT_SECRET)
-            response.set_cookie(
-                "recall_session",
-                new_token,
-                httponly=True,
-                secure=settings.ENV != "development",
-                samesite="lax",
-                max_age=7 * 86400
-            )
-            response.set_cookie(
-                "jwt",
-                new_token,
-                httponly=True,
-                secure=settings.ENV != "development",
-                samesite="lax",
-                max_age=7 * 86400
-            )
-            
+    if set_cookies:
+        exp = payload.get("exp")
+        if exp is not None:
+            now = time.time()
+            if exp - now < 86400:
+                new_payload = {
+                    "sub": str(user_id),
+                    "chat_id": payload.get("chat_id"),
+                    "exp": int(now) + 7 * 86400
+                }
+                new_token = generate_jwt(new_payload, settings.JWT_SECRET)
+                response.set_cookie(
+                    "recall_session",
+                    new_token,
+                    httponly=True,
+                    secure=settings.ENV != "development",
+                    samesite="lax",
+                    max_age=7 * 86400
+                )
+                response.set_cookie(
+                    "jwt",
+                    new_token,
+                    httponly=True,
+                    secure=settings.ENV != "development",
+                    samesite="lax",
+                    max_age=7 * 86400
+                )
+                
     return UserContext(id=row[0], telegram_chat_id=str(row[1]))
+
+
+async def get_jwt_user(
+    request: Request,
+    response: Response,
+    db: psycopg.AsyncConnection = Depends(get_db)
+) -> UserContext:
+    """FastAPI dependency for verifying JWT stored in 'recall_session' or 'jwt' cookie."""
+    token = request.cookies.get("recall_session") or request.cookies.get("jwt")
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return await get_jwt_user_by_token(token, request, response, db, set_cookies=True)
 
 
 async def get_current_user(
@@ -218,18 +227,21 @@ async def get_current_user(
     """
     Unified auth dependency for /api/* routes.
     
-    Tries JWT cookie first; if missing, tries TWA header; if both missing: 401.
-    Does not double-authenticate.
+    Tries JWT cookie first; if missing, tries TWA header or Bearer header; if all missing: 401.
     """
     # 1. Try JWT cookie first
     jwt_cookie = request.cookies.get("recall_session") or request.cookies.get("jwt")
     if jwt_cookie is not None:
-        return await get_jwt_user(request, response, db)
+        return await get_jwt_user_by_token(jwt_cookie, request, response, db, set_cookies=True)
         
-    # 2. If cookie is missing, check TWA header
+    # 2. Check Authorization header
     auth_header = request.headers.get("Authorization")
-    if auth_header is not None and auth_header.startswith("TelegramInitData "):
-        return await get_twa_user(request, db)
-        
-    # 3. If both are missing
+    if auth_header is not None:
+        if auth_header.startswith("TelegramInitData "):
+            return await get_twa_user(request, db)
+        elif auth_header.startswith("Bearer "):
+            token = auth_header.split(" ", 1)[1].strip()
+            return await get_jwt_user_by_token(token, request, response, db, set_cookies=False)
+            
+    # 3. If all are missing
     raise HTTPException(status_code=401, detail="Not authenticated")

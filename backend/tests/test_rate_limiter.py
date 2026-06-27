@@ -103,3 +103,18 @@ async def test_rate_limiter_different_users():
                 await check_rate_limit("user_a")
             with pytest.raises(RateLimitExceeded):
                 await check_rate_limit("user_b")
+
+@pytest.mark.asyncio
+async def test_rate_limiter_empty_results():
+    with mock.patch("backend.services.redis_client.redis.eval", return_value=[]):
+        # Should return None/succeed silently
+        await check_rate_limit("user_a")
+
+@pytest.mark.asyncio
+async def test_rate_limiter_invalid_oldest_member():
+    # Return count > limit but with invalid oldest_member string
+    with mock.patch("backend.services.redis_client.redis.eval", return_value=[25, "invalid-member-format"]):
+        with pytest.raises(RateLimitExceeded) as exc_info:
+            await check_rate_limit("user_a")
+        # Since parsing fails, it falls back to current time, making retry_after = window_seconds (60)
+        assert exc_info.value.retry_after == 60.0

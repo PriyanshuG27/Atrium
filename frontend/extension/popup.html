@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Recall</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <header class="header">
+      <div class="logo-container">
+        <div class="logo-icon">R</div>
+        <span class="logo-text">Recall</span>
+      </div>
+    </header>
+
+    <main class="content">
+      <!-- Unauthenticated State -->
+      <div id="auth-state-logged-out" class="state-container hidden">
+        <p class="description">Save pages, PDFs, and articles directly to your Recall knowledge base.</p>
+        <button id="btn-login" class="btn btn-login">
+          <span>Login with Telegram</span>
+        </button>
+      </div>
+
+      <!-- Authenticated State -->
+      <div id="auth-state-logged-in" class="state-container hidden">
+        <div class="page-info">
+          <span class="label">Current Tab</span>
+          <h4 id="tab-title" class="tab-title">Loading...</h4>
+          <p id="tab-url" class="tab-url">Loading...</p>
+        </div>
+        
+        <button id="btn-save" class="btn btn-save">
+          Save to Recall
+        </button>
+        
+        <div id="status-message" class="status-message hidden"></div>
+      </div>
+    </main>
+  </div>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

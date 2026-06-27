@@ -100,6 +100,14 @@ def test_encrypt_non_string_raises():
         encrypt(12345)  # type: ignore[arg-type]
 
 
+def test_decrypt_non_string_raises():
+    """decrypt() should raise ValueError for non-string input."""
+    from backend.services.encryption import decrypt
+
+    with pytest.raises((ValueError, TypeError)):
+        decrypt(12345)  # type: ignore[arg-type]
+
+
 def test_no_key_in_logs(caplog, monkeypatch):
     """FERNET_KEY must NEVER appear in any log output during encryption."""
     import logging

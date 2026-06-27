@@ -181,6 +181,7 @@ class UserMeResponse(BaseModel):
     last_7_days_activity: List[bool] = Field(..., description="Active status for each of the last 7 days (UTC based).")
     last_activity_date: Optional[datetime] = Field(None, description="ISO-8601 formatted timestamp of the user's last saved item.")
     digest_enabled: bool = Field(True, description="Whether the user wants daily digests.")
+    telegram_chat_id: Optional[str] = Field(None, description="Telegram Chat ID or username of the user.")
 
 class UserMeUpdateRequest(BaseModel):
     timezone_offset: Optional[float] = Field(None, ge=-12.0, le=14.0, description="Timezone offset in hours.")

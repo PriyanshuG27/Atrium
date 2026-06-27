@@ -151,3 +151,38 @@ async def test_create_reminder_limit_exceeded():
     
     with pytest.raises(ValueError, match="limit of 20 active reminders"):
         await create_reminder(42, "Check logs", target_time, conn)
+
+def test_parse_time_expression_empty():
+    delta, abs_fmt, msg = parse_time_expression("")
+    assert delta is None and abs_fmt is None and msg == ""
+
+@pytest.mark.asyncio
+async def test_create_reminder_db_persist_fail():
+    state = MockDbState(active_count=5)
+    class FailCursor(MockCursor):
+        def __init__(self, state):
+            super().__init__(state)
+            self.fetch_count = 0
+        async def fetchone(self):
+            self.fetch_count += 1
+            if self.fetch_count == 1:
+                return (5,)
+            return None
+    class FailConnection(MockConnection):
+        def cursor(self):
+            return FailCursor(self.state)
+            
+    conn = FailConnection(state)
+    target_time = datetime.now(timezone.utc) + timedelta(hours=2)
+    with pytest.raises(RuntimeError, match="Failed to persist reminder"):
+        await create_reminder(42, "Check logs", target_time, conn)
+
+@pytest.mark.asyncio
+async def test_create_reminder_redis_fail(mock_redis_service):
+    mock_redis_service.zadd.side_effect = RuntimeError("Redis Down")
+    state = MockDbState(active_count=5)
+    conn = MockConnection(state)
+    target_time = datetime.now(timezone.utc) + timedelta(hours=2)
+    
+    with pytest.raises(RuntimeError, match="Failed to schedule reminder in Redis"):
+        await create_reminder(42, "Check logs", target_time, conn)

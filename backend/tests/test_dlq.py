@@ -108,3 +108,11 @@ async def test_send_failure_message_fallback():
         mock_post.assert_called_once()
         call_kwargs = mock_post.call_args[1]
         assert call_kwargs["json"]["text"] == DEFAULT_TEMPLATE
+
+@pytest.mark.asyncio
+async def test_send_failure_message_exception():
+    with mock.patch("httpx.AsyncClient.post", new_callable=mock.AsyncMock) as mock_post:
+        mock_post.side_effect = httpx.HTTPError("Connection failed")
+        # Should catch and log, not raise
+        await send_failure_message("123456789", "voice")
+        mock_post.assert_called_once()

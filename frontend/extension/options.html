@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Recall - Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="options-wrapper">
+    <header class="header">
+      <div class="logo-container">
+        <div class="logo-icon">R</div>
+        <span class="logo-text">Recall Options</span>
+      </div>
+    </header>
+
+    <main class="settings-container">
+      <!-- Section 1: Account Status -->
+      <section class="settings-card">
+        <h2 class="card-title">Account</h2>
+        <div class="card-body">
+          <div id="account-status-loading" class="status-indicator">
+            <span class="spinner"></span> Checking account status...
+          </div>
+          <div id="account-status-logged-in" class="hidden">
+            <p class="status-text">Logged in as <strong id="telegram-username">@username</strong></p>
+            <button id="btn-logout" class="btn btn-danger">Logout</button>
+          </div>
+          <div id="account-status-logged-out" class="hidden">
+            <p class="status-text muted">Not logged in. Open the Recall extension popup or website to log in.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 2: Keyboard Shortcuts Info -->
+      <section class="settings-card">
+        <h2 class="card-title">Keyboard Shortcuts</h2>
+        <div class="card-body">
+          <div class="shortcut-row">
+            <span class="shortcut-action">Save Current Page</span>
+            <kbd class="shortcut-key">Ctrl + Shift + S</kbd>
+          </div>
+          <p class="helper-text">On macOS, use <kbd>Alt + Shift + S</kbd>. You can customize shortcuts in chrome://extensions/shortcuts.</p>
+        </div>
+      </section>
+
+      <!-- Section 3: Notifications -->
+      <section class="settings-card">
+        <h2 class="card-title">Preferences</h2>
+        <div class="card-body">
+          <label class="toggle-container">
+            <input type="checkbox" id="toggle-notifications" checked>
+            <span class="toggle-label">Show save confirmation notification</span>
+          </label>
+        </div>
+      </section>
+
+      <!-- Section 4: API Configuration -->
+      <section class="settings-card">
+        <h2 class="card-title">Connection</h2>
+        <div class="card-body">
+          <div class="input-group">
+            <label for="input-api-url" class="input-label">API URL</label>
+            <input type="text" id="input-api-url" class="text-input" placeholder="http://localhost:8000">
+          </div>
+          <button id="btn-save-api" class="btn btn-primary">Save API URL</button>
+          <div id="save-status" class="save-status hidden">Settings saved ✓</div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script type="module" src="options.js"></script>
+</body>
+</html>

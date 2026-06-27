@@ -25,6 +25,12 @@ def test_sm2_correct_ok_q4():
     assert pytest.approx(new_ef) == 2.5
     assert new_interval == 8
 
+def test_sm2_correct_hard_q3():
+    # Correct hard (q=3) | ef=2.5, interval=3 -> ease_factor=2.5, interval_days=3
+    new_ef, new_interval = update_sm2(2.5, 3, 3)
+    assert pytest.approx(new_ef) == 2.5
+    assert new_interval == 3
+
 def test_sm2_wrong_after_streak():
     # Wrong after streak | ef=2.5, interval=8, q=1 -> ease_factor=1.7, interval_days=1
     new_ef, new_interval = update_sm2(2.5, 8, 1)
