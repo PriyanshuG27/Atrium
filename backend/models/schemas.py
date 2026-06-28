@@ -6,9 +6,18 @@ Ensures proper response structures and that raw_text never leaks.
 """
 
 from __future__ import annotations
-from pydantic import BaseModel, Field
-from typing import List, Optional
-from datetime import datetime, date as datetime_date
+from pydantic import BaseModel, Field, AfterValidator
+from typing import List, Optional, Annotated
+from datetime import datetime, timezone, date as datetime_date
+
+def make_utc_aware(dt: datetime) -> datetime:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+AwareDateTime = Annotated[datetime, AfterValidator(make_utc_aware)]
 
 # ---------------------------------------------------------------------------
 # Items schemas
@@ -21,11 +30,14 @@ class ItemResponse(BaseModel):
     summary: str = Field(..., description="LLM-generated plain-text summary.")
     title: Optional[str] = Field(None, description="Extracted or generated title.")
     tags: List[str] = Field(default_factory=list, description="List of auto-generated tags.")
-    created_at: datetime = Field(..., description="Item creation timestamp.")
+    created_at: AwareDateTime = Field(..., description="Item creation timestamp.")
 
 class ItemCreateRequest(BaseModel):
-    url: str = Field(..., description="The URL of the item to add.")
+    url: Optional[str] = Field(None, description="The URL of the item to add.")
     title: Optional[str] = Field(None, description="The optional title of the item.")
+    raw_text: Optional[str] = Field(None, description="Raw note text content.")
+    source_type: Optional[str] = Field(None, description="Type of ingest source.")
+    tags: Optional[List[str]] = Field(None, description="Custom tags list.")
 
 
 class PaginatedItem(BaseModel):
@@ -35,7 +47,7 @@ class PaginatedItem(BaseModel):
     source_type: str = Field(..., description="Type of ingest source.")
     source_url: Optional[str] = Field(None, description="Original source URL.")
     tags: List[str] = Field(default_factory=list, description="List of auto-generated tags.")
-    created_at: datetime = Field(..., description="Item creation timestamp.")
+    created_at: AwareDateTime = Field(..., description="Item creation timestamp.")
 
 
 class PaginatedItemsResponse(BaseModel):
@@ -62,7 +74,7 @@ class SearchResponseItem(BaseModel):
     summary: str = Field(..., description="LLM-generated plain-text summary.")
     source_type: str = Field(..., description="Type of ingest source.")
     source_url: Optional[str] = Field(None, description="Original source URL.")
-    created_at: str = Field(..., description="Creation timestamp in ISO format.")
+    created_at: AwareDateTime = Field(..., description="Creation timestamp in ISO format.")
 
 class SearchResultItem(BaseModel):
     item: ItemResponse = Field(..., description="Matched item metadata.")
@@ -79,7 +91,7 @@ class SearchSourceItem(BaseModel):
     source_type: str = Field("text", description="Source type of the item.")
     source_url: Optional[str] = Field(None, description="Source URL of the item.")
     tags: List[str] = Field(default_factory=list, description="Tags associated with the item.")
-    created_at: datetime = Field(default_factory=datetime.now, description="Creation timestamp.")
+    created_at: AwareDateTime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Creation timestamp.")
 
 class RAGSearchResponse(BaseModel):
     answer: Optional[str] = Field(None, description="Synthesised answer generated from context, or null if skipped/failed.")
@@ -93,7 +105,7 @@ class GraphNode(BaseModel):
     id: int = Field(..., description="Internal surrogate ID of the item.")
     title: str = Field(..., description="Extracted or generated title of the item.")
     source_type: str = Field(..., description="Type of ingest source.")
-    created_at: str = Field(..., description="Creation timestamp in ISO format.")
+    created_at: AwareDateTime = Field(..., description="Creation timestamp in ISO format.")
     is_hub: bool = Field(..., description="True if the item is a member of any semantic hub.")
 
 class GraphEdge(BaseModel):
@@ -125,7 +137,7 @@ class QuizResponse(BaseModel):
     ease_factor: float = Field(..., description="SM-2 ease factor.")
     interval_days: int = Field(..., description="SM-2 interval in days.")
     next_review: datetime_date = Field(..., description="Scheduled review date.")
-    created_at: datetime = Field(..., description="Quiz creation timestamp.")
+    created_at: AwareDateTime = Field(..., description="Quiz creation timestamp.")
 
 class QuizAnswerRequest(BaseModel):
     quality: int = Field(..., ge=0, le=5, description="SM-2 response quality score (0 to 5).")
@@ -152,14 +164,14 @@ class ReminderResponse(BaseModel):
     user_id: int = Field(..., description="Owner's internal user ID.")
     item_id: Optional[int] = Field(None, description="Optional linked item ID.")
     message: str = Field(..., description="Reminder text message.")
-    remind_at: datetime = Field(..., description="Scheduled delivery timestamp (UTC).")
+    remind_at: AwareDateTime = Field(..., description="Scheduled delivery timestamp (UTC).")
     status: str = Field(..., description="Delivery status ('pending', 'sent', 'failed').")
-    created_at: datetime = Field(..., description="Reminder creation timestamp.")
+    created_at: AwareDateTime = Field(..., description="Reminder creation timestamp.")
 
 class ReminderCreateRequest(BaseModel):
     item_id: Optional[int] = Field(None, description="Optional linked item ID.")
     message: str = Field(..., description="Reminder message body.")
-    remind_at: datetime = Field(..., description="Scheduled delivery timestamp (UTC).")
+    remind_at: AwareDateTime = Field(..., description="Scheduled delivery timestamp (UTC).")
 
 # ---------------------------------------------------------------------------
 # Error response schemas
@@ -179,7 +191,7 @@ class UserMeResponse(BaseModel):
     quizzes_answered: int = Field(..., description="Total quizzes answered.")
     google_last_sync: Optional[str] = Field(None, description="ISO-8601 formatted timestamp of the last successful Google Drive sync.")
     last_7_days_activity: List[bool] = Field(..., description="Active status for each of the last 7 days (UTC based).")
-    last_activity_date: Optional[datetime] = Field(None, description="ISO-8601 formatted timestamp of the user's last saved item.")
+    last_activity_date: Optional[AwareDateTime] = Field(None, description="ISO-8601 formatted timestamp of the user's last saved item.")
     digest_enabled: bool = Field(True, description="Whether the user wants daily digests.")
     telegram_chat_id: Optional[str] = Field(None, description="Telegram Chat ID or username of the user.")
 

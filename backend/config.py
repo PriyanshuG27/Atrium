@@ -35,8 +35,10 @@ class Settings(BaseSettings):
     SCRAPINGBEE_KEY: str | None = None
     SCRAPERAPI_KEY: str | None = None
     HF_TOKEN: str | None = None
+    COBALT_API_URL: str | None = None
 
     ENV: str = "development"
+
 
 
     # ==========================================================================

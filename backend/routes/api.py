@@ -164,8 +164,19 @@ async def create_item(
     from backend.services.search_service import embed_text
     from backend.services.encryption import encrypt
 
+    if req.source_type == "text" or not req.url:
+        source_type = "text"
+        title = req.title or "Untitled Note"
+        raw_text = req.raw_text or ""
+        input_tags = req.tags or []
+    else:
+        source_type = "url"
+        title = req.title or "Untitled Link"
+        raw_text = f"URL: {req.url}\nTitle: {title}"
+        input_tags = []
+
     # 1. Early deduplication check (before expensive AI/embedding calls)
-    if req.url:
+    if req.url and source_type == "url":
         from backend.config import settings
         if settings.ENV != "test" or req.url == "https://existing.com":
             async with db.cursor() as cur:
@@ -187,33 +198,41 @@ async def create_item(
                         created_at=row[7]
                     )
 
-    title = req.title or "Untitled Link"
-    raw_text = f"URL: {req.url}\nTitle: {title}"
-
     # Generate summary & tags via AI cascade (non-blocking)
     cascade = AICascade()
-    tags = []
+    tags = list(input_tags)
     try:
         ai_res = await cascade.summarise(raw_text)
         summary = ai_res.get("summary") or "No summary generated."
-        tags = ai_res.get("tags") or []
+        if not tags:
+            tags = ai_res.get("tags") or []
     except Exception as e:
-        logger.error("Failed to generate AI summary/tags for URL item: %s", e)
-        summary = "No summary generated."
+        logger.error("Failed to generate AI summary/tags for item: %s", e)
+        summary = raw_text or "No summary generated."
 
     normalized_tags = [t.strip().lower() for t in tags if isinstance(t, str) and t.strip()][:5]
     embedding = await embed_text(raw_text)
     encrypted_raw_text = encrypt(raw_text)
 
     async with db.cursor() as cur:
-        await cur.execute(
-            """
-            INSERT INTO items (user_id, source_type, source_url, raw_text, summary, title, embedding, tags)
-            VALUES (%s, 'url', %s, %s, %s, %s, %s::vector, %s)
-            RETURNING id, created_at;
-            """,
-            (user.id, req.url, encrypted_raw_text, summary, title, embedding, normalized_tags)
-        )
+        if source_type == "url":
+            await cur.execute(
+                """
+                INSERT INTO items (user_id, source_type, source_url, raw_text, summary, title, embedding, tags)
+                VALUES (%s, 'url', %s, %s, %s, %s, %s::vector, %s)
+                RETURNING id, created_at;
+                """,
+                (user.id, req.url, encrypted_raw_text, summary, title, embedding, normalized_tags)
+            )
+        else:
+            await cur.execute(
+                """
+                INSERT INTO items (user_id, source_type, source_url, raw_text, summary, title, embedding, tags)
+                VALUES (%s, 'text', NULL, %s, %s, %s, %s::vector, %s)
+                RETURNING id, created_at;
+                """,
+                (user.id, encrypted_raw_text, summary, title, embedding, normalized_tags)
+            )
         row = await cur.fetchone()
         if not row:
             raise HTTPException(status_code=500, detail="Failed to save item to database")

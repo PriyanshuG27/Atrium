@@ -13,16 +13,16 @@ from psycopg import AsyncConnection
 
 logger = logging.getLogger(__name__)
 
-# User-facing failure messages per ERROR_HANDLING.md requirements
+# User-facing failure messages per Phase 6 spec — short, calm, no personality
 TEMPLATES = {
-    "voice": "Could not process your voice note. Saved as bookmark. We'll retry later.",
-    "pdf": "Could not process your PDF. Saved as bookmark. We'll retry later.",
-    "url": "Could not process that link. Saved as bookmark. We'll retry later.",
-    "photo": "Could not process your image. Saved as bookmark. We'll retry later.",
-    "image": "Could not process your image. Saved as bookmark. We'll retry later.",
-    "text": "Could not process your text. Saved as bookmark. We'll retry later.",
+    "voice": "Couldn't process that. Try again in a moment.",
+    "pdf": "Couldn't process that. Try again in a moment.",
+    "url": "That URL isn't accessible right now. Try again later.",
+    "photo": "Couldn't process that. Try again in a moment.",
+    "image": "Couldn't process that. Try again in a moment.",
+    "text": "Couldn't process that. Try again in a moment.",
 }
-DEFAULT_TEMPLATE = "Could not process your message. Saved as bookmark. We'll retry later."
+DEFAULT_TEMPLATE = "Something went wrong. Try again in a moment."
 
 async def write_to_dlq(user_id: int, task_payload: dict, error_message: str, db: AsyncConnection) -> None:
     """

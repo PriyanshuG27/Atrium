@@ -24,6 +24,7 @@ def mock_db_connection():
 @pytest.mark.asyncio
 async def test_text_deduplication_found(mock_db_connection):
     """Test that text ingestion stops early if content_hash matches."""
+    import datetime
     with patch("backend.worker.upsert_user", new_callable=AsyncMock) as mock_upsert, \
          patch("backend.worker.send_telegram_message", new_callable=AsyncMock) as mock_send, \
          patch("backend.worker.AICascade") as mock_cascade, \
@@ -35,8 +36,8 @@ async def test_text_deduplication_found(mock_db_connection):
         conn, cursor = mock_db_connection
         mock_pool.connection.return_value.__aenter__.return_value = conn
         
-        # Simulate that the exact text content_hash already exists
-        cursor.fetchone.return_value = (10,)
+        # Simulate that the exact text content_hash already exists with a specific created_at
+        cursor.fetchone.return_value = (10, datetime.datetime(2026, 6, 28, 12, 0, 0))
         
         task_payload = {
             "chat_id": "123",
@@ -48,18 +49,20 @@ async def test_text_deduplication_found(mock_db_connection):
         await process_task(task_payload)
         
         # Verification
-        mock_send.assert_called_once_with("123", "This looks like something you've already saved.")
+        mock_send.assert_called_once_with("123", "Already saved on 28 Jun 2026.")
         mock_cascade.assert_not_called()
         # Verify it checked for the hash
         expected_hash = hashlib.sha256("This is exactly the same text.".encode()).hexdigest()[:16]
         cursor.execute.assert_called_with(
-            "SELECT id FROM items WHERE user_id=%s AND content_hash=%s LIMIT 1", 
+            "SELECT id, created_at FROM items WHERE user_id=%s AND content_hash=%s LIMIT 1", 
             (1, expected_hash)
         )
+
 
 @pytest.mark.asyncio
 async def test_url_deduplication_found(mock_db_connection):
     """Test URL deduplication."""
+    import datetime
     with patch("backend.worker.upsert_user", new_callable=AsyncMock) as mock_upsert, \
          patch("backend.worker.send_telegram_message", new_callable=AsyncMock) as mock_send, \
          patch("backend.worker.ingest_url", new_callable=AsyncMock) as mock_ingest, \
@@ -70,7 +73,7 @@ async def test_url_deduplication_found(mock_db_connection):
         mock_pool.connection.return_value.__aenter__.return_value = conn
         
         # Simulate URL already exists
-        cursor.fetchone.return_value = (42, "Existing URL Title")
+        cursor.fetchone.return_value = (42, "Existing URL Title", datetime.datetime(2026, 6, 28, 12, 0, 0))
         
         task_payload = {
             "chat_id": "123",
@@ -82,12 +85,13 @@ async def test_url_deduplication_found(mock_db_connection):
         await process_task(task_payload)
         
         # Verification
-        mock_send.assert_called_once_with("123", "Already saved! Item ID: 42 — Existing URL Title")
+        mock_send.assert_called_once_with("123", "Already saved on 28 Jun 2026.")
         mock_ingest.assert_not_called()
         cursor.execute.assert_called_with(
-            "SELECT id, title FROM items WHERE user_id=%s AND source_url=%s LIMIT 1", 
+            "SELECT id, title, created_at FROM items WHERE user_id=%s AND source_url=%s LIMIT 1", 
             (1, "https://example.com")
         )
+
 
 @pytest.mark.asyncio
 async def test_voice_deduplication_exception_handled(mock_db_connection):
@@ -114,7 +118,8 @@ async def test_voice_deduplication_exception_handled(mock_db_connection):
         await process_task(task_payload)
         
         # Verification
-        mock_send.assert_called_once_with("123", "This looks like something you've already saved.")
+        mock_send.assert_called_once_with("123", "Already saved on a previous date.")
+
 
 @pytest.mark.asyncio
 async def test_image_deduplication_exception_handled(mock_db_connection):
@@ -141,7 +146,8 @@ async def test_image_deduplication_exception_handled(mock_db_connection):
         await process_task(task_payload)
         
         # Verification
-        mock_send.assert_called_once_with("123", "This looks like something you've already saved.")
+        mock_send.assert_called_once_with("123", "Already saved on a previous date.")
+
 
 @pytest.mark.asyncio
 async def test_pdf_deduplication_exception_handled(mock_db_connection):
@@ -176,5 +182,6 @@ async def test_pdf_deduplication_exception_handled(mock_db_connection):
         await process_task(task_payload)
         
         # Verification
-        mock_send.assert_called_once_with("123", "This looks like something you've already saved.")
+        mock_send.assert_called_once_with("123", "Already saved on a previous date.")
+
 

@@ -1,6 +1,10 @@
 import React from 'react';
 import '@testing-library/jest-dom';
-import { vi } from 'vitest';
+import { vi, beforeEach } from 'vitest';
+
+beforeEach(() => {
+  vi.useRealTimers();
+});
 
 // Mock window.open
 window.open = vi.fn();
@@ -33,7 +37,6 @@ class MockIntersectionObserver {
 }
 window.IntersectionObserver = MockIntersectionObserver;
 
-// Mock @phosphor-icons/react to avoid EMFILE (too many open files) on Windows
 vi.mock('@phosphor-icons/react', () => {
   const React = require('react');
   const makeMock = (name) => {
@@ -76,9 +79,43 @@ vi.mock('@phosphor-icons/react', () => {
     Hourglass: makeMock('Hourglass'),
     Percent: makeMock('Percent'),
     Compass: makeMock('Compass'),
-    Flame: makeMock('Flame')
+    Flame: makeMock('Flame'),
+    User: makeMock('User'),
+    Globe: makeMock('Globe'),
+    SpeakerHigh: makeMock('SpeakerHigh'),
+    SpeakerSlash: makeMock('SpeakerSlash'),
+    CalendarPlus: makeMock('CalendarPlus'),
+    Plus: makeMock('Plus'),
+    Clock: makeMock('Clock'),
+    Database: makeMock('Database'),
+    Rows: makeMock('Rows'),
+    ArrowsInLine: makeMock('ArrowsInLine'),
+    ArrowsOutLine: makeMock('ArrowsOutLine'),
+    Play: makeMock('Play'),
+    Pause: makeMock('Pause'),
+    Selection: makeMock('Selection'),
+    ArrowsIn: makeMock('ArrowsIn'),
+    Crosshair: makeMock('Crosshair'),
+    Tag: makeMock('Tag'),
+    Activity: makeMock('Activity'),
+    Folder: makeMock('Folder'),
+    GoogleDriveLogo: makeMock('GoogleDriveLogo'),
+    Lightning: makeMock('Lightning'),
+    ClockCounterClockwise: makeMock('ClockCounterClockwise'),
+    Hash: makeMock('Hash'),
+    ArrowSquareOut: makeMock('ArrowSquareOut'),
+    CaretRight: makeMock('CaretRight'),
+    Sparkle: makeMock('Sparkle'),
+    Copy: makeMock('Copy'),
+    Check: makeMock('Check'),
+    ArrowRight: makeMock('ArrowRight'),
+    BookmarkSimple: makeMock('BookmarkSimple'),
+    Lightning: makeMock('Lightning'),
   };
 });
+
+
+
 
 // Mock WebSocket globally to prevent ReferenceError in testing environments
 class MockWebSocket {
@@ -152,9 +189,23 @@ vi.mock('../hooks/useGraphSocket', () => {
     })),
   };
 });
+vi.mock('@react-three/fiber', () => {
+  const React = require('react');
+  return {
+    Canvas: ({ children }) => React.createElement('div', { 'data-testid': 'r3f-canvas' }, children),
+    useFrame: vi.fn(),
+    useThree: vi.fn(() => ({
+      camera: { position: { x: 0, y: 0, z: 0 }, lookAt: vi.fn() },
+      mouse: { x: 0, y: 0 },
+      viewport: { width: 100, height: 100 }
+    }))
+  };
+});
 
-
-
-
-
+vi.mock('@react-three/drei', () => {
+  const React = require('react');
+  return {
+    Html: ({ children }) => React.createElement('div', { 'data-testid': 'r3f-html' }, children)
+  };
+});
 

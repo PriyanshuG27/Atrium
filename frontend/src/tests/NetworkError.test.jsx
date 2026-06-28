@@ -51,7 +51,15 @@ describe('Network and Offline Error Handling', () => {
           json: () => Promise.resolve({ items: [], total: 0, pages: 1 }),
         });
       }
+      if (url === '/api/quizzes/stats') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ streak: 0, total_reviewed: 0 }),
+        });
+      }
       return Promise.resolve({ ok: false });
+
     });
   });
 
@@ -70,7 +78,7 @@ describe('Network and Offline Error Handling', () => {
 
     // Wait for the app to finish loading the Dashboard/Auth state
     await waitFor(() => {
-      expect(screen.getByText('Welcome to Recall')).toBeInTheDocument();
+      expect(screen.getByText(/No signals received yet/i)).toBeInTheDocument();
     });
 
     // Trigger offline event

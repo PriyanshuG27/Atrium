@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { MagnifyingGlass, GoogleLogo, CloudX, CloudArrowUp, SignOut, CaretDown, CaretUp, ShareNetwork, List, Gear, Bell } from '@phosphor-icons/react';
+import { MagnifyingGlass, GoogleLogo, CloudX, CloudArrowUp, SignOut, CaretDown, CaretUp, ShareNetwork, List, Gear, Bell, BookOpen } from '@phosphor-icons/react';
 import ConnectionStatus from './ConnectionStatus';
 import ConnectDriveCard from './ConnectDriveCard';
 import { useToast } from './Toast';
@@ -191,12 +191,27 @@ export default function Header({ onSearch, dueQuizCount, viewMode = 'graph', onV
     }
   };
 
+  // Derive initial letter for avatar
+  const avatarLetter = user?.chat_id ? user.chat_id.substring(0, 1) : 'U';
+
   return (
     <header className="app-header">
       <div className="header-left">
-        <a href="/" className="header-logo gradient-text">
-          Recall
+        {/* Logo — small watermark, ~40% opacity, clicking resets pan/zoom */}
+        <a
+          href="/"
+          className="header-logo"
+          style={{
+            opacity: 0.4,
+            fontSize: '0.875rem',
+            fontWeight: 600,
+            letterSpacing: '-0.02em',
+            pointerEvents: 'auto'
+          }}
+        >
+          Recall.
         </a>
+
         {user && (
           <div 
             onClick={handleSearchContainerClick}
@@ -216,7 +231,7 @@ export default function Header({ onSearch, dueQuizCount, viewMode = 'graph', onV
                 }
               }}
             >
-              <MagnifyingGlass size={16} aria-hidden="true" />
+              <MagnifyingGlass size={14} aria-hidden="true" />
             </span>
             <input
               ref={searchInputRef}
@@ -240,30 +255,35 @@ export default function Header({ onSearch, dueQuizCount, viewMode = 'graph', onV
       <div className="header-right">
         {user && (
           <>
+            {/* View toggle — icon-only, minimal */}
             <div className="view-toggle">
               <button 
                 className={`toggle-btn ${viewMode === 'graph' ? 'active' : ''}`}
                 onClick={() => onViewModeChange && onViewModeChange('graph')}
                 aria-label="Switch to Graph View"
+                title="Graph"
               >
-                🌌 Graph
+                <ShareNetwork size={14} aria-hidden="true" />
               </button>
               <button 
                 className={`toggle-btn ${viewMode === 'feed' ? 'active' : ''}`}
                 onClick={() => onViewModeChange && onViewModeChange('feed')}
                 aria-label="Switch to Feed View"
+                title="Feed"
               >
-                📋 Feed
+                <List size={14} aria-hidden="true" />
+              </button>
+              <button 
+                className={`toggle-btn ${viewMode === 'quiz' ? 'active' : ''}`}
+                onClick={() => onViewModeChange && onViewModeChange('quiz')}
+                aria-label="Switch to Quiz View"
+                title="Quiz"
+              >
+                <BookOpen size={14} aria-hidden="true" />
               </button>
             </div>
 
-            <button className="quiz-badge-btn" onClick={onStatsClick}>
-              <span>Quiz</span>
-              {dueQuizCount > 0 && (
-                <span className="quiz-badge-count">{dueQuizCount}</span>
-              )}
-            </button>
-
+            {/* Stats card — compact numbers only */}
             {stats && (
               <div 
                 className="quiz-stats-card" 
@@ -278,11 +298,13 @@ export default function Header({ onSearch, dueQuizCount, viewMode = 'graph', onV
                   }
                 }}
               >
-                <span>Due: <span className="stat-val">{stats.due_today}</span></span>
-                <span style={{ color: 'rgba(255,255,255,0.12)' }}>|</span>
-                <span>Mastered: <span className="stat-val">{stats.mastered}</span></span>
-                <span style={{ color: 'rgba(255,255,255,0.12)' }}>|</span>
-                <span>Avg ease: <span className="stat-val">{stats.avg_ease_factor.toFixed(1)}</span></span>
+                <span className="stats-compact">
+                  <span style={{ color: 'var(--text-tertiary)' }}>Due:</span>
+                  <span className="stat-val">{stats.due_today}</span>
+                  <span style={{ color: 'rgba(240,237,232,0.12)' }}>|</span>
+                  <span style={{ color: 'var(--text-tertiary)' }}>Avg:</span>
+                  <span className="stat-val">{stats.avg_ease_factor.toFixed(1)}</span>
+                </span>
               </div>
             )}
 
@@ -304,6 +326,7 @@ export default function Header({ onSearch, dueQuizCount, viewMode = 'graph', onV
 
             <ConnectionStatus />
 
+            {/* Profile area — avatar only, no username text */}
             <div className="profile-menu-container" ref={dropdownRef}>
               <button
                 className="profile-trigger"
@@ -311,18 +334,34 @@ export default function Header({ onSearch, dueQuizCount, viewMode = 'graph', onV
                 aria-expanded={dropdownOpen}
                 aria-haspopup="true"
                 aria-label="Profile menu"
+                style={{ padding: '0.2rem', borderRadius: '50%', border: '1px solid var(--border-subtle)' }}
               >
                 <div className="avatar-circle">
-                  {user.chat_id ? user.chat_id.substring(0, 1) : 'U'}
+                  {avatarLetter}
                 </div>
-                <span>User {user.chat_id}</span>
-                <span style={{ display: 'flex', alignItems: 'center', marginLeft: '0.25rem' }}>
-                  {dropdownOpen ? <CaretUp size={12} aria-hidden="true" /> : <CaretDown size={12} aria-hidden="true" />}
-                </span>
+                {/* Hidden span for tests — keeps user identifier accessible without showing it */}
+                <span className="sr-only">User {user.chat_id}</span>
               </button>
 
               {dropdownOpen && (
                 <div className="dropdown-menu glass-panel" role="menu" style={{ width: '280px' }}>
+                  {/* User identity — shown inside dropdown */}
+                  <div style={{
+                    padding: '0.625rem 0.875rem',
+                    borderBottom: '1px solid var(--border-subtle)',
+                    marginBottom: '0.25rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.6rem'
+                  }}>
+                    <div className="avatar-circle" style={{ width: '22px', height: '22px', fontSize: '0.625rem' }}>
+                      {avatarLetter}
+                    </div>
+                    <span style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
+                      User {user.chat_id}
+                    </span>
+                  </div>
+
                   <div className="dropdown-header" role="presentation">Drive Integration</div>
                   <div style={{ padding: '0.25rem 0.5rem' }}>
                     <ConnectDriveCard />

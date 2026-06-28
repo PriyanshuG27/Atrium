@@ -96,25 +96,19 @@ describe('Feed Component', () => {
     });
   });
 
-  it('renders filter bar and datalist autocomplete options', async () => {
+  it('renders filter bar and tag input', async () => {
     render(<Feed onNodeClick={mockOnNodeClick} onViewInGraph={mockOnViewInGraph} />);
 
     await waitFor(() => {
-      expect(screen.getByText('All')).toBeInTheDocument();
       expect(screen.getByText('Links')).toBeInTheDocument();
       expect(screen.getByText('Voice')).toBeInTheDocument();
       expect(screen.getByText('PDFs')).toBeInTheDocument();
       expect(screen.getByText('Images')).toBeInTheDocument();
       expect(screen.getByText('Text')).toBeInTheDocument();
-      expect(screen.getByPlaceholderText('Search by tag...')).toBeInTheDocument();
-    });
-
-    // Check datalist option presence
-    await waitFor(() => {
-      const option = screen.getByText('3 saves');
-      expect(option).toBeInTheDocument();
+      expect(screen.getByPlaceholderText('#tag')).toBeInTheDocument();
     });
   });
+
 
   it('renders initial list of items', async () => {
     render(<Feed onNodeClick={mockOnNodeClick} onViewInGraph={mockOnViewInGraph} />);
@@ -122,8 +116,6 @@ describe('Feed Component', () => {
     await waitFor(() => {
       expect(screen.getByText('React Best Practices')).toBeInTheDocument();
       expect(screen.getByText('Voice Note Idea')).toBeInTheDocument();
-      expect(screen.getByText('URL')).toBeInTheDocument();
-      expect(screen.getByText('VOICE')).toBeInTheDocument();
       expect(screen.getByText('1h ago')).toBeInTheDocument();
     });
   });
@@ -163,20 +155,21 @@ describe('Feed Component', () => {
     });
   });
 
-  it('filters items by typing in tag autocomplete input', async () => {
+  it('filters items by typing in tag input', async () => {
     render(<Feed onNodeClick={mockOnNodeClick} onViewInGraph={mockOnViewInGraph} />);
 
     await waitFor(() => {
-      expect(screen.getByPlaceholderText('Search by tag...')).toBeInTheDocument();
+      expect(screen.getByPlaceholderText('#tag')).toBeInTheDocument();
     });
 
-    const tagInput = screen.getByPlaceholderText('Search by tag...');
+    const tagInput = screen.getByPlaceholderText('#tag');
     fireEvent.change(tagInput, { target: { value: 'react' } });
 
     await waitFor(() => {
       expect(fetchSpy).toHaveBeenCalledWith(expect.stringContaining('tag=react'));
     });
   });
+
 
   it('triggers onNodeClick when item card is clicked', async () => {
     render(<Feed onNodeClick={mockOnNodeClick} onViewInGraph={mockOnViewInGraph} />);
@@ -199,21 +192,30 @@ describe('Feed Component', () => {
     });
 
     const actionTriggers = screen.getAllByLabelText('Item Actions');
-    fireEvent.click(actionTriggers[0]); // Open dropdown menu for first card
+    fireEvent.click(actionTriggers[0]);
 
     await waitFor(() => {
       expect(screen.getByText('Delete')).toBeInTheDocument();
     });
 
+    // Enable fake timers before the async deletion timeout is registered
+    vi.useFakeTimers();
+
     const deleteBtn = screen.getByText('Delete');
     fireEvent.click(deleteBtn);
 
-    // Verify window.confirm was shown and DELETE API was called
+    // Verify React Best Practices is removed immediately (optimistic UI)
+    expect(screen.queryByText('React Best Practices')).not.toBeInTheDocument();
+
+    // Fast-forward time for the setTimeout to execute
+    vi.advanceTimersByTime(5000);
+
+    // Restore real timers so waitFor can run
+    vi.useRealTimers();
+
+    // Verify DELETE API was called
     await waitFor(() => {
-      expect(window.confirm).toHaveBeenCalled();
       expect(fetchSpy).toHaveBeenCalledWith(expect.stringContaining('/api/items/1'), { method: 'DELETE' });
-      // React Best Practices should be deleted/removed from list
-      expect(screen.queryByText('React Best Practices')).not.toBeInTheDocument();
     });
   });
 

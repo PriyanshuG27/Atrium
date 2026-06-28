@@ -29,14 +29,14 @@ class MockCursor:
         self.executed.append((query, params))
         
     async def fetchone(self):
-        last_query = self.executed[-1][0].lower() if self.executed else ""
-        if "insert into items" in last_query:
+        query = self.executed[-1][0].lower() if self.executed else ""
+        if "insert into items" in query:
             return (101,)
-        if "select title" in last_query:
-            return ("Mock Page Title", "Mock Summary")
-        if "select raw_text" in last_query:
-            # We encrypt "Mock Transcript" to match voice note raw_text
-            # But let's mock encrypt/decrypt, or return mock encrypted
+        if "select title" in query and "summary" in query:
+            return ("Mock Page Title", "Mock Summary", ["tech", "python"])
+        if "select summary" in query:
+            return ("Mock Voice Summary", ["voice"])
+        if "select raw_text" in query:
             return (b"gAAAAAB...", "Mock Voice Summary")
         return None
 
@@ -97,7 +97,15 @@ async def test_process_text_task(monkeypatch):
     await process_task(task)
     
     mock_redis.delete.assert_called_once_with("graph:42")
-    mock_send.assert_called_once_with("7732257445", "Saved ✓ — [Hello Recall!]")
+    # New Phase-6 format: emoji_title + summary + divider + tags + Saved.
+    call_args = mock_send.call_args
+    sent_text = call_args[0][1]
+    sent_kwargs = call_args[1] if call_args[1] else {}
+    sent_markup = call_args[0][2] if len(call_args[0]) > 2 else sent_kwargs.get("reply_markup")
+    assert "Hello Recall!" in sent_text
+    assert "Mock Text Summary" in sent_text
+    assert "Saved." in sent_text
+    assert sent_markup is not None
 
 
 @pytest.mark.asyncio
@@ -125,7 +133,15 @@ async def test_process_url_task(monkeypatch):
     await process_task(task)
     
     mock_redis.delete.assert_called_once_with("graph:42")
-    mock_send.assert_called_once_with("7732257445", "🔗 Mock Page Title\n\nMock Summary\n\nSaved ✓")
+    # New Phase-6 format: intelligence-brief with divider and Saved.
+    call_args = mock_send.call_args
+    sent_text = call_args[0][1]
+    sent_kwargs = call_args[1] if call_args[1] else {}
+    sent_markup = call_args[0][2] if len(call_args[0]) > 2 else sent_kwargs.get("reply_markup")
+    assert "Mock Page Title" in sent_text
+    assert "Mock Summary" in sent_text
+    assert "Saved." in sent_text
+    assert sent_markup is not None
 
 
 
@@ -159,11 +175,11 @@ async def test_process_url_task_private_google_drive(monkeypatch):
     # Verify no graph delete (since it didn't save)
     assert not mock_redis.delete.called
     
-    # Verify bot message sent warning the user
+    # Verify bot message uses the new calm, short error message
     mock_send.assert_called_once()
     called_text = mock_send.call_args[0][1]
-    assert "Google Drive file is private" in called_text
-    assert "Anyone with the link can view" in called_text
+    assert "That Drive file is private" in called_text
+    assert "Share it publicly" in called_text
 
 
 @pytest.mark.asyncio
@@ -227,11 +243,15 @@ async def test_process_pdf_task(monkeypatch):
     await process_task(task)
     
     mock_redis.delete.assert_called_once_with("graph:42")
-    # Verify page count and filename formatting
-    mock_send.assert_called_once_with(
-        "7732257445",
-        "📄 document.pdf\n\nNo summary available.\n\nPages: 4 | Saved ✓"
-    )
+    # New Phase-6 format: intelligence brief — no page count, no "Saved ✓"
+    call_args = mock_send.call_args
+    sent_text = call_args[0][1]
+    sent_kwargs = call_args[1] if call_args[1] else {}
+    sent_markup = call_args[0][2] if len(call_args[0]) > 2 else sent_kwargs.get("reply_markup")
+    assert "document.pdf" in sent_text
+    assert "Saved." in sent_text
+    assert "Pages:" not in sent_text
+    assert sent_markup is not None
 
 
 @pytest.mark.asyncio
@@ -260,10 +280,14 @@ async def test_process_voice_task(monkeypatch):
     await process_task(task)
     
     mock_redis.delete.assert_called_once_with("graph:42")
-    mock_send.assert_called_once_with(
-        "7732257445",
-        "🎙 Transcribed:\nMock Transcript Decrypted...\n\n📝 Summary:\nMock Voice Summary\n\nSaved ✓"
-    )
+    # New Phase-6 format: compact summary-based brief, no transcript dump
+    call_args = mock_send.call_args
+    sent_text = call_args[0][1]
+    sent_kwargs = call_args[1] if call_args[1] else {}
+    sent_markup = call_args[0][2] if len(call_args[0]) > 2 else sent_kwargs.get("reply_markup")
+    assert "Voice note" in sent_text
+    assert "Saved." in sent_text
+    assert sent_markup is not None
 
 
 @pytest.mark.asyncio

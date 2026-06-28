@@ -1,9 +1,35 @@
 import React from 'react';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import Dashboard from '../pages/Dashboard';
-import { AuthProvider, useAuth } from '../context/AuthContext';
-import axios from 'axios';
+
+vi.mock('../canvas/GraphCanvas', () => {
+  const React = require('react');
+  return {
+    __esModule: true,
+    default: function MockGraphCanvas({ activeNodes, handleNodeClick, matchingNodeIds }) {
+      return React.createElement(
+        'div',
+        { 'data-testid': 'mock-graph-canvas' },
+        activeNodes.map(node => {
+          let opacity = '1';
+          if (matchingNodeIds) {
+            opacity = matchingNodeIds.has(node.id) ? '1' : '0.1';
+          }
+          return React.createElement(
+            'button',
+            {
+              key: node.id,
+              className: 'constellation-node',
+              style: { opacity },
+              onClick: () => handleNodeClick && handleNodeClick(node)
+            },
+            node.title || node.label
+          );
+        })
+      );
+    }
+  };
+});
 
 vi.mock('axios', () => {
   const mockInstance = {
@@ -26,6 +52,13 @@ vi.mock('axios', () => {
     ...mockInstance
   };
 });
+
+import Dashboard from '../pages/Dashboard';
+import { AuthProvider, useAuth } from '../context/AuthContext';
+import axios from 'axios';
+
+
+
 
 function SeedAuth({ user, children }) {
   const { login } = useAuth();
@@ -126,6 +159,10 @@ describe('Dashboard Component', () => {
         </SeedAuth>
       </AuthProvider>
     );
+
+    // Click search icon button to open search bar
+    const searchTrigger = screen.getByTestId('icon-MagnifyingGlass').closest('button');
+    fireEvent.click(searchTrigger);
 
     await waitFor(() => {
       expect(screen.getByPlaceholderText('Search your brain...')).toBeInTheDocument();

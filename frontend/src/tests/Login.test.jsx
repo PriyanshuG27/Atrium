@@ -25,9 +25,13 @@ describe('Login Component', () => {
       expect(fetchSpy).toHaveBeenCalledWith('/auth/me');
     });
 
-    expect(screen.getByText('✦ Recall')).toBeInTheDocument();
-    expect(screen.getByText('Your second brain. Zero friction.')).toBeInTheDocument();
-    expect(screen.getByText('⚡ Developer Bypass Login')).toBeInTheDocument();
+    expect(screen.getByText('Recall.')).toBeInTheDocument();
+    
+    await waitFor(() => {
+      expect(screen.getByText(/Personal knowledge OS/i)).toBeInTheDocument();
+    }, { timeout: 3000 });
+
+    expect(screen.getByText('⚡ Go')).toBeInTheDocument();
   });
 
   it('performs developer bypass login successfully', async () => {
@@ -50,7 +54,7 @@ describe('Login Component', () => {
       </AuthProvider>
     );
 
-    fireEvent.click(screen.getByText('⚡ Developer Bypass Login'));
+    fireEvent.click(screen.getByText('⚡ Go'));
 
     await waitFor(() => {
       expect(fetchSpy).toHaveBeenCalledWith('/auth/telegram?id=12345&mock=true');
@@ -69,7 +73,7 @@ describe('Login Component', () => {
       </AuthProvider>
     );
 
-    fireEvent.click(screen.getByText('⚡ Developer Bypass Login'));
+    fireEvent.click(screen.getByText('⚡ Go'));
 
     await waitFor(() => {
       expect(screen.getByText('Bypass login failed.')).toBeInTheDocument();
@@ -96,9 +100,9 @@ describe('Login Component', () => {
       </AuthProvider>
     );
 
-    const input = screen.getByLabelText('Telegram Chat ID to view your bot items');
+    const input = screen.getByPlaceholderText(/123456789/i);
     fireEvent.change(input, { target: { value: '98765' } });
-    fireEvent.click(screen.getByText('⚡ Developer Bypass Login'));
+    fireEvent.click(screen.getByText('⚡ Go'));
 
     await waitFor(() => {
       expect(fetchSpy).toHaveBeenCalledWith('/auth/telegram?id=98765&mock=true');

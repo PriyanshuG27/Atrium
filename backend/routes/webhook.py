@@ -401,7 +401,59 @@ async def telegram_webhook(
                         }
                         background_tasks.add_task(http_client.post, url_edit, json=payload_edit)
                         logger.info("Processed callback_query answer for quiz %d, user %d", quiz_id, user_id)
-                        
+
+            elif data.startswith("quiz_me:"):
+                parts = data.split(":")
+                if len(parts) == 2:
+                    try:
+                        item_id = int(parts[1])
+                        background_tasks.add_task(
+                            process_quiz_me_callback,
+                            chat_id,
+                            user_id,
+                            item_id,
+                            callback_query_id
+                        )
+                    except ValueError:
+                        pass
+                return {"status": "ok", "detail": "callback_query_processed"}
+
+            elif data.startswith("remind_me:"):
+                parts = data.split(":")
+                if len(parts) == 2:
+                    try:
+                        item_id = int(parts[1])
+                        background_tasks.add_task(
+                            process_remind_me_callback,
+                            chat_id,
+                            user_id,
+                            item_id,
+                            callback_query_id
+                        )
+                    except ValueError:
+                        pass
+                return {"status": "ok", "detail": "callback_query_processed"}
+
+            elif data.startswith("remind_set:"):
+                parts = data.split(":")
+                if len(parts) == 3:
+                    try:
+                        item_id = int(parts[1])
+                        interval = parts[2]
+                        message_id = callback_query["message"]["message_id"]
+                        background_tasks.add_task(
+                            process_remind_set_callback,
+                            chat_id,
+                            user_id,
+                            item_id,
+                            interval,
+                            callback_query_id,
+                            message_id
+                        )
+                    except (ValueError, KeyError):
+                        pass
+                return {"status": "ok", "detail": "callback_query_processed"}
+
             return {"status": "ok", "detail": "callback_query_processed"}
         
         # 4.5 Check for bot commands
@@ -979,3 +1031,258 @@ async def telegram_webhook(
         logger.info("Webhook request finished in %.2f ms", elapsed)
         
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Telegram Button Callback Query Helper Functions (Executed in Background)
+# ---------------------------------------------------------------------------
+
+async def process_quiz_me_callback(chat_id: str, user_id: int, item_id: int, callback_query_id: str):
+    from backend.db.connection import _pool
+    if not _pool:
+        logger.error("DB pool is not initialised in process_quiz_me_callback.")
+        return
+
+    # Acknowledge callback query
+    url_ans = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
+    try:
+        await http_client.post(url_ans, json={"callback_query_id": callback_query_id})
+    except Exception as e:
+        logger.warning("Failed to answer callback query: %s", e)
+
+    try:
+        async with _pool.connection() as conn:
+            if hasattr(conn, "execute"):
+                await conn.execute("SET statement_timeout = '30s'")
+            async with conn.cursor() as cur:
+                # 1. Check if quiz already exists
+                await cur.execute(
+                    "SELECT id, question, options, correct_index, explanation FROM quizzes WHERE item_id = %s AND user_id = %s LIMIT 1;",
+                    (item_id, user_id)
+                )
+                row = await cur.fetchone()
+
+                if not row:
+                    # 2. Fetch the item's summary / content to generate quiz
+                    await cur.execute(
+                        "SELECT source_type, raw_text, summary, title FROM items WHERE id = %s AND user_id = %s;",
+                        (item_id, user_id)
+                    )
+                    item_row = await cur.fetchone()
+                    if not item_row:
+                        url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
+                        await http_client.post(url, json={"chat_id": chat_id, "text": "Item not found."})
+                        return
+
+                    source_type, raw_text, summary, title = item_row
+                    from backend.services.encryption import decrypt
+                    if raw_text:
+                        try:
+                            text_content = decrypt(raw_text)
+                        except Exception:
+                            text_content = raw_text
+                    else:
+                        text_content = ""
+
+                    text_for_quiz = summary or text_content or title or ""
+
+                    # 3. Call AICascade to generate quiz
+                    from backend.services.ai_cascade import AICascade
+                    cascade = AICascade()
+                    try:
+                        quiz_data = await cascade.generate_quiz(text_for_quiz)
+                    except Exception as e:
+                        logger.error("Failed to generate quiz via AICascade: %s", e)
+                        quiz_data = None
+
+                    if not quiz_data:
+                        url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
+                        await http_client.post(url, json={"chat_id": chat_id, "text": "Sorry, I couldn't generate a quiz question for this item. Please try again."})
+                        return
+
+                    # 4. Insert the new quiz
+                    await cur.execute(
+                        """
+                        INSERT INTO quizzes (user_id, item_id, question, options, correct_index, explanation)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        RETURNING id, question, options, correct_index, explanation;
+                        """,
+                        (
+                            user_id,
+                            item_id,
+                            quiz_data["question"],
+                            json.dumps(quiz_data["options"]),
+                            quiz_data["correct_index"],
+                            quiz_data["explanation"]
+                        )
+                    )
+                    row = await cur.fetchone()
+                    await conn.commit()
+
+        # 5. Format and send the quiz
+        quiz_id, question, options_val, correct_index, explanation = row
+        if isinstance(options_val, str):
+            opts = json.loads(options_val)
+        else:
+            opts = options_val
+
+        inline_keyboard = [
+            [
+                {"text": f"A. {opts[0]}", "callback_data": f"quiz:{quiz_id}:0"},
+                {"text": f"B. {opts[1]}", "callback_data": f"quiz:{quiz_id}:1"}
+            ],
+            [
+                {"text": f"C. {opts[2]}", "callback_data": f"quiz:{quiz_id}:2"},
+                {"text": f"D. {opts[3]}", "callback_data": f"quiz:{quiz_id}:3"}
+            ]
+        ]
+
+        url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = {
+            "chat_id": chat_id,
+            "text": f"<b>{question}</b>",
+            "parse_mode": "HTML",
+            "reply_markup": {
+                "inline_keyboard": inline_keyboard
+            }
+        }
+        await http_client.post(url, json=payload)
+    except Exception as e:
+        logger.exception("Error in process_quiz_me_callback: %s", e)
+        url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
+        await http_client.post(url, json={"chat_id": chat_id, "text": "An error occurred while processing your quiz request."})
+
+
+async def process_remind_me_callback(chat_id: str, user_id: int, item_id: int, callback_query_id: str):
+    # Acknowledge callback query
+    url_ans = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
+    try:
+        await http_client.post(url_ans, json={"callback_query_id": callback_query_id})
+    except Exception as e:
+        logger.warning("Failed to answer callback query: %s", e)
+
+    inline_keyboard = [
+        [
+            {"text": "⏰ In 1 Hour", "callback_data": f"remind_set:{item_id}:1h"},
+            {"text": "⏰ In 3 Hours", "callback_data": f"remind_set:{item_id}:3h"}
+        ],
+        [
+            {"text": "🌅 Tomorrow Morning", "callback_data": f"remind_set:{item_id}:tomorrow"},
+            {"text": "📅 Next Week", "callback_data": f"remind_set:{item_id}:next_week"}
+        ]
+    ]
+
+    url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": "Select when you would like to be reminded:",
+        "reply_markup": {
+            "inline_keyboard": inline_keyboard
+        }
+    }
+    try:
+        await http_client.post(url, json=payload)
+    except Exception as e:
+        logger.error("Failed to send reminder duration choices: %s", e)
+
+
+async def process_remind_set_callback(
+    chat_id: str,
+    user_id: int,
+    item_id: int,
+    interval: str,
+    callback_query_id: str,
+    message_id: int
+):
+    from backend.db.connection import _pool
+    if not _pool:
+        logger.error("DB pool is not initialised in process_remind_set_callback.")
+        return
+
+    try:
+        async with _pool.connection() as conn:
+            if hasattr(conn, "execute"):
+                await conn.execute("SET statement_timeout = '30s'")
+            async with conn.cursor() as cur:
+                # 1. Fetch timezone offset
+                await cur.execute("SELECT timezone_offset FROM users WHERE id = %s;", (user_id,))
+                row = await cur.fetchone()
+                timezone_offset = row[0] if (row and row[0] is not None) else 0
+
+                # 2. Fetch item title
+                await cur.execute("SELECT title FROM items WHERE id = %s AND user_id = %s;", (item_id, user_id))
+                item_row = await cur.fetchone()
+                item_title = item_row[0] or "Saved Item" if item_row else "Saved Item"
+
+        # 3. Calculate reminder time in UTC
+        utc_now = datetime.now(timezone.utc)
+        if interval == "1h":
+            remind_at_utc = utc_now + timedelta(hours=1)
+        elif interval == "3h":
+            remind_at_utc = utc_now + timedelta(hours=3)
+        else:
+            user_local = utc_now + timedelta(minutes=timezone_offset)
+            if interval == "tomorrow":
+                target_date = user_local.date() + timedelta(days=1)
+                target_local_dt = datetime.combine(target_date, dt_time(9, 0))
+            elif interval == "next_week":
+                target_date = user_local.date() + timedelta(days=7)
+                target_local_dt = datetime.combine(target_date, dt_time(9, 0))
+            else:
+                remind_at_utc = utc_now + timedelta(hours=1)
+                
+            remind_at_utc = target_local_dt - timedelta(minutes=timezone_offset)
+            remind_at_utc = remind_at_utc.replace(tzinfo=timezone.utc)
+
+        # 4. Create and save the reminder
+        message = f"Review Item: {item_title}\nRetrieve: /file_{item_id}"
+        from backend.services.reminder_service import create_reminder
+        
+        async with _pool.connection() as conn:
+            reminder_id, final_message, was_truncated = await create_reminder(
+                user_id, message, remind_at_utc, conn
+            )
+            await conn.commit()
+
+        user_local_target = remind_at_utc + timedelta(minutes=timezone_offset)
+        formatted_dt = user_local_target.strftime("%d %b %Y at %H:%M")
+        confirm_text = f"⏰ Reminder set for item '{item_title}' on {formatted_dt} ✓"
+
+        # 5. Edit selection message to confirm
+        url_ans = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
+        await http_client.post(url_ans, json={"callback_query_id": callback_query_id, "text": "Reminder set! ⏰"})
+
+        url_edit = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/editMessageText"
+        payload_edit = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": confirm_text,
+            "reply_markup": {"inline_keyboard": []}
+        }
+        await http_client.post(url_edit, json=payload_edit)
+
+    except ValueError as val_err:
+        url_ans = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
+        await http_client.post(url_ans, json={"callback_query_id": callback_query_id})
+        
+        url_edit = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/editMessageText"
+        payload_edit = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": f"❌ {str(val_err)}",
+            "reply_markup": {"inline_keyboard": []}
+        }
+        await http_client.post(url_edit, json=payload_edit)
+    except Exception as e:
+        logger.error("Failed to set callback reminder: %s", e)
+        url_ans = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
+        await http_client.post(url_ans, json={"callback_query_id": callback_query_id})
+        
+        url_edit = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/editMessageText"
+        payload_edit = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": "❌ Failed to set reminder. Please try again.",
+            "reply_markup": {"inline_keyboard": []}
+        }
+        await http_client.post(url_edit, json=payload_edit)

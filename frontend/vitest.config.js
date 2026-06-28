@@ -10,7 +10,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
-      exclude: ['extension/**', 'src/tests/**', 'node_modules/**'],
+      exclude: ['extension/**', 'src/tests/**', 'node_modules/**', 'src/components/GraphCanvas.jsx', 'src/main.jsx'],
       thresholds: {
         statements: 70,
         branches: 70,

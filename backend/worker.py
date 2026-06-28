@@ -136,7 +136,68 @@ def clean_latex_for_telegram(text: str) -> str:
 
     return text
 
-async def send_telegram_message(chat_id: str, text: str) -> None:
+# Inline keyboard shown below every successfully saved item
+def build_recall_keyboard(item_id: int) -> dict:
+    """Build the inline keyboard for a successfully saved item."""
+    website_url = settings.WEBSITE_URL
+    # Telegram Bot API rejects 'localhost' or '127.0.0.1' URLs in inline buttons.
+    # If using local dev without a tunnel, fall back to a mock public domain to prevent 400 Bad Request.
+    if "localhost" in website_url or "127.0.0.1" in website_url:
+        website_url = "https://recall-dev.example.com"
+        
+    return {
+        "inline_keyboard": [[
+            {"text": "Open in Recall", "url": f"{website_url}/archive?item={item_id}"},
+            {"text": "Quiz Me", "callback_data": f"quiz_me:{item_id}"},
+            {"text": "Remind Me", "callback_data": f"remind_me:{item_id}"},
+        ]]
+    }
+
+# Divider used in intelligence-brief style messages
+_DIVIDER = "\u2500\u2500 \u2500\u2500 \u2500\u2500 \u2500\u2500 \u2500\u2500"
+
+
+def _truncate_summary(summary: str, max_chars: int = 3000) -> str:
+    """Truncate summary to at most max_chars characters, breaking at a word boundary."""
+    if len(summary) <= max_chars:
+        return summary
+    truncated = summary[:max_chars].rsplit(" ", 1)[0]
+    return truncated.rstrip(".,;:") + "…"
+
+
+
+
+def _format_tags(tags: list) -> str:
+    """Return a space-separated tag string like '#tag1  #tag2  #tag3'."""
+    if not tags:
+        return ""
+    return "  ".join(f"#{t}" for t in tags)
+
+
+def _build_success_message(emoji_title: str, summary: str, tags: list) -> str:
+    """
+    Build the Phase-6 intelligence-brief success message:
+
+        📄 filename.pdf
+
+        Summary in one or two compact sentences.
+
+        ── ── ── ── ──
+        #tag1  #tag2  #tag3
+
+        Saved.
+    """
+    summary_text = _truncate_summary(summary)
+    tag_line = _format_tags(tags)
+    parts = [emoji_title, "", summary_text, "", _DIVIDER]
+    if tag_line:
+        parts.append(tag_line)
+    parts.append("")
+    parts.append("Saved.")
+    return "\n".join(parts)
+
+
+async def send_telegram_message(chat_id: str, text: str, reply_markup: Optional[dict] = None) -> None:
     """Helper to send a message back to the Telegram chat."""
     url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
     
@@ -163,12 +224,12 @@ async def send_telegram_message(chat_id: str, text: str) -> None:
             bolded_parts.append(part)
     formatted = "".join(bolded_parts)
     
-    # 3. Process line-by-line for headers, lists, italics, and footer beautification
+    # 3. Process line-by-line for headers, lists, italics, and title beautification
     lines = formatted.split("\n")
     if lines:
         # Beautify title line if it starts with an emoji
         first_line = lines[0]
-        emojis = ("🎥 ", "📸 ", "📄 ", "🎙 ", "🖼 ")
+        emojis = ("🎥 ", "📸 ", "📄 ", "🎙 ", "🖼 ", "🔗 ")
         for emoji in emojis:
             if first_line.startswith(emoji):
                 title_content = first_line[len(emoji):]
@@ -189,26 +250,19 @@ async def send_telegram_message(chat_id: str, text: str) -> None:
             # Convert Markdown italics (*text* or _text_) to <i>text</i>
             line = re.sub(r'\*(.*?)\*', r'<i>\1</i>', line)
             line = re.sub(r'_(.*?)_', r'<i>\1</i>', line)
-            
-            # Beautify footer/acknowledgements
-            if line == "Saved ✓":
-                line = "<b>Saved ✓</b>"
-            elif line.endswith(" | Saved ✓"):
-                base = line[:-10]
-                line = f"{base} | <b>Saved ✓</b>"
-            elif line.startswith("Saved ✓ — "):
-                title_content = line[10:]
-                line = f"<b>Saved ✓</b> — {title_content}"
                 
             lines[idx] = line
             
     final_text = "\n".join(lines)
     
-    payload = {
+    payload: Dict[str, Any] = {
         "chat_id": str(chat_id),
         "text": final_text,
         "parse_mode": "HTML"
     }
+    if reply_markup is not None:
+        import json as _json
+        payload["reply_markup"] = _json.dumps(reply_markup)
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(url, json=payload)
@@ -288,10 +342,11 @@ async def process_task(task: Dict[str, Any]) -> None:
                 async with _pool.connection() as conn:
                     await conn.execute("SET statement_timeout = '30s'")
                     async with conn.cursor() as cur:
-                        await cur.execute("SELECT id FROM items WHERE user_id=%s AND content_hash=%s LIMIT 1", (user_id, content_hash))
+                        await cur.execute("SELECT id, created_at FROM items WHERE user_id=%s AND content_hash=%s LIMIT 1", (user_id, content_hash))
                         row = await cur.fetchone()
                         if row:
-                            bot_reply = "This looks like something you've already saved."
+                            saved_date = row[1].strftime("%d %b %Y") if hasattr(row[1], "strftime") else str(row[1])[:10]
+                            bot_reply = f"Already saved on {saved_date}."
                             await send_telegram_message(chat_id, bot_reply)
                             return
                 
@@ -322,8 +377,8 @@ async def process_task(task: Dict[str, Any]) -> None:
                         item_id = row[0]
                         await conn.commit()
                     
-                bot_reply = f"Saved ✓ — [{title}]"
-                await send_telegram_message(chat_id, bot_reply)
+                bot_reply = _build_success_message(f"📝 {title}", summary, normalized_tags)
+                await send_telegram_message(chat_id, bot_reply, reply_markup=build_recall_keyboard(item_id))
                 
             elif content_type == "url":
                 if not text_content:
@@ -333,10 +388,11 @@ async def process_task(task: Dict[str, Any]) -> None:
                 async with _pool.connection() as conn:
                     await conn.execute("SET statement_timeout = '30s'")
                     async with conn.cursor() as cur:
-                        await cur.execute("SELECT id, title FROM items WHERE user_id=%s AND source_url=%s LIMIT 1", (user_id, text_content))
+                        await cur.execute("SELECT id, title, created_at FROM items WHERE user_id=%s AND source_url=%s LIMIT 1", (user_id, text_content))
                         row = await cur.fetchone()
                         if row:
-                            bot_reply = f"Already saved! Item ID: {row[0]} — {row[1]}"
+                            saved_date = row[2].strftime("%d %b %Y") if hasattr(row[2], "strftime") else str(row[2])[:10]
+                            bot_reply = f"Already saved on {saved_date}."
                             await send_telegram_message(chat_id, bot_reply)
                             return
                 
@@ -353,12 +409,7 @@ async def process_task(task: Dict[str, Any]) -> None:
                         item_id = await ingest_url(text_content, user_id, _pool)
                     except ValueError as e:
                         if "private Google Drive link" in str(e):
-                            bot_reply = (
-                                "🔒 This Google Drive file is private.\n\n"
-                                "To save it in Recall, please either:\n"
-                                "1. Set the file's link sharing to \"Anyone with the link can view\", or\n"
-                                "2. Share the file with our Service Account email (if configured)."
-                            )
+                            bot_reply = "That Drive file is private. Share it publicly to save it."
                             await send_telegram_message(chat_id, bot_reply)
                             return
                         raise
@@ -367,27 +418,29 @@ async def process_task(task: Dict[str, Any]) -> None:
                 async with _pool.connection() as conn:
                     await conn.execute("SET statement_timeout = '30s'")
                     async with conn.cursor() as cur:
-                        await cur.execute("SELECT title, summary FROM items WHERE id = %s AND user_id = %s;", (item_id, user_id))
+                        await cur.execute("SELECT title, summary, tags FROM items WHERE id = %s AND user_id = %s;", (item_id, user_id))
                         row = await cur.fetchone()
                 title = row[0] if row else "URL Link"
                 summary = row[1] if row else ""
+                item_tags = row[2] if row else []
                 
                 if is_youtube:
                     if "Could not process" in summary:
-                        bot_reply = f"Could not process this YouTube video. Saved as bookmark. We'll retry later."
+                        bot_reply = "Couldn't process that. Try again in a moment."
+                        await send_telegram_message(chat_id, bot_reply)
                     else:
-                        bot_reply = f"🎥 {title}\n\n{summary}\n\nSaved ✓"
+                        bot_reply = _build_success_message(f"🎥 {title}", summary, item_tags or [])
+                        await send_telegram_message(chat_id, bot_reply, reply_markup=build_recall_keyboard(item_id))
                 elif is_instagram:
                     if "Could not process" in summary:
-                        bot_reply = f"Could not process this Instagram Reel. Saved as bookmark. We'll retry later."
+                        bot_reply = "Couldn't process that. Try again in a moment."
+                        await send_telegram_message(chat_id, bot_reply)
                     else:
-                        bot_reply = f"📸 {title}\n\n{summary}\n\nSaved ✓"
+                        bot_reply = _build_success_message(f"📸 {title}", summary, item_tags or [])
+                        await send_telegram_message(chat_id, bot_reply, reply_markup=build_recall_keyboard(item_id))
                 else:
-                    if summary:
-                        bot_reply = f"🔗 {title}\n\n{summary}\n\nSaved ✓"
-                    else:
-                        bot_reply = f"Saved ✓ — {title}"
-                await send_telegram_message(chat_id, bot_reply)
+                    bot_reply = _build_success_message(f"🔗 {title}", summary, item_tags or [])
+                    await send_telegram_message(chat_id, bot_reply, reply_markup=build_recall_keyboard(item_id))
                 
             elif content_type == "pdf":
                 if not file_id:
@@ -410,21 +463,27 @@ async def process_task(task: Dict[str, Any]) -> None:
                     
                     try:
                         item_id = await ingest_pdf(temp_path, user_id, filename, file_id, _pool)
-                    except DuplicateItemException:
-                        bot_reply = "This looks like something you've already saved."
+                    except DuplicateItemException as dup_exc:
+                        saved_date = getattr(dup_exc, "saved_date", None)
+                        if saved_date and hasattr(saved_date, "strftime"):
+                            date_str = saved_date.strftime("%d %b %Y")
+                        else:
+                            date_str = str(saved_date)[:10] if saved_date else "a previous date"
+                        bot_reply = f"Already saved on {date_str}."
                         await send_telegram_message(chat_id, bot_reply)
                         return
                     
-                    # Fetch generated summary (short connection block)
+                    # Fetch generated summary and tags (short connection block)
                     async with _pool.connection() as conn:
                         await conn.execute("SET statement_timeout = '30s'")
                         async with conn.cursor() as cur:
-                            await cur.execute("SELECT summary FROM items WHERE id = %s AND user_id = %s;", (item_id, user_id))
+                            await cur.execute("SELECT summary, tags FROM items WHERE id = %s AND user_id = %s;", (item_id, user_id))
                             row = await cur.fetchone()
                     summary = row[0] if row else "No summary available."
+                    item_tags = row[1] if row else []
                     
-                    bot_reply = f"📄 {filename}\n\n{summary}\n\nPages: {page_count} | Saved ✓"
-                    await send_telegram_message(chat_id, bot_reply)
+                    bot_reply = _build_success_message(f"📄 {filename}", summary, item_tags or [])
+                    await send_telegram_message(chat_id, bot_reply, reply_markup=build_recall_keyboard(item_id))
                     
                 finally:
                     if os.path.exists(temp_path):
@@ -439,8 +498,13 @@ async def process_task(task: Dict[str, Any]) -> None:
                 
                 try:
                     item_id = await ingest_voice(file_id, user_id, chat_id, _pool)
-                except DuplicateItemException:
-                    bot_reply = "This looks like something you've already saved."
+                except DuplicateItemException as dup_exc:
+                    saved_date = getattr(dup_exc, "saved_date", None)
+                    if saved_date and hasattr(saved_date, "strftime"):
+                        date_str = saved_date.strftime("%d %b %Y")
+                    else:
+                        date_str = str(saved_date)[:10] if saved_date else "a previous date"
+                    bot_reply = f"Already saved on {date_str}."
                     await send_telegram_message(chat_id, bot_reply)
                     return
                 
@@ -448,17 +512,17 @@ async def process_task(task: Dict[str, Any]) -> None:
                 async with _pool.connection() as conn:
                     await conn.execute("SET statement_timeout = '30s'")
                     async with conn.cursor() as cur:
-                        await cur.execute("SELECT raw_text, summary FROM items WHERE id = %s AND user_id = %s;", (item_id, user_id))
+                        await cur.execute("SELECT summary, tags FROM items WHERE id = %s AND user_id = %s;", (item_id, user_id))
                         row = await cur.fetchone()
                 if row:
-                    decrypted_transcript = decrypt(row[0])
-                    summary = row[1]
+                    summary = row[0]
+                    item_tags = row[1] if row[1] else []
                 else:
-                    decrypted_transcript = "Transcription not retrieved."
-                    summary = "Summary not retrieved."
+                    summary = "Voice note saved."
+                    item_tags = []
                     
-                bot_reply = f"🎙 Transcribed:\n{decrypted_transcript[:200]}...\n\n📝 Summary:\n{summary}\n\nSaved ✓"
-                await send_telegram_message(chat_id, bot_reply)
+                bot_reply = _build_success_message("🎙 Voice note", summary, item_tags)
+                await send_telegram_message(chat_id, bot_reply, reply_markup=build_recall_keyboard(item_id))
                 
             elif content_type in ("photo", "image"):
                 if not file_id:
@@ -466,8 +530,13 @@ async def process_task(task: Dict[str, Any]) -> None:
                     
                 try:
                     item_id = await ingest_image(file_id, user_id, chat_id, _pool)
-                except DuplicateItemException:
-                    bot_reply = "This looks like something you've already saved."
+                except DuplicateItemException as dup_exc:
+                    saved_date = getattr(dup_exc, "saved_date", None)
+                    if saved_date and hasattr(saved_date, "strftime"):
+                        date_str = saved_date.strftime("%d %b %Y")
+                    else:
+                        date_str = str(saved_date)[:10] if saved_date else "a previous date"
+                    bot_reply = f"Already saved on {date_str}."
                     await send_telegram_message(chat_id, bot_reply)
                     return
                 
@@ -475,23 +544,17 @@ async def process_task(task: Dict[str, Any]) -> None:
                 async with _pool.connection() as conn:
                     await conn.execute("SET statement_timeout = '30s'")
                     async with conn.cursor() as cur:
-                        await cur.execute("SELECT raw_text, summary FROM items WHERE id = %s AND user_id = %s;", (item_id, user_id))
+                        await cur.execute("SELECT summary, tags FROM items WHERE id = %s AND user_id = %s;", (item_id, user_id))
                         row = await cur.fetchone()
                 if row:
-                    decrypted_raw = decrypt(row[0])
-                    summary = row[1]
+                    summary = row[0]
+                    item_tags = row[1] if row[1] else []
                 else:
-                    decrypted_raw = ""
-                    summary = ""
+                    summary = "Image saved."
+                    item_tags = []
                     
-                if decrypted_raw.startswith("OCR Text:"):
-                    ocr_content = decrypted_raw.replace("OCR Text:\n", "")
-                    bot_reply = f"🖼 Extracted text:\n{ocr_content[:200]}...\n\nSaved ✓"
-                else:
-                    caption_content = decrypted_raw.replace("Image Caption:\n", "")
-                    bot_reply = f"🖼 Caption: {caption_content}\n\nSaved ✓"
-                    
-                await send_telegram_message(chat_id, bot_reply)
+                bot_reply = _build_success_message("🖼 Image", summary, item_tags)
+                await send_telegram_message(chat_id, bot_reply, reply_markup=build_recall_keyboard(item_id))
                 
             else:
                 logger.warning("Worker received unsupported content type '%s' on update_id=%s. Discarding.", content_type, update_id)

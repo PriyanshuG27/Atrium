@@ -614,6 +614,100 @@ async def weekly_drive_sync() -> None:
         logger.error("weekly_drive_sync background job failed: %s", e, exc_info=True)
 
 
+async def offpeak_quiz_generator() -> None:
+    """
+    Daily job to generate quizzes for items that don't have a quiz card yet.
+    Runs at off-peak hours (e.g., 03:30 UTC) to minimize peak-hour API usage.
+    """
+    logger.info("Starting off-peak automatic quiz generation background job...")
+    pool = await get_pool()
+    if not pool:
+        logger.error("DB pool not initialized in offpeak_quiz_generator.")
+        return
+
+    import json
+    import asyncio
+    from backend.services.encryption import decrypt
+    from backend.services.ai_cascade import AICascade
+
+    try:
+        # 1. Fetch items without quizzes
+        async with pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute("SET statement_timeout = '60s'")
+                await cur.execute(
+                    """
+                    SELECT i.id, i.user_id, i.summary, i.raw_text, i.title
+                    FROM items i
+                    LEFT JOIN quizzes q ON i.id = q.item_id AND i.user_id = q.user_id
+                    WHERE q.id IS NULL
+                    ORDER BY i.created_at ASC
+                    LIMIT 50;
+                    """
+                )
+                items_without_quiz = await cur.fetchall()
+
+        if not items_without_quiz:
+            logger.info("No items without quizzes found. Off-peak quiz generation complete.")
+            return
+
+        logger.info("Found %d items requiring quiz generation.", len(items_without_quiz))
+
+        cascade = AICascade()
+        generated_count = 0
+
+        for item_id, user_id, summary, raw_text, title in items_without_quiz:
+            try:
+                decrypted_text = ""
+                if raw_text:
+                    try:
+                        decrypted_text = decrypt(raw_text)
+                    except Exception:
+                        decrypted_text = raw_text
+
+                text_for_quiz = summary or decrypted_text or title or ""
+                if not text_for_quiz:
+                    continue
+
+                quiz_data = await cascade.generate_quiz(text_for_quiz)
+                if quiz_data:
+                    async with pool.connection() as conn:
+                        async with conn.cursor() as cur:
+                            await cur.execute("SET statement_timeout = '30s'")
+                            await cur.execute(
+                                """
+                                INSERT INTO quizzes (user_id, item_id, question, options, correct_index, explanation)
+                                VALUES (%s, %s, %s, %s, %s, %s);
+                                """,
+                                (
+                                    user_id,
+                                    item_id,
+                                    quiz_data["question"],
+                                    json.dumps(quiz_data["options"]),
+                                    quiz_data["correct_index"],
+                                    quiz_data["explanation"]
+                                )
+                            )
+                            await conn.commit()
+                    generated_count += 1
+
+                # Dynamic throttle: 1s sleep between LLM calls to prevent rate-limit spikes
+                await asyncio.sleep(1.0)
+
+            except Exception as item_err:
+                logger.error(
+                    "Failed to generate quiz for item %d (user %d) during off-peak: %s",
+                    item_id,
+                    user_id,
+                    item_err
+                )
+
+        logger.info("Off-peak quiz generation complete. Generated %d quizzes.", generated_count)
+
+    except Exception as e:
+        logger.error("offpeak_quiz_generator background job failed: %s", e, exc_info=True)
+
+
 # ---------------------------------------------------------------------------
 # Scheduler Manager
 # ---------------------------------------------------------------------------
@@ -681,9 +775,17 @@ async def start_scheduler(app=None) -> None:
         id="weekly_drive_sync",
         misfire_grace_time=60
     )
+
+    # 8. offpeak_quiz_generator (daily at 22:00 UTC / 3:30 AM IST)
+    _scheduler.add_job(
+        offpeak_quiz_generator,
+        trigger=CronTrigger(hour=22, minute=0, timezone="UTC"),
+        id="offpeak_quiz_generator",
+        misfire_grace_time=60
+    )
     
     _scheduler.start()
-    logger.info("Background job scheduler started successfully with all 7 jobs.")
+    logger.info("Background job scheduler started successfully with all 8 jobs.")
 
 
 async def stop_scheduler() -> None:

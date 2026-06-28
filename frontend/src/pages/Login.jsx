@@ -1,49 +1,224 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
-import GraphCanvas from '../canvas/GraphCanvas';
-import { Microphone, Link as LinkIcon, FilePdf } from '@phosphor-icons/react';
 
-// Pre-calculated coordinates for a 5-node star constellation layout
-const demoNodes = [
-  { id: 1, title: 'Voice Notes', x: 200, y: 150, type: 'node', source_type: 'voice' },
-  { id: 2, title: 'Links', x: 120, y: 350, type: 'node', source_type: 'url' },
-  { id: 3, title: 'PDFs', x: 380, y: 250, type: 'node', source_type: 'pdf' },
-  { id: 4, title: 'Recall', x: 450, y: 480, type: 'node', source_type: 'text' },
-  { id: 5, title: 'Zero Friction', x: 280, y: 550, type: 'node', source_type: 'default' }
+/* ══════════════════════════════════════════════════════════════════════════
+   RECALL — Login v3 — "Your Memory, Mapped."
+   
+   Layout: full-bleed split-screen
+   • Left  60%: Live animated demo knowledge graph (pure canvas, no deps)
+   • Right 40%: Login form — wordmark, tagline, Telegram widget, dev bypass
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Demo graph data ────────────────────────────────────────────────────── */
+const DEMO_NODES = [
+  { id: 0,  label: 'Research',      color: '#CFA365', r: 22, type: 'hub'  },
+  { id: 1,  label: 'Machine Learning', color: '#7C6FD4', r: 8,  type: 'item' },
+  { id: 2,  label: 'Voice Note',    color: '#3DAA8A', r: 7,  type: 'item' },
+  { id: 3,  label: 'FastAPI docs',  color: '#C9893C', r: 8,  type: 'item' },
+  { id: 4,  label: 'Screenshot',    color: '#3D8AAA', r: 7,  type: 'item' },
+  { id: 5,  label: 'Meeting Notes', color: '#8A8582', r: 7,  type: 'item' },
+  { id: 6,  label: 'Ideas',         color: '#CFA365', r: 18, type: 'hub'  },
+  { id: 7,  label: 'Quick thought', color: '#3DAA8A', r: 7,  type: 'item' },
+  { id: 8,  label: 'Article link',  color: '#7C6FD4', r: 7,  type: 'item' },
+  { id: 9,  label: 'Design ref',    color: '#3D8AAA', r: 7,  type: 'item' },
+  { id: 10, label: 'Projects',      color: '#CFA365', r: 16, type: 'hub'  },
+  { id: 11, label: 'System design', color: '#C9893C', r: 8,  type: 'item' },
+  { id: 12, label: 'Stack trace',   color: '#8A8582', r: 7,  type: 'item' },
 ];
 
-const demoEdges = [
-  { id: 1, source: 1, target: 3, weight: 0.8 },
-  { id: 2, source: 2, target: 4, weight: 0.9 },
-  { id: 3, source: 3, target: 5, weight: 0.7 }
+const DEMO_EDGES = [
+  [0,1],[0,2],[0,3],[0,4],[0,5],
+  [6,7],[6,8],[6,9],[1,8],
+  [10,11],[10,12],[10,3],[5,11],
 ];
 
-export default function Login() {
-  const { login } = useAuth();
-  const [error, setError] = useState('');
-  const [customChatId, setCustomChatId] = useState('');
-  const [showDeveloperBypass, setShowDeveloperBypass] = useState(false);
+function useDemoGraph(canvasRef) {
+  const stateRef = useRef(null);
 
-  // Load the live Telegram Login widget
   useEffect(() => {
-    const script = document.createElement('script');
-    script.src = "https://telegram.org/js/telegram-web-app.js";
-    script.setAttribute("data-telegram-login", import.meta.env.VITE_BOT_USERNAME || "");
-    script.setAttribute("data-size", "large");
-    script.setAttribute("data-radius", "8");
-    script.setAttribute("data-auth-url", `${import.meta.env.VITE_API_URL || ""}/auth/telegram`);
-    script.async = true;
-    
-    const container = document.getElementById('telegram-widget-container');
-    if (container) {
-      container.appendChild(script);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Place nodes in a nice layout
+    const W = canvas.width;
+    const H = canvas.height;
+    const cx = W / 2;
+    const cy = H / 2;
+
+    // Hub positions (spiral seeded)
+    const hubPositions = [
+      { x: cx - 130, y: cy - 60 },  // 0 Research
+      { x: cx + 140, y: cy + 50 },  // 6 Ideas
+      { x: cx - 20,  y: cy + 150 }, // 10 Projects
+    ];
+
+    const nodes = DEMO_NODES.map((n, i) => {
+      let x, y;
+      if (n.type === 'hub') {
+        const hi = [0,6,10].indexOf(n.id);
+        x = hubPositions[hi]?.x ?? cx;
+        y = hubPositions[hi]?.y ?? cy;
+      } else {
+        // Orbit around connected hub
+        x = cx + (Math.random() - 0.5) * W * 0.7;
+        y = cy + (Math.random() - 0.5) * H * 0.65;
+      }
+      return { ...n, x, y, vx: 0, vy: 0, phase: Math.random() * Math.PI * 2 };
+    });
+
+    // Simple D3-style force simulation
+    function tick() {
+      const t = performance.now() * 0.001;
+      nodes.forEach(n => {
+        // Gentle float
+        n.vx += (Math.sin(t * 0.3 + n.phase) * 0.12 - n.vx) * 0.03;
+        n.vy += (Math.cos(t * 0.22 + n.phase) * 0.09 - n.vy) * 0.03;
+        // Repulsion
+        nodes.forEach(m => {
+          if (m.id === n.id) return;
+          const dx = n.x - m.x;
+          const dy = n.y - m.y;
+          const d2 = dx*dx + dy*dy + 0.1;
+          const f = Math.min(4000 / d2, 2.5);
+          n.vx += dx * f * 0.01;
+          n.vy += dy * f * 0.01;
+        });
+        // Center gravity
+        n.vx += (cx - n.x) * 0.0008;
+        n.vy += (cy - n.y) * 0.0006;
+        // Damping
+        n.vx *= 0.85;
+        n.vy *= 0.85;
+        n.x += n.vx;
+        n.y += n.vy;
+        // Bounds
+        n.x = Math.max(n.r + 10, Math.min(W - n.r - 10, n.x));
+        n.y = Math.max(n.r + 10, Math.min(H - n.r - 10, n.y));
+      });
     }
 
+    let rafId;
+    function draw() {
+      rafId = requestAnimationFrame(draw);
+      tick();
+
+      ctx.clearRect(0, 0, W, H);
+
+      // ── Edges ──
+      DEMO_EDGES.forEach(([si, ti]) => {
+        const s = nodes[si];
+        const t = nodes[ti];
+        const isHub = s.type === 'hub' || t.type === 'hub';
+        ctx.beginPath();
+        ctx.moveTo(s.x, s.y);
+        ctx.lineTo(t.x, t.y);
+        ctx.strokeStyle = isHub ? 'rgba(207,163,101,0.22)' : 'rgba(138,133,130,0.1)';
+        ctx.lineWidth = isHub ? 1.2 : 0.6;
+        ctx.stroke();
+      });
+
+      // ── Nodes ──
+      nodes.forEach(n => {
+        const isHubNode = n.type === 'hub';
+
+        if (isHubNode) {
+          // Outer glow
+          const grd = ctx.createRadialGradient(n.x, n.y, n.r * 0.5, n.x, n.y, n.r * 3);
+          grd.addColorStop(0, `${n.color}30`);
+          grd.addColorStop(1, `${n.color}00`);
+          ctx.beginPath();
+          ctx.arc(n.x, n.y, n.r * 3, 0, Math.PI * 2);
+          ctx.fillStyle = grd;
+          ctx.fill();
+
+          // Rings
+          ctx.beginPath();
+          ctx.arc(n.x, n.y, n.r + 5, 0, Math.PI * 2);
+          ctx.strokeStyle = `${n.color}55`;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
+
+        // Core
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+        ctx.fillStyle = n.color;
+        ctx.globalAlpha = isHubNode ? 0.9 : 0.75;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+
+        // Label
+        if (isHubNode) {
+          ctx.font = 'bold 10px "JetBrains Mono", monospace';
+          ctx.fillStyle = '#F4EFEB';
+          ctx.textAlign = 'center';
+          ctx.fillText(n.label, n.x, n.y - n.r - 6);
+        }
+      });
+    }
+
+    stateRef.current = { rafId: null };
+    draw();
+    stateRef.current.rafId = rafId;
+
     return () => {
-      if (container) {
-        container.innerHTML = '';
-      }
+      cancelAnimationFrame(rafId);
     };
+  }, [canvasRef]);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Main Component
+   ══════════════════════════════════════════════════════════════════════════ */
+export default function Login() {
+  const { login } = useAuth();
+  const [error, setError]             = useState('');
+  const [customChatId, setCustomChatId] = useState('');
+  const [displayText, setDisplayText] = useState('');
+  const canvasRef = useRef(null);
+
+  // Animate demo graph
+  useDemoGraph(canvasRef);
+
+  // Typewriter tagline
+  const fullText = 'Your second brain, finally visible.';
+  useEffect(() => {
+    let i = 0;
+    const iv = setInterval(() => {
+      setDisplayText(fullText.slice(0, i + 1));
+      i++;
+      if (i >= fullText.length) clearInterval(iv);
+    }, 42);
+    return () => clearInterval(iv);
+  }, []);
+
+  // Set canvas size on mount
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const resize = () => {
+      canvas.width  = canvas.offsetWidth;
+      canvas.height = canvas.offsetHeight;
+    };
+    resize();
+    window.addEventListener('resize', resize);
+    return () => window.removeEventListener('resize', resize);
+  }, []);
+
+  // Telegram widget
+  useEffect(() => {
+    const script = document.createElement('script');
+    script.src = 'https://telegram.org/js/telegram-web-app.js';
+    script.setAttribute('data-telegram-login', import.meta.env.VITE_BOT_USERNAME || '');
+    script.setAttribute('data-size', 'large');
+    script.setAttribute('data-radius', '4');
+    script.setAttribute('data-auth-url', `${import.meta.env.VITE_API_URL || ''}/auth/telegram`);
+    script.async = true;
+    const container = document.getElementById('tg-widget');
+    if (container) container.appendChild(script);
+    return () => { if (container) container.innerHTML = ''; };
   }, []);
 
   const handleDeveloperBypass = async () => {
@@ -60,281 +235,184 @@ export default function Login() {
         setError('Bypass login failed.');
       }
     } catch (err) {
-      console.error(err);
       setError('Connection error.');
     }
   };
 
   return (
     <div style={{
-      position: 'relative',
       width: '100%',
-      minHeight: '100vh',
+      height: '100vh',
       display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: '1.5rem',
-      backgroundColor: '#030307',
+      background: '#09080C',
       overflow: 'hidden',
-      fontFamily: "'Outfit', sans-serif"
+      fontFamily: '"Inter", sans-serif',
     }}>
-      {/* Dynamic Keyframe Styles */}
-      <style dangerouslySetInnerHTML={{__html: `
-        @keyframes slideUpFade {
-          from {
-            opacity: 0;
-            transform: translateY(24px) scale(0.98);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0) scale(1);
-          }
+      <style>{`
+        @keyframes login-fade-up {
+          from { opacity: 0; transform: translateY(16px); }
+          to   { opacity: 1; transform: translateY(0); }
         }
-        .slide-up-fade {
-          animation: slideUpFade 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        @keyframes pulse-border {
+          0%,100% { border-color: rgba(207,163,101,0.12); }
+          50%     { border-color: rgba(207,163,101,0.32); }
         }
-        .feature-pill {
-          transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-        }
-        .feature-pill:hover {
-          background: rgba(255, 255, 255, 0.08) !important;
-          border-color: rgba(0, 212, 170, 0.3) !important;
-          transform: translateY(-1px);
-        }
-        .bypass-toggle {
-          cursor: pointer;
-          font-size: 0.75rem;
-          color: var(--color-text-muted);
-          text-decoration: underline;
-          margin-top: 1.5rem;
-          transition: color 0.2s ease;
-        }
-        .bypass-toggle:hover {
-          color: var(--color-text);
-        }
-      `}} />
+        .login-step { opacity: 0; animation: login-fade-up 0.6s cubic-bezier(0.16,1,0.3,1) forwards; }
+        .bypass-input:focus { border-color: rgba(207,163,101,0.4) !important; outline: none; }
+        .bypass-btn:hover { opacity: 0.8; }
+      `}</style>
 
-      {/* Floating Nebula Blobs (Cosmic Noir Atmosphere) */}
-      <div className="nebula-blob nebula-violet" style={{ top: '10%', left: '5%', width: '450px', height: '450px', position: 'absolute', pointerEvents: 'none' }} />
-      <div className="nebula-blob nebula-mint" style={{ bottom: '10%', right: '5%', width: '500px', height: '500px', position: 'absolute', pointerEvents: 'none' }} />
+      {/* ── LEFT: Animated knowledge graph ── */}
+      <div style={{ flex: '1 1 60%', position: 'relative', overflow: 'hidden' }}>
+        {/* Dark gradient overlay on right edge to blend into form */}
+        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to right, transparent 70%, #09080C 100%)', zIndex: 2, pointerEvents: 'none' }} />
+        <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(ellipse 70% 60% at 40% 50%, rgba(207,163,101,0.04) 0%, transparent 70%)', zIndex: 1, pointerEvents: 'none' }} />
+        
+        <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />
 
-      {/* 30% Opacity Hero Constellation Graph Background */}
-      <div style={{
-        position: 'absolute',
-        inset: 0,
-        opacity: 0.3,
-        pointerEvents: 'none',
-        zIndex: 0
-      }}>
-        <GraphCanvas 
-          activeNodes={demoNodes} 
-          edges={demoEdges} 
-          pan={{ x: 0, y: 0 }}
-          zoom={1}
-        />
+        {/* Floating label in top-left */}
+        <div style={{ position: 'absolute', top: 32, left: 36, zIndex: 5 }}>
+          <div style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 10, color: 'rgba(207,163,101,0.5)', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 6 }}>
+            RECALL
+          </div>
+          <div style={{ fontFamily: '"Outfit", sans-serif', fontWeight: 700, fontSize: '1.5rem', color: '#F0EDE8', letterSpacing: '-0.03em' }}>
+            Your knowledge,<br />connected.
+          </div>
+        </div>
+
+        {/* Step indicators bottom-left */}
+        <div style={{ position: 'absolute', bottom: 36, left: 36, zIndex: 5, display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
+          {[
+            ['01', 'SEND', 'Message your Telegram bot'],
+            ['02', 'SAVE', 'Recall indexes it instantly'],
+            ['03', 'MAP',  'Your knowledge graph grows'],
+          ].map(([num, title, desc], i) => (
+            <div key={num} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', opacity: 0.7 }}>
+              <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 9, color: 'var(--accent-gold)', letterSpacing: '0.1em' }}>{num}</span>
+              <span style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 9, color: '#F0EDE8', letterSpacing: '0.1em' }}>{title}</span>
+              <span style={{ fontFamily: '"Inter", sans-serif', fontSize: 11, color: 'rgba(244,239,235,0.4)' }}>{desc}</span>
+            </div>
+          ))}
+        </div>
       </div>
 
-      {/* Double-Bezel (Doppelrand) Nested Card Architecture */}
-      <div className="slide-up-fade" style={{
-        zIndex: 1,
-        width: '100%',
-        maxWidth: '440px',
-        padding: '6px',
-        borderRadius: '24px',
-        background: 'rgba(255, 255, 255, 0.03)',
-        border: '1px solid rgba(255, 255, 255, 0.08)',
-        backdropFilter: 'blur(32px)',
-        WebkitBackdropFilter: 'blur(32px)',
-        boxShadow: '0 24px 60px rgba(0, 0, 0, 0.5)'
+      {/* ── RIGHT: Login form ── */}
+      <div style={{
+        flex: '0 0 400px',
+        minWidth: 340,
+        maxWidth: 440,
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'center',
+        padding: '3rem 3rem 3rem 2.5rem',
+        position: 'relative',
+        zIndex: 10,
+        borderLeft: '1px solid rgba(244,239,235,0.05)',
+        background: 'rgba(10,9,14,0.96)',
+        backdropFilter: 'blur(20px)',
       }}>
-        <div className="glass-card" style={{
-          padding: '2.5rem 2rem',
-          borderRadius: '18px',
-          background: 'rgba(7, 7, 15, 0.9)',
-          border: '1px solid rgba(255, 255, 255, 0.03)',
-          boxShadow: 'inset 0 1px 1px rgba(255, 255, 255, 0.1)',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          textAlign: 'center'
-        }}>
-          {/* Logo Branding */}
-          <h1 style={{
-            fontFamily: "'Outfit', sans-serif",
-            fontWeight: 700,
-            fontSize: '32px',
-            margin: 0,
-            color: '#F1F1F6',
-            letterSpacing: '-0.02em',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.4rem'
-          }}>
-            ✦ Recall
-          </h1>
 
-          {/* Tagline */}
-          <p style={{
-            fontFamily: "'Outfit', sans-serif",
-            fontWeight: 400,
-            fontSize: '18px',
-            margin: '0.5rem 0 1.5rem 0',
-            color: '#8E8E9F'
-          }}>
-            Your second brain. Zero friction.
-          </p>
-
-          {/* Feature Pills */}
-          <div style={{
-            display: 'flex',
-            gap: '0.6rem',
-            marginBottom: '2rem',
-            justifyContent: 'center',
-            flexWrap: 'wrap'
-          }}>
-            <div className="feature-pill" style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.35rem',
-              padding: '0.4rem 0.8rem',
-              borderRadius: '20px',
-              background: 'rgba(255, 255, 255, 0.04)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
-              fontSize: '0.8125rem',
-              color: '#F1F1F6'
-            }}>
-              <Microphone size={14} weight="light" />
-              <span>Voice Notes</span>
-            </div>
-            <div className="feature-pill" style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.35rem',
-              padding: '0.4rem 0.8rem',
-              borderRadius: '20px',
-              background: 'rgba(255, 255, 255, 0.04)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
-              fontSize: '0.8125rem',
-              color: '#F1F1F6'
-            }}>
-              <LinkIcon size={14} weight="light" />
-              <span>Links</span>
-            </div>
-            <div className="feature-pill" style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.35rem',
-              padding: '0.4rem 0.8rem',
-              borderRadius: '20px',
-              background: 'rgba(255, 255, 255, 0.04)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
-              fontSize: '0.8125rem',
-              color: '#F1F1F6'
-            }}>
-              <FilePdf size={14} weight="light" />
-              <span>PDFs</span>
-            </div>
+        {/* Wordmark */}
+        <div className="login-step" style={{ animationDelay: '0.05s', marginBottom: '2.5rem' }}>
+          <div style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 10, color: 'rgba(207,163,101,0.5)', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 10 }}>
+            Personal knowledge OS
           </div>
-
-          {/* CTA: Telegram Login Widget Container */}
-          <div 
-            className="glass-card" 
-            id="telegram-widget-container" 
-            style={{
-              width: '100%',
-              minHeight: '64px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              border: '1px solid #00D4AA',
-              borderRadius: '8px',
-              background: 'rgba(0, 212, 170, 0.02)',
-              boxShadow: '0 0 15px rgba(0, 212, 170, 0.05)',
-              margin: '0.5rem 0'
-            }}
-          />
-
-          {/* Error Message */}
-          {error && (
-            <div style={{
-              color: '#ef4444',
-              fontSize: '0.8125rem',
-              backgroundColor: 'rgba(239, 68, 68, 0.1)',
-              padding: '0.5rem 0.75rem',
-              borderRadius: '6px',
-              marginTop: '1rem',
-              width: '100%',
-              border: '1px solid rgba(239, 68, 68, 0.2)'
-            }}>
-              {error}
-            </div>
-          )}
-
-          {/* Footer Statement */}
-          <p style={{
-            fontSize: '0.75rem',
-            color: '#8E8E9F',
-            marginTop: '2rem',
-            marginBottom: 0
-          }}>
-            Free. No signup form. Works in &lt; 5 seconds.
+          <h1 style={{ fontFamily: '"Outfit", sans-serif', fontWeight: 800, fontSize: '2.5rem', lineHeight: 1.05, letterSpacing: '-0.05em', color: '#F0EDE8', margin: '0 0 0.5rem 0' }}>
+            Recall.
+          </h1>
+          <p style={{ fontFamily: '"Inter", sans-serif', fontSize: '0.9375rem', color: 'rgba(244,239,235,0.45)', lineHeight: 1.5, margin: 0, minHeight: '1.5em' }}>
+            {displayText}
+            <span style={{ opacity: displayText.length < fullText.length ? 1 : 0, borderRight: '1.5px solid rgba(207,163,101,0.7)', marginLeft: 1, animation: 'pulse-border 0.8s steps(1) infinite' }}>&nbsp;</span>
           </p>
+        </div>
 
-          {/* Developer Bypass Panel */}
-          <div style={{
-            width: '100%',
-            marginTop: '1.5rem',
-            paddingTop: '1.5rem',
-            borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '0.6rem'
-          }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', width: '100%' }}>
-              <label htmlFor="custom-chat-id" style={{ fontSize: '0.8125rem', color: '#8E8E9F', textAlign: 'left' }}>
-                Telegram Chat ID to view your bot items
-              </label>
-              <input
-                id="custom-chat-id"
-                type="text"
-                value={customChatId}
-                onChange={(e) => setCustomChatId(e.target.value)}
-                placeholder="e.g. 123456789"
-                style={{
-                  width: '100%',
-                  background: 'rgba(255, 255, 255, 0.05)',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                  color: '#F1F1F6',
-                  padding: '0.5rem 0.75rem',
-                  borderRadius: '6px',
-                  outline: 'none',
-                  fontSize: '0.875rem',
-                  transition: 'border-color 0.2s ease'
-                }}
-                onFocus={(e) => e.target.style.borderColor = 'rgba(255, 255, 255, 0.2)'}
-                onBlur={(e) => e.target.style.borderColor = 'rgba(255, 255, 255, 0.08)'}
-              />
-            </div>
+        {/* Source type capabilities */}
+        <div className="login-step" style={{ animationDelay: '0.15s', display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '2.5rem' }}>
+          {[
+            ['🔗', 'Links',  '#7C6FD4'],
+            ['🎙', 'Voice',  '#3DAA8A'],
+            ['📄', 'PDFs',   '#C9893C'],
+            ['🖼', 'Images', '#3D8AAA'],
+            ['📝', 'Text',   '#8A8582'],
+          ].map(([icon, label, col]) => (
+            <span key={label} style={{
+              display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
+              padding: '0.3rem 0.65rem', borderRadius: 4,
+              border: `1px solid ${col}30`, background: `${col}10`,
+              fontSize: '0.75rem', color: col,
+              fontFamily: '"JetBrains Mono", monospace', letterSpacing: '0.04em',
+            }}>
+              {icon} {label}
+            </span>
+          ))}
+        </div>
 
-            <button 
-              className="btn btn-primary" 
+        {/* Telegram CTA */}
+        <div className="login-step" style={{ animationDelay: '0.25s', marginBottom: '1.5rem' }}>
+          <div style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 9, letterSpacing: '0.14em', color: 'rgba(207,163,101,0.5)', textTransform: 'uppercase', marginBottom: 10 }}>
+            Continue with
+          </div>
+          <div style={{ border: '1px solid rgba(207,163,101,0.15)', borderRadius: 8, padding: '1.25rem', animation: 'pulse-border 4s ease-in-out infinite' }}>
+            <div id="tg-widget" style={{ minHeight: 48, display: 'flex', alignItems: 'center', justifyContent: 'center' }} />
+          </div>
+        </div>
+
+        {/* Error */}
+        {error && (
+          <div style={{ marginBottom: '1rem', padding: '0.5rem 0.75rem', borderRadius: 4, background: 'rgba(180,60,60,0.1)', border: '1px solid rgba(180,60,60,0.25)', color: '#D4756A', fontSize: '0.8rem', fontFamily: '"JetBrains Mono", monospace' }}>
+            {error}
+          </div>
+        )}
+
+        {/* Footnote */}
+        <div className="login-step" style={{ animationDelay: '0.3s' }}>
+          <p style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 10, color: 'rgba(244,239,235,0.2)', letterSpacing: '0.1em', textTransform: 'uppercase', margin: '0 0 1.5rem 0' }}>
+            no account · no form · 5 seconds
+          </p>
+        </div>
+
+        {/* Dev bypass */}
+        <div className="login-step" style={{ animationDelay: '0.4s', paddingTop: '1.25rem', borderTop: '1px solid rgba(244,239,235,0.05)' }}>
+          <label style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 9, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'rgba(244,239,235,0.2)', display: 'block', marginBottom: 6 }}>
+            Dev bypass · Telegram Chat ID
+          </label>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <input
+              className="bypass-input"
+              type="text"
+              value={customChatId}
+              onChange={e => setCustomChatId(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleDeveloperBypass()}
+              placeholder="e.g. 123456789"
+              style={{
+                flex: 1,
+                background: 'rgba(244,239,235,0.03)',
+                border: '1px solid rgba(244,239,235,0.08)',
+                color: '#F0EDE8',
+                padding: '0.45rem 0.7rem',
+                borderRadius: 4,
+                fontSize: '0.8rem',
+                fontFamily: '"JetBrains Mono", monospace',
+                transition: 'border-color 0.15s',
+              }}
+            />
+            <button
+              className="bypass-btn"
               onClick={handleDeveloperBypass}
               style={{
-                width: '100%',
-                padding: '0.5rem 1rem',
-                fontSize: '0.875rem',
-                borderRadius: '6px',
-                fontWeight: '600',
+                padding: '0 1rem',
+                background: 'rgba(124,111,212,0.15)',
+                border: '1px solid rgba(124,111,212,0.3)',
+                borderRadius: 4,
+                color: '#9B90D9',
+                fontSize: '0.75rem',
+                fontFamily: '"JetBrains Mono", monospace',
                 cursor: 'pointer',
-                background: '#6C63FF',
-                border: 'none',
-                color: 'white',
-                transition: 'opacity 0.2s ease'
+                whiteSpace: 'nowrap',
+                transition: 'opacity 0.15s',
               }}
-              onMouseOver={(e) => e.target.style.opacity = '0.9'}
-              onMouseOut={(e) => e.target.style.opacity = '1'}
             >
-              ⚡ Developer Bypass Login
+              ⚡ Go
             </button>
           </div>
         </div>

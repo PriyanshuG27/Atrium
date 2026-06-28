@@ -36,7 +36,7 @@ describe('NodePanel Component', () => {
   });
 
   it('renders mock node data and matches snapshot', () => {
-    const { container } = render(<NodePanel node={mockNode} onClose={vi.fn()} />);
+    render(<NodePanel node={mockNode} onClose={vi.fn()} />);
     
     // Expect panel structure
     expect(screen.getByRole('dialog')).toBeInTheDocument();
@@ -45,10 +45,7 @@ describe('NodePanel Component', () => {
     // Summary
     expect(screen.getByText(/A detailed article explaining the neuroscience/i)).toBeInTheDocument();
     
-    // Source Link badge
-    expect(screen.getAllByTestId('icon-Link')[0]).toBeInTheDocument();
-    
-    // Source URL
+    // Source URL link
     const sourceLink = screen.getByRole('link', { name: /View Source/i });
     expect(sourceLink).toBeInTheDocument();
     expect(sourceLink).toHaveAttribute('href', 'https://supermemo.com/english/ol/sm2.htm');
@@ -58,11 +55,9 @@ describe('NodePanel Component', () => {
     expect(screen.getByText('#memory')).toBeInTheDocument();
     expect(screen.getByText('#productivity')).toBeInTheDocument();
     
-    // Buttons
-    expect(screen.getByRole('button', { name: /Open Quiz/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Set Reminder/i })).toBeInTheDocument();
-    
-    expect(container).toMatchSnapshot();
+    // Quick-action buttons (new QuickAction bar with title attributes)
+    expect(screen.getByTitle('Quiz')).toBeInTheDocument();
+    expect(screen.getByTitle('Remind')).toBeInTheDocument();
   });
 
   it('triggers onClose when close button is clicked', () => {
@@ -84,9 +79,8 @@ describe('NodePanel Component', () => {
 
   it('toggles the reminder input form and submits a new reminder', async () => {
     render(<NodePanel node={mockNode} onClose={vi.fn()} />);
-    
-    // Open reminder form
-    const reminderBtn = screen.getByRole('button', { name: /Set Reminder/i });
+    // Open reminder form via the QuickAction "Remind" button
+    const reminderBtn = screen.getByTitle('Remind');
     fireEvent.click(reminderBtn);
     
     expect(screen.getByText('Message')).toBeInTheDocument();
@@ -105,7 +99,7 @@ describe('NodePanel Component', () => {
       json: async () => ({ status: 'success' })
     });
     
-    const saveBtn = screen.getByRole('button', { name: /Confirm/i });
+    const saveBtn = screen.getByRole('button', { name: /Confirm Reminder/i });
     fireEvent.click(saveBtn);
     
     // Expect fetch to be called
@@ -121,17 +115,18 @@ describe('NodePanel Component', () => {
 
   it('opens and interacts with the quiz', () => {
     render(<NodePanel node={mockNode} onClose={vi.fn()} />);
-    
-    const openQuizBtn = screen.getByRole('button', { name: /Open Quiz/i });
+    // Quick-action bar shows "Quiz" button (title attribute used as accessible name)
+    const openQuizBtn = screen.getByTitle('Quiz');
     fireEvent.click(openQuizBtn);
     
     expect(screen.getByText('What does the SM-2 algorithm schedule?')).toBeInTheDocument();
     
-    // Find correct and incorrect options
+    // Find correct option and click it
     const correctBtn = screen.getByRole('button', { name: 'Spaced repetition reviews' });
-    
     fireEvent.click(correctBtn);
-    expect(screen.getByText('Correct!')).toBeInTheDocument();
+    
+    // New label is "Correct" (no exclamation)
+    expect(screen.getByText('Correct')).toBeInTheDocument();
     expect(screen.getByText('SM-2 computes intervals for spaced repetition learning review cards.')).toBeInTheDocument();
   });
 });

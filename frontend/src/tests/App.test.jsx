@@ -76,7 +76,7 @@ describe('App PWA and Session Tracking', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('Welcome to Recall')).toBeInTheDocument();
+      expect(screen.getByText(/No signals received yet/i)).toBeInTheDocument();
     });
 
     const userPromptChoice = Promise.resolve({ outcome: 'accepted' });
@@ -153,7 +153,7 @@ describe('App PWA and Session Tracking', () => {
     );
 
     await waitFor(() => {
-      expect(replaceSpy).toHaveBeenCalledWith(expect.any(Object), '', '/dashboard');
+      expect(replaceSpy).toHaveBeenCalledWith(expect.any(Object), '', '/archive');
     });
 
     vi.unstubAllGlobals();

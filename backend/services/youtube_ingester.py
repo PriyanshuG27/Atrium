@@ -311,7 +311,40 @@ async def _try_cobalt(url: str, cobalt_api_url: str) -> str | None:
         return None
 
 
+async def _scrape_instagram_meta(url: str) -> tuple[str | None, str | None]:
+    """Fallback scraping for Instagram using crawler User-Agent to extract og:title and og:description."""
+    import httpx
+    from bs4 import BeautifulSoup
+    headers = {
+        "User-Agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_codedoc.pdf)",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code == 200:
+                soup = BeautifulSoup(resp.text, "html.parser")
+                title = None
+                description = None
+                for meta in soup.find_all("meta"):
+                    prop = meta.get("property") or meta.get("name")
+                    if prop == "og:title":
+                        title = meta.get("content")
+                    elif prop in ("og:description", "description"):
+                        description = meta.get("content")
+                
+                if not title and soup.title and soup.title.string:
+                    title = soup.title.string.strip()
+                    
+                return title, description
+    except Exception as e:
+        logger.warning("  [Instagram Ingestion] Crawler fallback scraping failed: %s", e)
+    return None, None
+
+
 async def ingest_instagram(url: str, user_id: int, db: AsyncConnection) -> int:
+
     """
     Ingests an Instagram URL (Reel / Post).
 
@@ -437,15 +470,9 @@ async def ingest_instagram(url: str, user_id: int, db: AsyncConnection) -> int:
 
     if transcript:
         try:
-            logger.info("[Instagram Ingestion] Running AI Cascade summarizer & tag generator...")
-            cascade = AICascade()
-            ai_res = await cascade.summarise(transcript)
-            summary = ai_res.get("summary") or f"Instagram Reel: {transcript[:200]}..."
-            tags = ai_res.get("tags") or ["instagram", "reel"]
-            normalized_tags = [t.strip().lower() for t in tags if isinstance(t, str) and t.strip()][:5]
-
-            # Try to get a title via yt-dlp metadata (best effort — no crash on failure)
+            # 1. Fetch metadata first (best effort — no crash on failure)
             video_title = "Instagram Video"
+            video_description = None
             try:
                 logger.info("[Instagram Ingestion] Extracting metadata title via yt-dlp...")
                 with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True}) as ydl:
@@ -453,9 +480,32 @@ async def ingest_instagram(url: str, user_id: int, db: AsyncConnection) -> int:
                     if info:
                         raw_title = info.get("title") or info.get("description") or ""
                         video_title = (raw_title[:97] + "...") if len(raw_title) > 100 else raw_title or "Instagram Video"
+                        video_description = info.get("description")
                 logger.info("[Instagram Ingestion] Metadata extraction title resolved: '%s'", video_title)
             except Exception as meta_err:
-                logger.info("  [Instagram Ingestion] Metadata extract failed (ignoring, fallback to default title): %s", meta_err)
+                logger.info("  [Instagram Ingestion] Metadata extract via yt-dlp failed, trying crawler fallback... Error: %s", meta_err)
+                scraped_title, scraped_desc = await _scrape_instagram_meta(url)
+                if scraped_title:
+                    video_title = (scraped_title[:97] + "...") if len(scraped_title) > 100 else scraped_title
+                if scraped_desc:
+                    video_description = scraped_desc
+                logger.info("  [Instagram Ingestion] Crawler fallback resolved title: '%s', description length: %d", video_title, len(video_description) if video_description else 0)
+
+            # 2. Run summarizer with metadata context prepended to the transcript
+            logger.info("[Instagram Ingestion] Running AI Cascade summarizer & tag generator...")
+            cascade = AICascade()
+            
+            summarizer_input = ""
+            if video_title and video_title != "Instagram Video":
+                summarizer_input += f"Video Title: {video_title}\n"
+            if video_description:
+                summarizer_input += f"Video Description/Caption: {video_description}\n"
+            summarizer_input += f"Audio Transcript:\n{transcript}"
+            
+            ai_res = await cascade.summarise(summarizer_input)
+            summary = ai_res.get("summary") or f"Instagram Reel: {transcript[:200]}..."
+            tags = ai_res.get("tags") or ["instagram", "reel"]
+            normalized_tags = [t.strip().lower() for t in tags if isinstance(t, str) and t.strip()][:5]
 
             logger.info("[Instagram Ingestion] Creating vector embedding for the transcribed text...")
             raw_text = f"Instagram: {url}\nTitle: {video_title}\nTranscript:\n{transcript}"

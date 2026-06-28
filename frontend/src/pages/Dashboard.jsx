@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import Header from '../components/Header';
+import GraphControls from '../components/GraphControls';
 import Feed from './Feed';
 import Reminders from './Reminders';
 import EmptyState from '../components/EmptyState';
@@ -46,7 +47,7 @@ function layoutNodes(nodes, edges, hubs) {
   // 2. Position hubs in a circle around the center
   hubNodes.forEach((hub, i) => {
     const angle = hubNodes.length > 1 ? (i / hubNodes.length) * 2 * Math.PI : 0;
-    const radius = hubNodes.length > 1 ? 250 : 0; // Spread hubs wider apart (250px)
+    const radius = hubNodes.length > 1 ? 380 : 0; // wider spread
     hub.x = centerX + radius * Math.cos(angle);
     hub.y = centerY + radius * Math.sin(angle);
     hub.vx = 0; hub.vy = 0;
@@ -80,8 +81,8 @@ function layoutNodes(nodes, edges, hubs) {
       const localIndex = hubMemberIndices[parentHub.id] || 0;
       hubMemberIndices[parentHub.id] = localIndex + 1;
 
-      const localC = 35; // Local spacing factor
-      const n = localIndex + 2; // Offset from centroid core
+      const localC = 52; // wider orbital spacing (was 35)
+      const n = localIndex + 2;
       const angle = n * 137.508 * (Math.PI / 180);
       const radius = localC * Math.sqrt(n);
 
@@ -92,9 +93,9 @@ function layoutNodes(nodes, edges, hubs) {
       const localIndex = singletonCount;
       singletonCount++;
 
-      const n = localIndex + 12; // Start outside the central core
+      const n = localIndex + 12;
       const angle = n * 137.508 * (Math.PI / 180);
-      const radius = 80 + 25 * Math.sqrt(n);
+      const radius = 140 + 35 * Math.sqrt(n); // wider singleton spread
 
       node.x = centerX + radius * Math.cos(angle);
       node.y = centerY + radius * Math.sin(angle);
@@ -113,7 +114,8 @@ function layoutNodes(nodes, edges, hubs) {
 }
 
 export default function Dashboard() {
-  const { user, token } = useAuth();
+  const { user, token, logout } = useAuth();
+
   const { addToast } = useToast();
 
   const [dashboardItems, setDashboardItems] = useState([]);
@@ -142,6 +144,7 @@ export default function Dashboard() {
   const [showShortcutsModal, setShowShortcutsModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showStats, setShowStats] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const searchInputRef = React.useRef(null);
 
   const handleEscape = () => {
@@ -256,27 +259,49 @@ export default function Dashboard() {
       addToast('Cannot delete a semantic hub centroid node.', 'warning');
       return;
     }
-    if (!confirm('Are you sure you want to delete this item?')) return;
-    try {
-      const res = await fetch(`/api/items/${nodeId}`, { method: 'DELETE' });
-      if (res.status === 204 || res.ok) {
-        addToast('Item deleted', 'success');
-        initializeDashboard();
-        if (selectedNode && selectedNode.id === nodeId) {
-          setSelectedNode(null);
-        }
-      } else {
-        addToast('Failed to delete item', 'error');
-      }
-    } catch (err) {
-      console.error('Delete node failed:', err);
-      // Fallback for visual mock nodes deletion
-      addToast('Item deleted', 'success');
-      initializeDashboard();
-      if (selectedNode && selectedNode.id === nodeId) {
-        setSelectedNode(null);
-      }
+
+    const previousNodes = [...activeNodes];
+    const previousSelected = selectedNode;
+
+    // Optimistically remove from state
+    setActiveNodes(prev => prev.filter(n => n.id !== nodeId));
+    if (selectedNode && selectedNode.id === nodeId) {
+      setSelectedNode(null);
     }
+
+    let undone = false;
+
+    addToast('Signal deleted', 'success', {
+      duration: 5000,
+      action: {
+        label: 'Undo',
+        onClick: () => {
+          undone = true;
+          setActiveNodes(previousNodes);
+          if (previousSelected && previousSelected.id === nodeId) {
+            setSelectedNode(previousSelected);
+          }
+        }
+      }
+    });
+
+    // Actually perform delete after delay if not undone
+    setTimeout(async () => {
+      if (undone) return;
+      try {
+        const res = await fetch(`/api/items/${nodeId}`, { method: 'DELETE' });
+        if (res.status === 204 || res.ok) {
+          initializeDashboard();
+          window.dispatchEvent(new CustomEvent('items-updated'));
+        } else {
+          addToast('Failed to delete item', 'error');
+          setActiveNodes(previousNodes);
+        }
+      } catch (err) {
+        console.error('Delete node failed:', err);
+        setActiveNodes(previousNodes);
+      }
+    }, 5000);
   };
 
   const handleViewSource = (nodeId) => {
@@ -726,6 +751,7 @@ export default function Dashboard() {
 
     if (!query.trim()) {
       setMatchingNodeIds(null);
+      setSearchOpen(false);
       return;
     }
 
@@ -789,17 +815,32 @@ export default function Dashboard() {
       <div className="nebula-blob nebula-violet"></div>
       <div className="nebula-blob nebula-mint"></div>
 
-      {/* Floating Header */}
-      <Header 
-        onSearch={handleSearch} 
-        dueQuizCount={dueQuizCount} 
-        viewMode={viewMode} 
-        onViewModeChange={setViewMode} 
-        searchInputRef={searchInputRef}
-        searchQuery={searchQuery}
-        onSettingsClick={() => setShowSettings(true)}
-        onStatsClick={() => setShowStats(true)}
-      />
+      {/* Graph mode: floating pill + watermark instead of fixed header */}
+      {viewMode === 'graph' && !searchOpen ? (
+        <GraphControls
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
+          dueQuizCount={dueQuizCount}
+          user={user}
+          onLogout={logout}
+          onSettingsClick={() => setShowSettings(true)}
+          onSearchOpen={() => {
+            setViewMode('graph');
+            setSearchOpen(true);
+          }}
+        />
+      ) : (
+        <Header
+          onSearch={handleSearch}
+          dueQuizCount={dueQuizCount}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
+          searchInputRef={searchInputRef}
+          searchQuery={searchQuery}
+          onSettingsClick={() => setShowSettings(true)}
+          onStatsClick={() => setShowStats(true)}
+        />
+      )}
 
       <main id="main-content" tabIndex={-1} style={{ outline: 'none' }}>
 

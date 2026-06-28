@@ -11,7 +11,8 @@ from backend.scheduler.scheduler import (
     partition_creator,
     drive_nudge_sender,
     processed_updates_cleanup,
-    louvain_clustering
+    louvain_clustering,
+    offpeak_quiz_generator
 )
 import backend.scheduler.scheduler as scheduler_module
 
@@ -77,7 +78,8 @@ async def test_scheduler_jobs_registration():
             "louvain_clustering",
             "partition_creator",
             "drive_nudge_sender",
-            "processed_updates_cleanup"
+            "processed_updates_cleanup",
+            "offpeak_quiz_generator"
         ]
         for ej in expected_jobs:
             assert ej in job_ids
@@ -293,3 +295,42 @@ async def test_scheduler_resilience_on_exception():
         await drive_nudge_sender()
         
         # Test complete - verified that no exception was raised out of the methods
+
+
+@pytest.mark.asyncio
+async def test_offpeak_quiz_generator_success():
+    """Verify offpeak_quiz_generator fetches items without quizzes and generates them."""
+    # Mock items without quizzes
+    # SELECT i.id, i.user_id, i.summary, i.raw_text, i.title ...
+    items_data = [
+        (1, 42, "Summary of ML", "encrypted_raw_text", "Machine Learning")
+    ]
+    cursor = MockCursor(fetchall_data=items_data)
+    conn = MockConnection(cursor)
+    mock_pool = mock.MagicMock()
+    mock_pool.connection = mock.MagicMock(return_value=conn)
+    
+    # Mock AICascade generate_quiz
+    mock_cascade = mock.AsyncMock()
+    mock_cascade.generate_quiz.return_value = {
+        "question": "What is the primary language?",
+        "options": ["A", "B", "C", "D"],
+        "correct_index": 0,
+        "explanation": "Exp"
+    }
+    
+    with mock.patch("backend.scheduler.scheduler._pool", mock_pool), \
+         mock.patch("backend.scheduler.scheduler.AICascade", return_value=mock_cascade), \
+         mock.patch("asyncio.sleep", mock.AsyncMock()):
+        await offpeak_quiz_generator()
+        
+        # Verify SELECT query was executed
+        assert len(cursor.executed) >= 1
+        queries = [x[0].lower() for x in cursor.executed]
+        assert any("left join quizzes" in q for q in queries)
+        
+        # Verify INSERT query was executed
+        insert_queries = [x[0] for x in cursor.executed if "insert into quizzes" in x[0].lower()]
+        assert len(insert_queries) == 1
+        assert "values" in insert_queries[0].lower()
+

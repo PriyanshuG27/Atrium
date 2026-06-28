@@ -35,6 +35,12 @@ function SeedAuth({ user, children }) {
   return children;
 }
 
+// Helper: open the profile dropdown
+function openDropdown() {
+  const trigger = screen.getByRole('button', { name: /Profile menu/i });
+  fireEvent.click(trigger);
+}
+
 describe('Header', () => {
   let currentUser = null;
   let fetchSpy;
@@ -112,7 +118,8 @@ describe('Header', () => {
       expect(fetchSpy).toHaveBeenCalledWith('/auth/me');
     });
 
-    expect(screen.queryByText(/User /)).not.toBeInTheDocument();
+    // No profile menu button when logged out
+    expect(screen.queryByRole('button', { name: /Profile menu/i })).not.toBeInTheDocument();
   });
 
   it('renders logo and profile trigger if authenticated', async () => {
@@ -126,8 +133,10 @@ describe('Header', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('Recall')).toBeInTheDocument();
-      expect(screen.getByText('User 99999')).toBeInTheDocument();
+      // Logo watermark is present
+      expect(screen.getByText('Recall.')).toBeInTheDocument();
+      // Profile trigger button is present
+      expect(screen.getByRole('button', { name: /Profile menu/i })).toBeInTheDocument();
     });
   });
 
@@ -142,18 +151,18 @@ describe('Header', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('User 99999')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Profile menu/i })).toBeInTheDocument();
     });
 
     // Menu should be hidden initially
     expect(screen.queryByText(/Connect Google Drive/)).not.toBeInTheDocument();
 
     // Click trigger to open menu
-    fireEvent.click(screen.getByText('User 99999'));
+    openDropdown();
     expect(screen.getByText(/Connect Google Drive/)).toBeInTheDocument();
 
     // Click trigger again to close menu
-    fireEvent.click(screen.getByText('User 99999'));
+    openDropdown();
     expect(screen.queryByText(/Connect Google Drive/)).not.toBeInTheDocument();
   });
 
@@ -170,10 +179,10 @@ describe('Header', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('User 99999')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Profile menu/i })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText('User 99999'));
+    openDropdown();
     
     fireEvent.click(screen.getByText(/Connect Google Drive/));
     expect(windowOpenSpy).toHaveBeenCalledWith(
@@ -201,10 +210,10 @@ describe('Header', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('User 99999')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Profile menu/i })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText('User 99999'));
+    openDropdown();
     
     fireEvent.click(screen.getByText('Disconnect'));
     
@@ -232,10 +241,10 @@ describe('Header', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('User 99999')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Profile menu/i })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText('User 99999'));
+    openDropdown();
     
     fireEvent.click(screen.getByText('Sync Now'));
     
@@ -257,15 +266,15 @@ describe('Header', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('User 99999')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Profile menu/i })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText('User 99999'));
+    openDropdown();
     
     fireEvent.click(screen.getByText(/Logout/));
     
     await waitFor(() => {
-      expect(screen.queryByText('User 99999')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /Profile menu/i })).not.toBeInTheDocument();
     });
   });
 
@@ -285,8 +294,8 @@ describe('Header', () => {
       expect(screen.getByText('Due:')).toBeInTheDocument();
     });
 
+    // Compact format: Due: 3 | Avg: 2.7
     expect(screen.getByText('3')).toBeInTheDocument();
-    expect(screen.getByText('4')).toBeInTheDocument();
     expect(screen.getByText('2.7')).toBeInTheDocument();
 
     const statsCard = screen.getByTitle('View detailed quiz performance history');

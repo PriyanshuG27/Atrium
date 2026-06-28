@@ -92,10 +92,16 @@ describe('SettingsPanel Component', () => {
 
     await waitFor(() => {
       expect(axios.get).toHaveBeenCalledWith('/api/me');
-      expect(screen.getByText('Settings')).toBeInTheDocument();
+      expect(screen.getByText(/Observatory/i)).toBeInTheDocument();
       expect(screen.getByText('🔥 7 days')).toBeInTheDocument();
       expect(screen.getByText('42')).toBeInTheDocument();
       expect(screen.getByText('12')).toBeInTheDocument();
+    });
+
+    // Switch to Data tab to see Google Drive status
+    fireEvent.click(screen.getByRole('button', { name: /Data/i }));
+
+    await waitFor(() => {
       expect(screen.getByText('Google Drive connected')).toBeInTheDocument();
     });
   });
@@ -123,10 +129,15 @@ describe('SettingsPanel Component', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByLabelText('Local Timezone Offset')).toBeInTheDocument();
+      // Switch to Preferences tab
+      fireEvent.click(screen.getByRole('button', { name: /Preferences/i }));
     });
 
-    const select = screen.getByLabelText('Local Timezone Offset');
+    await waitFor(() => {
+      expect(screen.getByLabelText(/Local Timezone Offset/i)).toBeInTheDocument();
+    });
+
+    const select = screen.getByLabelText(/Local Timezone Offset/i);
     fireEvent.change(select, { target: { value: '5.5' } });
 
     await waitFor(() => {
@@ -157,11 +168,19 @@ describe('SettingsPanel Component', () => {
     );
 
     await waitFor(() => {
+      // Switch to Data tab
+      fireEvent.click(screen.getByRole('button', { name: /Data/i }));
+    });
+
+    // Expand the Critical System Actions collapsible
+    fireEvent.click(screen.getByText('Critical System Actions'));
+
+    await waitFor(() => {
       expect(screen.getByPlaceholderText('DELETE')).toBeInTheDocument();
     });
 
     const input = screen.getByPlaceholderText('DELETE');
-    const deleteBtn = screen.getByRole('button', { name: /Delete Account/i });
+    const deleteBtn = screen.getByRole('button', { name: /Purge Account/i });
 
     expect(deleteBtn).toBeDisabled();
 

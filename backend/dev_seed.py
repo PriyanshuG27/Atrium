@@ -75,12 +75,12 @@ def seed_database():
         with conn.cursor() as cur:
             # 1. Clear existing seed data (optional but helpful for clean runs)
             print("Cleaning existing data...")
-            cur.execute("DELETE FROM users WHERE telegram_chat_id IN ('111111111', '222222222', '333333333');")
+            cur.execute("DELETE FROM users WHERE telegram_chat_id IN ('111111111', '222222222', '333333333', '7732257445');")
             
             # 2. Insert 3 test users
             print("Seeding 3 test users...")
             users_data = [
-                ("111111111", 0, 5, date(2026, 6, 19)),
+                ("7732257445", 0, 4, date(2026, 6, 28)),
                 ("222222222", -300, 3, date(2026, 6, 19)),
                 ("333333333", 120, 0, None)
             ]
@@ -178,13 +178,48 @@ def seed_database():
                 }
             ]
             
+            quiz_questions = [
+                {
+                    "question": "What is the core cycle of agentic workflows?",
+                    "options": ["Plan, Act, Observe, Reflect", "Build, Deploy, Monitor, Scale", "Ingest, Transform, Load, Query", "Design, Develop, Test, Release"],
+                    "correct_index": 0,
+                    "explanation": "Agentic systems rely on a feedback loop of planning, acting, observing, and reflecting."
+                },
+                {
+                    "question": "Which index is recommended for fast vector search in pgvector?",
+                    "options": ["GIN index", "B-Tree index", "HNSW index", "Hash index"],
+                    "correct_index": 2,
+                    "explanation": "HNSW (Hierarchical Navigable Small World) provides sub-10 ms cosine similarity vector searches."
+                },
+                {
+                    "question": "What component of Redis requires sliding window rate limits verification?",
+                    "options": ["Memory cache", "Pub/sub channels", "Sliding window rate limiting", "Cluster replication"],
+                    "correct_index": 2,
+                    "explanation": "We need to check the Redis sliding window configuration for rate limits."
+                },
+                {
+                    "question": "The Transformer architecture (Attention Is All You Need) primarily replaces what component?",
+                    "options": ["Recurrent or convolutional neural networks", "Feedforward layers", "Fully connected layers", "Activation functions"],
+                    "correct_index": 0,
+                    "explanation": "Transformer sequence transduction models replace recurrent/convolutional layers with self-attention."
+                },
+                {
+                    "question": "What is the primary concern for the local development security regarding secrets?",
+                    "options": ["Never log secrets or push credentials to git", "Use HTTP in production", "Expose Fernet key in source code", "Disable JWT verification"],
+                    "correct_index": 0,
+                    "explanation": "Secrets like TELEGRAM_BOT_TOKEN and FERNET_KEY must never appear in logs or client code."
+                }
+            ]
+
+            import json
             for user_id in user_ids:
                 for idx, template in enumerate(item_templates):
                     # Parameterised statement
                     cur.execute(
                         """
                         INSERT INTO items (user_id, source_type, source_url, raw_text, summary, title, tags, created_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING id;
                         """,
                         (
                             user_id,
@@ -197,6 +232,25 @@ def seed_database():
                             datetime.now()
                         )
                     )
+                    item_id = cur.fetchone()[0]
+
+                    if idx < len(quiz_questions):
+                        q_data = quiz_questions[idx]
+                        cur.execute(
+                            """
+                            INSERT INTO quizzes (user_id, item_id, question, options, correct_index, explanation, next_review)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s);
+                            """,
+                            (
+                                user_id,
+                                item_id,
+                                q_data["question"],
+                                json.dumps(q_data["options"]),
+                                q_data["correct_index"],
+                                q_data["explanation"],
+                                date.today()
+                            )
+                        )
             
             # Commit the transaction
             conn.commit()
