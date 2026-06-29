@@ -55,13 +55,39 @@ async def open_pool() -> None:
         conninfo=settings.DATABASE_URL,
         min_size=0,
         max_size=5,
-        timeout=5.0,          # seconds to wait for a connection from the pool
+        timeout=15.0,         # seconds to wait for a connection from the pool
         max_idle=240.0,       # close idle connections before Neon drops them (5m)
         check=check_conn,     # Validate connection health on checkout
         open=False,            # we open manually below
     )
     await _pool.open()
     logger.info("Database connection pool opened (min=0, max=5, max_idle=240s).")
+    try:
+        async with _pool.connection() as conn:
+            await conn.execute("ALTER TABLE items ADD COLUMN IF NOT EXISTS context_prompt TEXT;")
+            await conn.execute("ALTER TABLE items ADD COLUMN IF NOT EXISTS passive_context JSONB;")
+            await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_day INT DEFAULT 0;")
+            await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_last_sent TIMESTAMP DEFAULT NULL;")
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS insight_candidates (
+                    id                 SERIAL PRIMARY KEY,
+                    user_id            INT REFERENCES users(id) ON DELETE CASCADE,
+                    item_id_a          INT NOT NULL,
+                    item_id_b          INT NOT NULL,
+                    similarity_score   FLOAT NOT NULL,
+                    bucket             VARCHAR(20) NOT NULL,
+                    status             VARCHAR(20) DEFAULT 'pending',
+                    insight_text       TEXT,
+                    expires_at         TIMESTAMP,
+                    cluster_pair_hash  VARCHAR(32),
+                    created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_candidates_user_status ON insight_candidates(user_id, status);")
+            await conn.commit()
+        logger.info("Dynamic schema check completed: items.context_prompt, items.passive_context, and insight_candidates verified/added.")
+    except Exception as ddl_err:
+        logger.error("Failed to run dynamic schema update: %s", ddl_err)
 
 
 async def close_pool() -> None:

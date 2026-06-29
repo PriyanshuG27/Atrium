@@ -237,6 +237,7 @@ export default function MapPage() {
   const [burstHubId,    setBurstHubId]    = useState(null);   // T4.3 hub burst
   const [viewTransitioning, setViewTransitioning] = useState(false);
   const [controlsExpanded, setControlsExpanded] = useState(false);
+  const [flareNodeId, setFlareNodeId] = useState(null);
   const [controlsPosition, setControlsPosition] = useState(() => {
     try {
       const saved = localStorage.getItem('map_controls_position');
@@ -341,6 +342,13 @@ export default function MapPage() {
       const { nodes, edges } = buildGraph(all, window.innerWidth, window.innerHeight);
       setGraphNodes(nodes);
       setGraphEdges(edges);
+      
+      // Select a random non-hub node for the daily "Star Flare"
+      const nonHubs = nodes.filter(n => n.type !== 'hub');
+      if (nonHubs.length > 0) {
+        const randNode = nonHubs[Math.floor(Math.random() * nonHubs.length)];
+        setFlareNodeId(randNode.id);
+      }
     } catch (err) {
       console.error('[Map] fetch error:', err);
       setError(err.message || 'Failed to load');
@@ -521,6 +529,7 @@ export default function MapPage() {
                 filterType={filterType} 
                 selectedNodeId={selectedNode?.id ?? null} 
                 selectedHubId={selectedHub?.id ?? null} 
+                flareNodeId={flareNodeId}
                 searchQuery={searchQuery}
                 physicsFrozen={physicsFrozen}
                 showLabels={showLabels}

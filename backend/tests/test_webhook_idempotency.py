@@ -76,6 +76,8 @@ class StatefulMockCursor:
             async with self.lock:
                 user_id = self.state.users.get(chat_id)
                 self._last_val = user_id
+        elif "SELECT COUNT(*)" in query_upper:
+            self._last_val = 3
                     
     async def fetchone(self):
         if self._last_val is not None:
@@ -118,9 +120,17 @@ def override_db(db_state):
 # ---------------------------------------------------------------------------
 # Mocks for external network tasks
 # ---------------------------------------------------------------------------
-@pytest.fixture()
-def mock_redis_push():
-    with mock.patch("backend.routes.webhook.run_upstash_command", new_callable=mock.AsyncMock) as m:
+@pytest.fixture(autouse=True)
+def mock_redis():
+    with mock.patch("backend.routes.webhook.redis", new_callable=mock.AsyncMock) as m:
+        m.rpush.return_value = 1
+        m.get.return_value = None
+        m.setex.return_value = True
+        yield m
+
+@pytest.fixture(autouse=True)
+def mock_sleep():
+    with mock.patch("asyncio.sleep", new_callable=mock.AsyncMock) as m:
         yield m
 
 
@@ -162,7 +172,7 @@ def make_telegram_update(update_id: int, chat_id: int, message_fields: dict) -> 
 # ---------------------------------------------------------------------------
 # Unit Tests: Idempotency (TESTING.md §1)
 # ---------------------------------------------------------------------------
-def test_first_delivery(client, db_state, mock_redis_push, mock_telegram_ack):
+def test_first_delivery(client, db_state, mock_redis, mock_telegram_ack):
     """Case 1: First delivery -> 200, db entry created, task enqueued, Telegram ACK sent."""
     payload = make_telegram_update(111, 12345, {"text": "Hello world"})
     
@@ -175,13 +185,11 @@ def test_first_delivery(client, db_state, mock_redis_push, mock_telegram_ack):
     assert "111" in db_state.processed
     
     # Verify task enqueued in Redis
-    assert mock_redis_push.call_count == 1
-    call_args = mock_redis_push.call_args[0][0]
-    assert call_args[0] == "LPUSH"
-    assert call_args[1] == "recall:tasks"
-    task_payload = json.loads(call_args[2])
+    assert mock_redis.rpush.call_count == 1
+    call_args = mock_redis.rpush.call_args[0]
+    assert call_args[0] == "batch:12345"
+    task_payload = json.loads(call_args[1])
     assert task_payload["update_id"] == "111"
-    assert task_payload["chat_id"] == "12345"
     assert task_payload["content_type"] == "text"
     assert task_payload["text"] == "Hello world"
     
@@ -193,7 +201,7 @@ def test_first_delivery(client, db_state, mock_redis_push, mock_telegram_ack):
     assert (end_time - start_time) < 0.05
 
 
-def test_duplicate_delivery(client, db_state, mock_redis_push, mock_telegram_ack):
+def test_duplicate_delivery(client, db_state, mock_redis, mock_telegram_ack):
     """Case 2: Duplicate delivery -> 200 returned immediately, no new task, db unchanged."""
     payload = make_telegram_update(111, 12345, {"text": "Hello world"})
     
@@ -206,11 +214,11 @@ def test_duplicate_delivery(client, db_state, mock_redis_push, mock_telegram_ack
     assert response.json() == {"status": "ok", "detail": "duplicate"}
     
     # No Redis LPUSH and no Telegram ACK
-    assert mock_redis_push.call_count == 0
+    assert mock_redis.rpush.call_count == 0
     assert mock_telegram_ack.call_count == 0
 
 
-def test_different_update_id(client, db_state, mock_redis_push, mock_telegram_ack):
+def test_different_update_id(client, db_state, mock_redis, mock_telegram_ack):
     """Case 3: Different update_id -> enqueues second task independently."""
     payload1 = make_telegram_update(111, 12345, {"text": "Hello world"})
     payload2 = make_telegram_update(112, 12345, {"text": "Hello again"})
@@ -223,12 +231,12 @@ def test_different_update_id(client, db_state, mock_redis_push, mock_telegram_ac
     assert "111" in db_state.processed
     assert "112" in db_state.processed
     
-    assert mock_redis_push.call_count == 2
+    assert mock_redis.rpush.call_count == 2
     assert mock_telegram_ack.call_count == 2
 
 
 @pytest.mark.anyio
-async def test_concurrent_duplicates(db_state, mock_redis_push, mock_telegram_ack):
+async def test_concurrent_duplicates(db_state, mock_redis, mock_telegram_ack):
     """Case 4: Concurrent duplicates -> exactly one task is enqueued."""
     payload = make_telegram_update(113, 12345, {"text": "Concurrent"})
     
@@ -254,7 +262,7 @@ async def test_concurrent_duplicates(db_state, mock_redis_push, mock_telegram_ac
     assert len(db_state.processed) == 1
     
     # Only one task enqueued and one ACK sent
-    assert mock_redis_push.call_count == 1
+    assert mock_redis.rpush.call_count == 1
     assert mock_telegram_ack.call_count == 1
 
 
@@ -272,7 +280,7 @@ async def test_concurrent_duplicates(db_state, mock_redis_push, mock_telegram_ac
         ({"video": {"file_id": "vid_1"}}, "unsupported", ACK_MESSAGES["unsupported"]),
     ]
 )
-def test_content_type_ack_mapping(client, mock_redis_push, mock_telegram_ack, message_fields, expected_type, expected_ack):
+def test_content_type_ack_mapping(client, mock_redis, mock_telegram_ack, message_fields, expected_type, expected_ack):
     """Verifies that all 6 content types parse correctly and dispatch correct ACKs."""
     payload = make_telegram_update(999, 12345, message_fields)
     
@@ -281,11 +289,12 @@ def test_content_type_ack_mapping(client, mock_redis_push, mock_telegram_ack, me
     
     # Verify task content type in Redis push (only if supported)
     if expected_type == "unsupported":
-        assert mock_redis_push.call_count == 0
+        assert mock_redis.rpush.call_count == 0
     else:
-        assert mock_redis_push.call_count == 1
-        call_args = mock_redis_push.call_args[0][0]
-        task_payload = json.loads(call_args[2])
+        assert mock_redis.rpush.call_count == 1
+        call_args = mock_redis.rpush.call_args[0]
+        assert call_args[0] == "batch:12345"
+        task_payload = json.loads(call_args[1])
         assert task_payload["content_type"] == expected_type
     
     # Verify Telegram ACK string
@@ -293,7 +302,7 @@ def test_content_type_ack_mapping(client, mock_redis_push, mock_telegram_ack, me
     mock_telegram_ack.assert_called_with("12345", expected_ack)
 
 
-def test_webhook_start_command(client, db_state, mock_redis_push, mock_telegram_ack):
+def test_webhook_start_command(client, db_state, mock_redis, mock_telegram_ack):
     """Verifies that sending /start upserts the user and replies with the welcome message."""
     payload = make_telegram_update(1001, 77777, {"text": "/start"})
     
@@ -306,15 +315,15 @@ def test_webhook_start_command(client, db_state, mock_redis_push, mock_telegram_
     assert db_state.users["77777"] == 1
     
     # Redis push should not happen for /start command
-    assert mock_redis_push.call_count == 0
+    assert mock_redis.rpush.call_count == 0
     
     # Welcome ACK message sent to user
-    welcome_msg = "Welcome to Recall! Forward me any link, voice note, PDF, or image and I'll remember it for you."
+    welcome_msg = "Welcome back to Recall! Forward me any link, voice note, PDF, or image and I'll remember it for you."
     assert mock_telegram_ack.call_count == 1
     mock_telegram_ack.assert_called_with("77777", welcome_msg)
 
 
-def test_webhook_rate_limit_exceeded(client, mock_redis_push, mock_telegram_ack):
+def test_webhook_rate_limit_exceeded(client, mock_redis, mock_telegram_ack):
     """Verifies that when rate limit is exceeded, webhook returns 200 and does NOT queue task or send ACK."""
     from backend.services.rate_limiter import RateLimitExceeded
     
@@ -326,5 +335,5 @@ def test_webhook_rate_limit_exceeded(client, mock_redis_push, mock_telegram_ack)
         assert response.json() == {"status": "ok", "detail": "rate_limited"}
         
         # Verify no task queued and no ACK sent
-        assert mock_redis_push.call_count == 0
+        assert mock_redis.rpush.call_count == 0
         assert mock_telegram_ack.call_count == 0

@@ -32,6 +32,16 @@ export default function Drill() {
   const [cardExiting, setCardExiting] = useState(false);
 
   const feedbackTimer = useRef(null);
+  const revealedTimeRef = useRef(0);
+
+  // Sync the time when card is revealed to prevent click-through rating actions
+  useEffect(() => {
+    if (revealed) {
+      revealedTimeRef.current = Date.now();
+    } else {
+      revealedTimeRef.current = 0;
+    }
+  }, [revealed]);
 
   /* ── Fetch streak count on mount ───────────────────────────────────────── */
   useEffect(() => {
@@ -104,6 +114,11 @@ export default function Drill() {
   const rateCard = useCallback(async (rating) => {
     const card = cards[currentIndex];
     if (!card || feedback) return;
+
+    // Cooldown to prevent accidental double-tap/click-through rating on mobile
+    if (Date.now() - revealedTimeRef.current < 400) {
+      return;
+    }
 
     const ratingLabel = rating === 1 ? 'locked' : rating === 2 ? 'shaky' : 'miss';
     const qualityVal = rating === 1 ? 5 : rating === 2 ? 3 : 1; // Translate rating to quality
@@ -205,6 +220,7 @@ export default function Drill() {
         if (!revealed) {
           // Tap card to reveal (small delta)
           if (Math.abs(diffX) < 15 && Math.abs(diffY) < 15) {
+            e.preventDefault(); // Prevents emulated click on newly visible elements
             setRevealed(true);
           }
           return;
@@ -227,7 +243,7 @@ export default function Drill() {
     };
 
     window.addEventListener('touchstart', onTouchStart, { passive: true });
-    window.addEventListener('touchend', onTouchEnd, { passive: true });
+    window.addEventListener('touchend', onTouchEnd, { passive: false });
     return () => {
       window.removeEventListener('touchstart', onTouchStart);
       window.removeEventListener('touchend', onTouchEnd);

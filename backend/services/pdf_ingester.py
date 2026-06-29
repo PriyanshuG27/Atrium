@@ -192,12 +192,14 @@ async def ingest_pdf(
     
     # Generate summary & tags using the AI cascade
     tags = []
+    context_prompt = None
     try:
         # Get head-tail sampled context for document-level summary (up to 60,000 characters)
         summary_context = get_summarization_context(full_text, max_chars=60000)
         ai_res = await cascade.summarise(summary_context)
         summary = ai_res.get("summary")
         tags = ai_res.get("tags") or []
+        context_prompt = ai_res.get("context_prompt")
     except Exception as e:
         logger.error("Failed to generate AI summary/tags for PDF %s: %s", title, e)
         summary = f"Summary of PDF: {title}. Contains {len(chunks)} sections."
@@ -224,13 +226,13 @@ async def ingest_pdf(
         async with conn.cursor() as cur:
             # INSERT parent item
             insert_item_query = """
-                INSERT INTO items (user_id, title, source_type, source_url, raw_text, summary, embedding, tags, content_hash)
-                VALUES (%s, %s, %s, %s, %s, %s, %s::vector, %s, %s)
+                INSERT INTO items (user_id, title, source_type, source_url, raw_text, summary, embedding, tags, content_hash, context_prompt)
+                VALUES (%s, %s, %s, %s, %s, %s, %s::vector, %s, %s, %s)
                 RETURNING id;
             """
             await cur.execute(
                 insert_item_query,
-                (user_id, title, "pdf", source_url, encrypted_raw_text, summary, first_chunk_embedding, normalized_tags, content_hash)
+                (user_id, title, "pdf", source_url, encrypted_raw_text, summary, first_chunk_embedding, normalized_tags, content_hash, context_prompt)
             )
             row = await cur.fetchone()
             if not row:

@@ -20,12 +20,18 @@ CREATE TABLE IF NOT EXISTS users (
     last_activity_date   DATE,
     digest_enabled       BOOLEAN DEFAULT TRUE,
     drive_nudge_sent     BOOLEAN DEFAULT FALSE,
+    onboarding_day       INT DEFAULT 0,     -- Day 1-5 onboarding sequence tracking
+    onboarding_last_sent TIMESTAMP DEFAULT NULL,
     created_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Ensure the columns exist if the users table already exists
+-- Ensure the columns exist if the users/items tables already exist
 ALTER TABLE users ADD COLUMN IF NOT EXISTS google_last_sync TIMESTAMP;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS digest_enabled BOOLEAN DEFAULT TRUE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_day INT DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_last_sent TIMESTAMP DEFAULT NULL;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS context_note TEXT;
+ALTER TABLE items ADD COLUMN IF NOT EXISTS passive_context JSONB;
 
 
 -- 3. ITEMS TABLE (Partitioned by Range on created_at)
@@ -40,6 +46,9 @@ CREATE TABLE IF NOT EXISTS items (
     embedding    VECTOR(384),               -- MiniLM-L6-v2 output
     tags         TEXT[],                    -- Postgres native array
     content_hash VARCHAR(16),               -- SHA256 first 16 chars for exact text deduplication
+    context_note TEXT,                      -- User-provided context note
+    context_prompt TEXT,                    -- AI-generated custom context prompt question
+    passive_context JSONB,                  -- Captured ingest event metadata
     created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id, created_at)
 ) PARTITION BY RANGE (created_at);

@@ -21,7 +21,17 @@ export default function TransmissionCard({
   if (!card) return null;
 
   const question = card.question || card.front || card.summary || 'No question';
-  const answer = card.answer || card.back || card.raw_text || 'No answer';
+  
+  // Format the answer based on multiple-choice options and explanation if available
+  const correctAnswerText = card.options && typeof card.correct_index === 'number' && card.correct_index >= 0 && card.correct_index < card.options.length
+    ? card.options[card.correct_index]
+    : null;
+
+  const formattedAnswer = correctAnswerText 
+    ? (card.explanation ? `${correctAnswerText}\n\nExplanation: ${card.explanation}` : correctAnswerText)
+    : null;
+
+  const answer = card.answer || card.back || formattedAnswer || card.raw_text || 'No answer';
 
   // CRT corner decorator component
   const CornerDecorators = () => (
@@ -62,6 +72,7 @@ export default function TransmissionCard({
         <div className="transmission-card-face transmission-card-front" style={{
           position: 'absolute',
           inset: 0,
+          padding: '2rem',
           backfaceVisibility: 'hidden',
           WebkitBackfaceVisibility: 'hidden',
           borderRadius: 4,
@@ -75,7 +86,7 @@ export default function TransmissionCard({
         }}>
           <CornerDecorators />
           
-          <div>
+          <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             {/* Header */}
             <div style={{
               fontFamily: 'var(--font-mono)',
@@ -101,11 +112,39 @@ export default function TransmissionCard({
               lineHeight: 1.65,
               color: 'rgba(244, 239, 235, 0.9)',
               textShadow: '0 0 20px rgba(143, 163, 130, 0.4)',
-              maxHeight: '160px',
+              maxHeight: '110px',
               overflowY: 'auto',
             }}>
               {question}
             </div>
+            {/* Options list if multiple choice */}
+            {card.options && card.options.length > 0 && (
+              <div style={{
+                marginTop: '1rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.5rem',
+                fontFamily: 'var(--font-body)',
+                fontSize: 13,
+                color: 'rgba(244, 239, 235, 0.7)',
+                maxHeight: '120px',
+                overflowY: 'auto',
+              }}>
+                {card.options.map((opt, i) => (
+                  <div key={i} style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start' }}>
+                    <span style={{ 
+                      fontFamily: 'var(--font-mono)', 
+                      color: 'var(--accent-gold)', 
+                      fontSize: 11,
+                      marginTop: '2px'
+                    }}>
+                      [{String.fromCharCode(65 + i)}]
+                    </span>
+                    <span>{opt}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <button
@@ -142,6 +181,7 @@ export default function TransmissionCard({
         <div className="transmission-card-face transmission-card-back" style={{
           position: 'absolute',
           inset: 0,
+          padding: '2rem',
           backfaceVisibility: 'hidden',
           WebkitBackfaceVisibility: 'hidden',
           borderRadius: 4,
@@ -201,6 +241,7 @@ export default function TransmissionCard({
               paddingLeft: '1rem',
               maxHeight: '130px',
               overflowY: 'auto',
+              whiteSpace: 'pre-wrap',
             }}>
               <GlitchText trigger={revealed} duration={150}>
                 {answer}

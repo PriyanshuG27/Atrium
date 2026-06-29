@@ -164,6 +164,7 @@ async def ingest_youtube(url: str, user_id: int, db: AsyncConnection) -> int:
             ai_res = await cascade.summarise(transcript)
             summary = ai_res.get("summary") or f"Summary of video: {transcript[:200]}..."
             tags = ai_res.get("tags") or ["youtube"]
+            context_prompt = ai_res.get("context_prompt")
             normalized_tags = [t.strip().lower() for t in tags if isinstance(t, str) and t.strip()][:5]
 
             logger.info("[YouTube Ingestion] Creating vector embedding for the transcribed text...")
@@ -188,11 +189,11 @@ async def ingest_youtube(url: str, user_id: int, db: AsyncConnection) -> int:
                 async with conn.cursor() as cur:
                     await cur.execute(
                         """
-                        INSERT INTO items (user_id, source_type, source_url, raw_text, summary, title, embedding, tags)
-                        VALUES (%s, 'url', %s, %s, %s, %s, %s::vector, %s)
+                        INSERT INTO items (user_id, source_type, source_url, raw_text, summary, title, embedding, tags, context_prompt)
+                        VALUES (%s, 'url', %s, %s, %s, %s, %s::vector, %s, %s)
                         RETURNING id;
                         """,
-                        (user_id, url, encrypted_raw_text, summary, video_title, embedding, normalized_tags)
+                        (user_id, url, encrypted_raw_text, summary, video_title, embedding, normalized_tags, context_prompt)
                     )
                     row = await cur.fetchone()
                     if not row:
@@ -505,6 +506,7 @@ async def ingest_instagram(url: str, user_id: int, db: AsyncConnection) -> int:
             ai_res = await cascade.summarise(summarizer_input)
             summary = ai_res.get("summary") or f"Instagram Reel: {transcript[:200]}..."
             tags = ai_res.get("tags") or ["instagram", "reel"]
+            context_prompt = ai_res.get("context_prompt")
             normalized_tags = [t.strip().lower() for t in tags if isinstance(t, str) and t.strip()][:5]
 
             logger.info("[Instagram Ingestion] Creating vector embedding for the transcribed text...")
@@ -529,11 +531,11 @@ async def ingest_instagram(url: str, user_id: int, db: AsyncConnection) -> int:
                 async with conn.cursor() as cur:
                     await cur.execute(
                         """
-                        INSERT INTO items (user_id, source_type, source_url, raw_text, summary, title, embedding, tags)
-                        VALUES (%s, 'url', %s, %s, %s, %s, %s::vector, %s)
+                        INSERT INTO items (user_id, source_type, source_url, raw_text, summary, title, embedding, tags, context_prompt)
+                        VALUES (%s, 'url', %s, %s, %s, %s, %s::vector, %s, %s)
                         RETURNING id;
                         """,
-                        (user_id, url, encrypted_raw_text, summary, video_title, embedding, normalized_tags),
+                        (user_id, url, encrypted_raw_text, summary, video_title, embedding, normalized_tags, context_prompt),
                     )
                     row = await cur.fetchone()
                     if not row:

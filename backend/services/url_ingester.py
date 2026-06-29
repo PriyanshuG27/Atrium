@@ -271,17 +271,23 @@ async def ingest_url(url: str, user_id: int, db: AsyncConnection) -> int:
     cascade = AICascade()
     summary = f"Summary snippet of {title}: {text_content[:200]}..."
     tags = ["url"]
+    context_prompt = None
     try:
         ai_res = await cascade.summarise(raw_text)
         summary = ai_res.get("summary") or summary
         tags = ai_res.get("tags") or tags
+        context_prompt = ai_res.get("context_prompt")
     except Exception as e:
         logger.error("Failed to generate AI summary/tags for URL %s: %s", url, e)
         
     normalized_tags = [t.strip().lower() for t in tags if isinstance(t, str) and t.strip()][:5]
     
     # 3. Generate embedding
-    embedding = await embed_text(raw_text)
+    is_fallback = (text_content == url)
+    if is_fallback:
+        embedding = await embed_text(f"{title}\n{summary}")
+    else:
+        embedding = await embed_text(raw_text)
     
     # 4. Encrypt raw text
     encrypted_raw_text = encrypt(raw_text)
@@ -302,11 +308,11 @@ async def ingest_url(url: str, user_id: int, db: AsyncConnection) -> int:
         async with conn.cursor() as cur:
             await cur.execute(
                 """
-                INSERT INTO items (user_id, source_type, source_url, raw_text, summary, title, embedding, tags)
-                VALUES (%s, 'url', %s, %s, %s, %s, %s::vector, %s)
+                INSERT INTO items (user_id, source_type, source_url, raw_text, summary, title, embedding, tags, context_prompt)
+                VALUES (%s, 'url', %s, %s, %s, %s, %s::vector, %s, %s)
                 RETURNING id;
                 """,
-                (user_id, url, encrypted_raw_text, summary, title, embedding, normalized_tags)
+                (user_id, url, encrypted_raw_text, summary, title, embedding, normalized_tags, context_prompt)
             )
             row = await cur.fetchone()
             if not row:

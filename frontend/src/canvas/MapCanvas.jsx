@@ -31,6 +31,7 @@ export default function MapCanvas({
   filterType = 'all',
   selectedNodeId = null,
   selectedHubId  = null,
+  flareNodeId    = null,
   searchQuery = '',
   physicsFrozen = false,
   showLabels = 'hover',
@@ -44,7 +45,7 @@ export default function MapCanvas({
     hovered: null, transform: { x: 0, y: 0, k: 1 },
     isDragging: false, dragNode: null, panStart: null,
     rafId: null, filterType: 'all',
-    selectedNodeId: null, selectedHubId: null,
+    selectedNodeId: null, selectedHubId: null, flareNodeId: null,
     searchQuery: '', physicsFrozen: false, showLabels: 'hover',
     gapsMode: false, burstHubId: null,
     alive: false, stars: [],
@@ -53,6 +54,7 @@ export default function MapCanvas({
   useEffect(() => { s.current.filterType     = filterType;    }, [filterType]);
   useEffect(() => { s.current.selectedNodeId = selectedNodeId; }, [selectedNodeId]);
   useEffect(() => { s.current.selectedHubId  = selectedHubId;  }, [selectedHubId]);
+  useEffect(() => { s.current.flareNodeId    = flareNodeId;    }, [flareNodeId]);
   useEffect(() => { s.current.searchQuery    = searchQuery;   }, [searchQuery]);
   useEffect(() => { s.current.showLabels     = showLabels;    }, [showLabels]);
   useEffect(() => { s.current.gapsMode       = gapsMode;      }, [gapsMode]);
@@ -223,6 +225,7 @@ export default function MapCanvas({
       const hov = st.hovered;
       const query = (st.searchQuery || '').trim().toLowerCase();
       const burstId = st.burstHubId;
+      const flareId = st.flareNodeId;
       const gaps = st.gapsMode;
       const now = performance.now() * 0.001;
 
@@ -325,6 +328,20 @@ export default function MapCanvas({
         const tgt = typeof link.target === 'object' ? link.target : sn.find(n => n.id === link.target);
         if (!src || !tgt || src.x == null || tgt.x == null) return;
 
+        // Level-of-Detail (LOD): Zoomed out hides non-hub connection edges
+        const srcHub = isHub(src);
+        const tgtHub = isHub(tgt);
+        if (k < 0.8 && (!srcHub || !tgtHub)) {
+          return;
+        }
+
+        // Cold Storage: Hide connection lines for cold nodes (daysSince >= 30)
+        const srcCold = !srcHub && (src.daysSince ?? 0) >= 30;
+        const tgtCold = !tgtHub && (tgt.daysSince ?? 0) >= 30;
+        if ((srcCold || tgtCold) && !litEdges.has(link)) {
+          return;
+        }
+
         const isLit = litEdges.has(link);
         let alpha;
         if (query) {
@@ -375,6 +392,18 @@ export default function MapCanvas({
         const isHubSel = node.id === hub;
         const isHov    = node.id === hov;
         const isLit    = litNodes.has(node.id);
+
+        // Level-of-Detail (LOD): Zoomed out hides non-hub stars
+        if (k < 0.8 && !hubNode && !isSel && !isHov && !isLit) {
+          return;
+        }
+
+        // Cold Storage: Skip drawing individual nodes that are cold (daysSince >= 30)
+        const isCold = !hubNode && (node.daysSince ?? 0) >= 30;
+        if (isCold && !isSel && !isHov && !isLit) {
+          return;
+        }
+
         const col      = nodeColor(node);
         const r        = nodeR(node);
         const inSearch = query ? matches.has(node.id) : true;
@@ -404,6 +433,24 @@ export default function MapCanvas({
         ctx.globalAlpha = opacity;
 
         if (hubNode) {
+          if (k >= 0.8) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, 45, 0, Math.PI * 2);
+            ctx.strokeStyle = ha(col, 0.08);
+            ctx.lineWidth = 1.0 / k;
+            ctx.setLineDash([4, 6]);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, 70, 0, Math.PI * 2);
+            ctx.strokeStyle = ha(col, 0.04);
+            ctx.lineWidth = 0.8 / k;
+            ctx.setLineDash([2, 8]);
+            ctx.stroke();
+            ctx.restore();
+          }
+
           const p1    = 0.5 + 0.5 * Math.sin(now * 1.2 + Math.abs(node.id) * 1.1);
           const p2    = 0.5 + 0.5 * Math.sin(now * 0.6 + Math.abs(node.id) * 0.7 + 2.1);
           const boost = isHubSel ? 2.0 : 1;
@@ -448,6 +495,17 @@ export default function MapCanvas({
             ctx.stroke();
           }
 
+          // Cold Storage: Draw secondary outer dashed halo around old Hubs (daysSince >= 30)
+          if (node.daysSince >= 30) {
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, r + 12, 0, Math.PI * 2);
+            ctx.strokeStyle = ha(col, 0.18);
+            ctx.lineWidth = 1.0 / k;
+            ctx.setLineDash([2, 4]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+
         } else {
           const drawR = (isSel || isHov || isLit) ? r * 1.7 : r;
 
@@ -471,6 +529,16 @@ export default function MapCanvas({
           ctx.arc(node.x, node.y, drawR, 0, Math.PI * 2);
           ctx.fillStyle = isSel ? '#F4EFEB' : col;
           ctx.fill();
+
+          if (node.id === flareId) {
+            const flarePulse = 0.5 + 0.5 * Math.sin(now * 3.5);
+            const flareR = drawR + 4 + flarePulse * 18;
+            ctx.beginPath();
+            ctx.arc(node.x, node.y, flareR, 0, Math.PI * 2);
+            ctx.strokeStyle = `rgba(207,163,101,${0.45 * (1 - flarePulse)})`;
+            ctx.lineWidth = 1.5 / k;
+            ctx.stroke();
+          }
         }
         ctx.restore();
 

@@ -57,7 +57,9 @@ class MockCursor:
         if "INSERT INTO ITEMS" in query_upper:
             # params: user_id, title, source_type, source_url, raw_text, summary, embedding, tags (optional), content_hash (optional)
             tags = []
-            if len(params) == 9:
+            if len(params) >= 10:
+                user_id, title, source_type, source_url, raw_text, summary, embedding, tags, _content_hash = params[:9]
+            elif len(params) == 9:
                 user_id, title, source_type, source_url, raw_text, summary, embedding, tags, _content_hash = params
             elif len(params) == 8:
                 user_id, title, source_type, source_url, raw_text, summary, embedding, tags = params

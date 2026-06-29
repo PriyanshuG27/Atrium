@@ -44,13 +44,22 @@ async def get_pool():
     return connection._pool
 
 
-async def send_telegram_message(chat_id: str, text: str) -> bool:
+async def send_telegram_message(
+    chat_id: str,
+    text: str,
+    reply_markup: Optional[Dict[str, Any]] = None,
+    parse_mode: Optional[str] = None
+) -> bool:
     """Helper to send Telegram messages via Bot API, redacting sensitive tokens in logs."""
     url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": chat_id,
         "text": text
     }
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
+    if parse_mode is not None:
+        payload["parse_mode"] = parse_mode
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.post(url, json=payload, timeout=10.0)
@@ -91,11 +100,11 @@ async def _perform_db_hubs_swap(cur, user_id: int, hubs_to_insert: List[Dict[str
 
 async def reminders_dispatcher() -> None:
     """
-    Background job to deliver pending reminders to users via Telegram Bot API.
-    Uses Redis Sorted Set for scheduling:
-    1. Queries Redis zset 'reminders:active' for due IDs.
+    Background job to deliver pending reminders and expire drift loops.
+    Uses Redis Sorted Set 'reminders:active' for scheduling:
+    1. Queries Redis zset 'reminders:active' for due IDs or drift keys.
     2. If empty, exits immediately without touching the PostgreSQL pool (Neon autosuspend).
-    3. If not empty, checks out database connection, updates statuses, and dispatches.
+    3. If not empty, checks out database connection, updates statuses, and dispatches/expires.
     """
     import time
     try:
@@ -104,45 +113,148 @@ async def reminders_dispatcher() -> None:
         if not due_ids_str:
             return
 
-        due_ids = [int(x) for x in due_ids_str if x.isdigit()]
-        if not due_ids:
+        # Divide into reminders and drift candidates
+        drift_cand_ids = [int(x.split(":")[1]) for x in due_ids_str if isinstance(x, str) and x.startswith("drift:")]
+        due_ids = [int(x) for x in due_ids_str if isinstance(x, str) and x.isdigit()]
+
+        if not due_ids and not drift_cand_ids:
             return
 
-        logger.info("Found %d pending reminders in Redis to dispatch.", len(due_ids))
+        logger.info("Found %d pending reminders and %d drift expiries to process.", len(due_ids), len(drift_cand_ids))
         pool = await get_pool()
+        async with pool.connection() as conn:
+            async with conn.cursor() as cur:
+                # 1. Process drift expiries
+                if drift_cand_ids:
+                    await cur.execute(
+                        "UPDATE insight_candidates SET status = 'expired' WHERE id = ANY(%s) AND status = 'delivered';",
+                        (drift_cand_ids,)
+                    )
+                    await conn.commit()
+                    for c_id in drift_cand_ids:
+                        await redis.zrem("reminders:active", f"drift:{c_id}")
+                        logger.info("Expired drift candidate %d in DB and Redis", c_id)
+
+                # 2. Process reminders
+                if due_ids:
+                    await cur.execute(
+                        """
+                        SELECT r.id, r.message, u.telegram_chat_id
+                        FROM reminders r
+                        JOIN users u ON r.user_id = u.id
+                        WHERE r.id = ANY(%s) AND r.status = 'pending';
+                        """,
+                        (due_ids,)
+                    )
+                    rows = await cur.fetchall()
+                    
+                    # Remove all checked due IDs from Redis immediately to prevent loopups
+                    for rem_id in due_ids:
+                        await redis.zrem("reminders:active", str(rem_id))
+                        
+                    if rows:
+                        for row in rows:
+                            rem_id, message, chat_id = row
+                            formatted_msg = f"🔔 Reminder:\n\n{message}"
+                            success = await send_telegram_message(chat_id, formatted_msg)
+                            status = "sent" if success else "failed"
+                            await cur.execute(
+                                "UPDATE reminders SET status = %s WHERE id = %s",
+                                (status, rem_id)
+                            )
+                        await conn.commit()
+                        logger.info("Successfully processed and updated %d reminders.", len(rows))
+    except Exception as e:
+        logger.error("reminders_dispatcher job failed: %s", e, exc_info=True)
+
+
+async def scan_insight_candidates_for_user(user_id: int, pool) -> None:
+    try:
+        # 1. Fetch cross-cluster item pairs (saved >= 14 days apart, similarity >= 0.60)
         async with pool.connection() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
                     """
-                    SELECT r.id, r.message, u.telegram_chat_id
-                    FROM reminders r
-                    JOIN users u ON r.user_id = u.id
-                    WHERE r.id = ANY(%s) AND r.status = 'pending';
+                    SELECT a.id, b.id, 1 - (a.embedding <=> b.embedding) AS similarity
+                    FROM items a, items b
+                    WHERE a.user_id = %s AND b.user_id = %s
+                      AND a.id < b.id
+                      AND a.created_at < b.created_at - INTERVAL '14 days'
+                      AND a.source_type != 'combined'
+                      AND b.source_type != 'combined'
+                      AND 1 - (a.embedding <=> b.embedding) >= 0.60
+                    ORDER BY similarity DESC
+                    LIMIT 200;
                     """,
-                    (due_ids,)
+                    (user_id, user_id)
                 )
-                rows = await cur.fetchall()
+                candidate_pairs = await cur.fetchall()
                 
-                # Remove all checked due IDs from Redis immediately to prevent loopups
-                for rem_id in due_ids:
-                    await redis.zrem("reminders:active", str(rem_id))
-                    
-                if not rows:
+                if not candidate_pairs:
                     return
-
-                for row in rows:
-                    rem_id, message, chat_id = row
-                    formatted_msg = f"🔔 Reminder:\n\n{message}"
-                    success = await send_telegram_message(chat_id, formatted_msg)
-                    status = "sent" if success else "failed"
+                
+                # Fetch semantic hub mappings for this user
+                await cur.execute(
+                    "SELECT id, member_ids FROM semantic_hubs WHERE user_id = %s;",
+                    (user_id,)
+                )
+                hubs = await cur.fetchall()
+                
+        # Build map of item_id -> hub_id
+        item_to_hub = {}
+        for hub_id, member_ids in hubs:
+            for m_id in member_ids:
+                item_to_hub[m_id] = hub_id
+                
+        # 2. Process each pair
+        import hashlib
+        for item_a_id, item_b_id, sim in candidate_pairs:
+            hub_a = item_to_hub.get(item_a_id)
+            hub_b = item_to_hub.get(item_b_id)
+            
+            # Check if they are cross-cluster pairs
+            if hub_a is not None and hub_b is not None and hub_a == hub_b:
+                continue
+                
+            # MD5 Hash for novelty filter
+            if hub_a is not None and hub_b is not None:
+                sorted_hubs = sorted([int(hub_a), int(hub_b)])
+                hash_str = f"hubs:{sorted_hubs[0]}:{sorted_hubs[1]}"
+            else:
+                sorted_items = sorted([item_a_id, item_b_id])
+                hash_str = f"items:{sorted_items[0]}:{sorted_items[1]}"
+                
+            pair_hash = hashlib.md5(hash_str.encode()).hexdigest()
+            
+            # Check novelty filter: did this pair hash fire in last 60 days?
+            async with pool.connection() as conn:
+                async with conn.cursor() as cur:
                     await cur.execute(
-                        "UPDATE reminders SET status = %s WHERE id = %s",
-                        (status, rem_id)
+                        """
+                        SELECT 1 FROM insight_candidates
+                        WHERE user_id = %s AND cluster_pair_hash = %s
+                          AND created_at > NOW() - INTERVAL '60 days'
+                        LIMIT 1;
+                        """,
+                        (user_id, pair_hash)
                     )
-                await conn.commit()
-                logger.info("Successfully processed and updated %d reminders.", len(rows))
-    except Exception as e:
-        logger.error("reminders_dispatcher job failed: %s", e, exc_info=True)
+                    exists = await cur.fetchone()
+                    if exists:
+                        continue
+                        
+                    # Insert into insight_candidates
+                    bucket = "confirmed" if sim >= 0.65 else "near_miss"
+                    await cur.execute(
+                        """
+                        INSERT INTO insight_candidates (user_id, item_id_a, item_id_b, similarity_score, bucket, status, cluster_pair_hash)
+                        VALUES (%s, %s, %s, %s, %s, 'pending', %s)
+                        ON CONFLICT DO NOTHING;
+                        """,
+                        (user_id, item_a_id, item_b_id, float(sim), bucket, pair_hash)
+                    )
+                    await conn.commit()
+    except Exception as scan_err:
+        logger.error("Failed to run nightly scan for user %d: %s", user_id, scan_err)
 
 
 async def louvain_clustering() -> None:
@@ -346,6 +458,9 @@ async def louvain_clustering() -> None:
 
             logger.info("Successfully completed Louvain clustering for user %s. Generated %d hubs.", user_id, len(hubs_to_insert))
 
+            # Run nightly candidate scan
+            await scan_insight_candidates_for_user(user_id, pool)
+
         except Exception as e:
             logger.error("Louvain clustering failed for user %s: %s", user_id, e, exc_info=True)
             continue
@@ -461,113 +576,217 @@ async def processed_updates_cleanup() -> None:
 
 async def daily_digest_sender() -> None:
     """
-    Background job to send a daily morning digest to active users who have
-    digest_enabled=True. Filters users dynamically by local hour 8:00 AM.
-    Runs hourly.
+    Unified daily digest loop. Runs hourly.
+    Checks users' local timezone hour:
+    - 8:00 AM local: Sends standard Morning Digest stats, and fires Morning Mystery (clue).
+    - 8:00 PM local: Sends Evening Answer (connection tension resolution).
     """
     try:
         pool = await get_pool()
-        users_to_digest = []
+        users_to_process = []
         async with pool.connection() as conn:
             await conn.execute("SET statement_timeout = '30s'")
             async with conn.cursor() as cur:
-                # Select users whose local time is currently in the 8:00 AM hour
-                # also filtering by digest_enabled and activity within previous 7 days
                 await cur.execute(
                     """
-                    SELECT id, telegram_chat_id, streak_count
+                    SELECT id, telegram_chat_id, streak_count,
+                           EXTRACT(HOUR FROM (CURRENT_TIMESTAMP + (timezone_offset * INTERVAL '1 minute'))) AS local_hour
                     FROM users
                     WHERE digest_enabled = TRUE
-                      AND last_activity_date >= CURRENT_DATE - INTERVAL '7 days'
-                      AND EXTRACT(HOUR FROM (CURRENT_TIMESTAMP + (timezone_offset * INTERVAL '1 minute'))) = 8;
+                      AND last_activity_date >= CURRENT_DATE - INTERVAL '14 days'
+                      AND EXTRACT(HOUR FROM (CURRENT_TIMESTAMP + (timezone_offset * INTERVAL '1 minute'))) IN (8, 20);
                     """
                 )
-                users_to_digest = await cur.fetchall()
+                users_to_process = await cur.fetchall()
         
-        if not users_to_digest:
-            logger.info("No active users found for daily digest in this hour.")
+        if not users_to_process:
+            logger.info("No active users found for daily digest / loop closure in this hour.")
             return
 
-        logger.info("Found %d users eligible for daily digest in this hour.", len(users_to_digest))
+        logger.info("Found %d users eligible for daily digest / loop closure in this hour.", len(users_to_process))
         
-        for user_id, chat_id, streak_count in users_to_digest:
+        import time
+        from backend.services.ai_cascade import AICascade
+
+        for row in users_to_process:
+            if len(row) == 4:
+                user_id, chat_id, streak_count, local_hour = row
+                local_hour = int(local_hour)
+            else:
+                user_id, chat_id, streak_count = row
+                local_hour = 8  # Default to morning digest if local_hour is omitted
             try:
-                yesterday_count = 0
-                top_titles = []
-                quizzes_due = 0
-                
-                async with pool.connection() as conn:
-                    await conn.execute("SET statement_timeout = '30s'")
-                    async with conn.cursor() as cur:
-                        # 1. Count yesterday's saved items
-                        await cur.execute(
-                            """
-                            SELECT COUNT(*)
-                            FROM items
-                            WHERE user_id = %s
-                              AND created_at >= CURRENT_DATE - INTERVAL '1 day'
-                              AND created_at < CURRENT_DATE;
-                            """,
-                            (user_id,)
-                        )
-                        count_row = await cur.fetchone()
-                        yesterday_count = count_row[0] if count_row else 0
-                        
-                        # 2. Get yesterday's first 3 titles (ordered by created_at)
-                        if yesterday_count > 0:
+                if local_hour == 8:
+                    # ==========================================
+                    # MORNING DIGEST & MYSTERY (8:00 AM)
+                    # ==========================================
+                    yesterday_count = 0
+                    top_titles = []
+                    quizzes_due = 0
+                    
+                    async with pool.connection() as conn:
+                        await conn.execute("SET statement_timeout = '30s'")
+                        async with conn.cursor() as cur:
+                            # 1. Count yesterday's saved items
                             await cur.execute(
                                 """
-                                SELECT title
+                                SELECT COUNT(*)
                                 FROM items
                                 WHERE user_id = %s
                                   AND created_at >= CURRENT_DATE - INTERVAL '1 day'
-                                  AND created_at < CURRENT_DATE
-                                ORDER BY created_at ASC
-                                LIMIT 3;
+                                  AND created_at < CURRENT_DATE;
                                 """,
                                 (user_id,)
                             )
-                            title_rows = await cur.fetchall()
-                            top_titles = [r[0] for r in title_rows if r and r[0]]
-                        
-                        # 3. Count quizzes due today
-                        await cur.execute(
-                            """
-                            SELECT COUNT(*)
-                            FROM quizzes
-                            WHERE user_id = %s
-                              AND next_review = CURRENT_DATE;
-                            """,
-                            (user_id,)
+                            count_row = await cur.fetchone()
+                            yesterday_count = count_row[0] if count_row else 0
+                            
+                            # 2. Get yesterday's first 3 titles
+                            if yesterday_count > 0:
+                                await cur.execute(
+                                    """
+                                    SELECT title
+                                    FROM items
+                                    WHERE user_id = %s
+                                      AND created_at >= CURRENT_DATE - INTERVAL '1 day'
+                                      AND created_at < CURRENT_DATE
+                                    ORDER BY created_at ASC
+                                    LIMIT 3;
+                                    """,
+                                    (user_id,)
+                                )
+                                title_rows = await cur.fetchall()
+                                top_titles = [r[0] for r in title_rows if r and r[0]]
+                            
+                            # 3. Count quizzes due today
+                            await cur.execute(
+                                """
+                                SELECT COUNT(*)
+                                FROM quizzes
+                                WHERE user_id = %s
+                                  AND next_review = CURRENT_DATE;
+                                """,
+                                (user_id,)
+                            )
+                            quiz_row = await cur.fetchone()
+                            quizzes_due = quiz_row[0] if quiz_row else 0
+                    
+                    # Format standard morning digest
+                    if yesterday_count > 0:
+                        titles_bullet = "\n".join(f"• {t}" for t in top_titles)
+                        msg = (
+                            "📬 Good morning! Your Recall daily digest:\n\n"
+                            f"Yesterday you saved {yesterday_count} items.\n"
+                            "📖 New knowledge:\n"
+                            f"{titles_bullet}\n\n"
+                            f"🧠 Quizzes due today: {quizzes_due}\n"
+                            "Type /quiz to start.\n\n"
+                            f"🔥 {streak_count} day streak — keep it up!"
                         )
-                        quiz_row = await cur.fetchone()
-                        quizzes_due = quiz_row[0] if quiz_row else 0
-                
-                # Format response message
-                if yesterday_count > 0:
-                    titles_bullet = "\n".join(f"• {t}" for t in top_titles)
-                    msg = (
-                        "📬 Good morning! Your Recall daily digest:\n\n"
-                        f"Yesterday you saved {yesterday_count} items.\n"
-                        "📖 New knowledge:\n"
-                        f"{titles_bullet}\n\n"
-                        f"🧠 Quizzes due today: {quizzes_due}\n"
-                        "Type /quiz to start.\n\n"
-                        f"🔥 {streak_count} day streak — keep it up!"
-                    )
-                else:
-                    msg = (
-                        "📬 Good morning! Your Recall daily digest:\n\n"
-                        f"🧠 Quizzes due today: {quizzes_due}\n"
-                        "Type /quiz to start.\n\n"
-                        f"🔥 {streak_count} day streak — keep it up!"
-                    )
-                
-                # Deliver message asynchronously, isolated to prevent single user failure from blocking others
-                await send_telegram_message(str(chat_id), msg)
-                
+                    else:
+                        msg = (
+                            "📬 Good morning! Your Recall daily digest:\n\n"
+                            f"🧠 Quizzes due today: {quizzes_due}\n"
+                            "Type /quiz to start.\n\n"
+                            f"🔥 {streak_count} day streak — keep it up!"
+                        )
+                    
+                    await send_telegram_message(str(chat_id), msg)
+                    
+                    # 4. Check for Morning Mystery Candidate
+                    async with pool.connection() as conn:
+                        async with conn.cursor() as cur:
+                            await cur.execute(
+                                """
+                                SELECT id, item_id_a, item_id_b 
+                                FROM insight_candidates
+                                WHERE user_id = %s AND status = 'pending'
+                                ORDER BY similarity_score DESC
+                                LIMIT 1;
+                                """,
+                                (user_id,)
+                            )
+                            cand = await cur.fetchone()
+                            
+                    if cand:
+                        cand_id, item_a, item_b = cand
+                        expiry_epoch = int(time.time()) + 12 * 3600
+                        
+                        async with pool.connection() as conn:
+                            async with conn.cursor() as cur:
+                                await cur.execute(
+                                    "UPDATE insight_candidates SET status = 'delivered', expires_at = NOW() + INTERVAL '12 hours' WHERE id = %s;",
+                                    (cand_id,)
+                                )
+                                await conn.commit()
+                                
+                        await redis.zadd("reminders:active", float(expiry_epoch), f"drift:{cand_id}")
+                        
+                        mystery_msg = "Your graph did something unusual overnight. Three things you saved in different weeks just collapsed into the same idea. I haven't told you what it is yet."
+                        await send_telegram_message(str(chat_id), mystery_msg)
+                        logger.info("Sent Morning Mystery to user %d, candidate %d", user_id, cand_id)
+
+                elif local_hour == 20:
+                    # ==========================================
+                    # EVENING ANSWER (8:00 PM)
+                    # ==========================================
+                    async with pool.connection() as conn:
+                        async with conn.cursor() as cur:
+                            await cur.execute(
+                                """
+                                SELECT c.id, c.item_id_a, c.item_id_b, 
+                                       a.title, a.summary, a.tags, a.context_note, a.passive_context,
+                                       b.title, b.summary, b.tags, b.context_note, b.passive_context
+                                FROM insight_candidates c
+                                JOIN items a ON c.item_id_a = a.id
+                                JOIN items b ON c.item_id_b = b.id
+                                WHERE c.user_id = %s AND c.status = 'delivered'
+                                ORDER BY c.created_at DESC
+                                LIMIT 1;
+                                """,
+                                (user_id,)
+                            )
+                            cand = await cur.fetchone()
+                            
+                    if cand:
+                        if len(cand) == 13:
+                            cand_id, item_a_id, item_b_id, t_a, s_a, tg_a, cn_a, pc_a, t_b, s_b, tg_b, cn_b, pc_b = cand
+                        else:
+                            cand_id, item_a_id, item_b_id, t_a, s_a, tg_a, t_b, s_b, tg_b = cand[:9]
+                            cn_a, pc_a, cn_b, pc_b = None, None, None, None
+                        
+                        cascade = AICascade()
+                        cascade._force_production_llm = True
+                        
+                        dict_a = {"title": t_a, "summary": s_a, "tags": tg_a, "context_note": cn_a, "passive_context": pc_a}
+                        dict_b = {"title": t_b, "summary": s_b, "tags": tg_b, "context_note": cn_b, "passive_context": pc_b}
+                        
+                        logger.info("Generating Evening Answer insight for candidate %d...", cand_id)
+                        insight = await cascade.generate_insight(dict_a, dict_b, 1)
+                        
+                        if insight:
+                            async with pool.connection() as conn:
+                                async with conn.cursor() as cur:
+                                    await cur.execute(
+                                        "UPDATE insight_candidates SET status = 'confirmed', insight_text = %s WHERE id = %s;",
+                                        (insight, cand_id)
+                                    )
+                                    await conn.commit()
+                                    
+                            await redis.zrem("reminders:active", f"drift:{cand_id}")
+                            
+                            resolved_msg = (
+                                f"The idea your graph kept circling:\n\n"
+                                f"{insight}\n\n"
+                                f"You connected it to:\n"
+                                f"🔗 {t_a}\n"
+                                f"🔗 {t_b}"
+                            )
+                            await send_telegram_message(str(chat_id), resolved_msg)
+                            logger.info("Sent Evening Answer to user %d, candidate %d", user_id, cand_id)
+                            
             except Exception as user_err:
-                logger.error("Failed to compile or deliver daily digest for user %d (chat_id %s): %s", user_id, chat_id, user_err, exc_info=True)
+                logger.error("Failed to process daily digest/loop closure for user %d (chat_id %s): %s", user_id, chat_id, user_err, exc_info=True)
                 
     except Exception as e:
         logger.error("daily_digest_sender job failed: %s", e, exc_info=True)
@@ -708,6 +927,213 @@ async def offpeak_quiz_generator() -> None:
         logger.error("offpeak_quiz_generator background job failed: %s", e, exc_info=True)
 
 
+async def onboarding_sequence_dispatcher() -> None:
+    """Handles the Day 1-5 conversational onboarding follow-ups."""
+    try:
+        pool = await get_pool()
+        from backend.services.redis_client import redis
+        
+        # 1. Day 0 checks (Wait 2 hours after first save)
+        async with pool.connection() as conn:
+            await conn.execute("SET statement_timeout = '30s'")
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    SELECT u.id, u.telegram_chat_id, MIN(i.id) as first_item_id
+                    FROM users u
+                    JOIN items i ON u.id = i.user_id
+                    WHERE u.onboarding_day = 0 AND u.onboarding_last_sent IS NULL
+                    GROUP BY u.id, u.telegram_chat_id
+                    HAVING MIN(i.created_at) <= CURRENT_TIMESTAMP - INTERVAL '2 hours';
+                    """
+                )
+                day0_users = await cur.fetchall()
+
+        for u_id, chat_id, item_id in day0_users:
+            msg = "I looked at the thing you sent me. Quick question — was this for you, or were you planning to act on it or share it with someone?"
+            reply_markup = {
+                "inline_keyboard": [
+                    [{"text": "Just for me 👤", "callback_data": "onboarding_opt:for_me"}],
+                    [{"text": "To act on it 🚀", "callback_data": "onboarding_opt:act"}],
+                    [{"text": "To share with someone 👥", "callback_data": "onboarding_opt:share"}]
+                ]
+            }
+            await redis.setex(f"pending_context:{chat_id}", 86400 * 2, str(item_id))
+            
+            success = await send_telegram_message(str(chat_id), msg, reply_markup=reply_markup)
+            if success:
+                async with pool.connection() as conn:
+                    await conn.execute("SET statement_timeout = '30s'")
+                    async with conn.cursor() as cur:
+                        await cur.execute(
+                            "UPDATE users SET onboarding_day = 1, onboarding_last_sent = CURRENT_TIMESTAMP WHERE id = %s;",
+                            (u_id,)
+                        )
+                        await conn.commit()
+
+        # 2. Day 1 checks (Sends next morning at 8:00 AM local time, at least 12h gap)
+        async with pool.connection() as conn:
+            await conn.execute("SET statement_timeout = '30s'")
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    SELECT u.id, u.telegram_chat_id,
+                           (SELECT id FROM items WHERE user_id = u.id ORDER BY created_at ASC LIMIT 1) as first_item_id,
+                           (SELECT title FROM items WHERE user_id = u.id ORDER BY created_at ASC LIMIT 1) as first_item_title
+                    FROM users u
+                    WHERE u.onboarding_day = 1
+                      AND u.onboarding_last_sent <= CURRENT_TIMESTAMP - INTERVAL '12 hours'
+                      AND EXTRACT(HOUR FROM (CURRENT_TIMESTAMP + (u.timezone_offset * INTERVAL '1 minute'))) = 8;
+                    """
+                )
+                day1_users = await cur.fetchall()
+
+        for u_id, chat_id, first_item_id, first_title in day1_users:
+            if not first_item_id:
+                continue
+            title_label = first_title or "the item you saved"
+            msg = f"Still thinking about \"{title_label}\"? I'm not doing anything with it yet — just checking if it's still on your mind, or if it's already done its job."
+            reply_markup = {
+                "inline_keyboard": [
+                    [{"text": "Still on my mind 💭", "callback_data": "onboarding_opt:mind"}],
+                    [{"text": "Already done its job ✓", "callback_data": "onboarding_opt:done"}]
+                ]
+            }
+            await redis.setex(f"pending_context:{chat_id}", 86400 * 2, str(first_item_id))
+            
+            success = await send_telegram_message(str(chat_id), msg, reply_markup=reply_markup)
+            if success:
+                async with pool.connection() as conn:
+                    await conn.execute("SET statement_timeout = '30s'")
+                    async with conn.cursor() as cur:
+                        await cur.execute(
+                            "UPDATE users SET onboarding_day = 2, onboarding_last_sent = CURRENT_TIMESTAMP WHERE id = %s;",
+                            (u_id,)
+                        )
+                        await conn.commit()
+
+        # 3. Day 2 checks (Sends next morning at 8:00 AM local, at least 18h gap, only if they replied to Day 0 or 1)
+        async with pool.connection() as conn:
+            await conn.execute("SET statement_timeout = '30s'")
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    SELECT u.id, u.telegram_chat_id,
+                           (SELECT context_note FROM items WHERE user_id = u.id ORDER BY created_at ASC LIMIT 1) as first_note
+                    FROM users u
+                    WHERE u.onboarding_day = 2
+                      AND u.onboarding_last_sent <= CURRENT_TIMESTAMP - INTERVAL '18 hours'
+                      AND EXTRACT(HOUR FROM (CURRENT_TIMESTAMP + (u.timezone_offset * INTERVAL '1 minute'))) = 8;
+                    """
+                )
+                day2_users = await cur.fetchall()
+
+        for u_id, chat_id, first_note in day2_users:
+            if first_note:
+                msg = "What's one thing you've been meaning to look into but haven't saved anywhere yet?"
+                success = await send_telegram_message(str(chat_id), msg)
+                if success:
+                    async with pool.connection() as conn:
+                        await conn.execute("SET statement_timeout = '30s'")
+                        async with conn.cursor() as cur:
+                            await cur.execute(
+                                "UPDATE users SET onboarding_day = 3, onboarding_last_sent = CURRENT_TIMESTAMP WHERE id = %s;",
+                                (u_id,)
+                            )
+                            await conn.commit()
+            else:
+                async with pool.connection() as conn:
+                    await conn.execute("SET statement_timeout = '30s'")
+                    async with conn.cursor() as cur:
+                        await cur.execute(
+                            "UPDATE users SET onboarding_day = 5, onboarding_last_sent = CURRENT_TIMESTAMP WHERE id = %s;",
+                            (u_id,)
+                        )
+                        await conn.commit()
+
+        # 4. Monitor Day 3 (Handoff when they reach >= 5 items)
+        async with pool.connection() as conn:
+            await conn.execute("SET statement_timeout = '30s'")
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    SELECT u.id, (SELECT COUNT(*) FROM items WHERE user_id = u.id) as node_count
+                    FROM users u
+                    WHERE u.onboarding_day = 3;
+                    """
+                )
+                monitored_users = await cur.fetchall()
+
+        for u_id, node_count in monitored_users:
+            if node_count >= 5:
+                async with pool.connection() as conn:
+                    await conn.execute("SET statement_timeout = '30s'")
+                    async with conn.cursor() as cur:
+                        await cur.execute(
+                            "UPDATE users SET onboarding_day = 5, onboarding_last_sent = CURRENT_TIMESTAMP WHERE id = %s;",
+                            (u_id,)
+                        )
+                        await conn.commit()
+
+    except Exception as e:
+        logger.error("onboarding_sequence_dispatcher background job failed: %s", e, exc_info=True)
+
+
+async def mid_graph_re_engagement_dispatcher() -> None:
+    """Sends engagement prompts to silent users within the 5-30 node threshold."""
+    try:
+        pool = await get_pool()
+        from backend.services.redis_client import redis
+        
+        async with pool.connection() as conn:
+            await conn.execute("SET statement_timeout = '30s'")
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    SELECT u.id, u.telegram_chat_id, COUNT(i.id) as node_count,
+                           (SELECT id FROM items WHERE user_id = u.id ORDER BY created_at DESC LIMIT 1) as last_item_id,
+                           (SELECT title FROM items WHERE user_id = u.id ORDER BY created_at DESC LIMIT 1) as last_item_title,
+                           (SELECT created_at FROM items WHERE user_id = u.id ORDER BY created_at DESC LIMIT 1) as last_save_time
+                    FROM users u
+                    JOIN items i ON u.id = i.user_id
+                    GROUP BY u.id, u.telegram_chat_id
+                    HAVING COUNT(i.id) BETWEEN 5 AND 30
+                       AND MAX(i.created_at) <= CURRENT_TIMESTAMP - INTERVAL '5 days'
+                       AND MAX(i.created_at) >= CURRENT_TIMESTAMP - INTERVAL '14 days';
+                    """
+                )
+                users_to_nudge = await cur.fetchall()
+
+        for u_id, chat_id, node_count, last_id, last_title, last_time in users_to_nudge:
+            if not last_id:
+                continue
+            
+            nudge_key = f"re_engagement_sent:{u_id}:{last_id}"
+            already_sent = await redis.get(nudge_key)
+            if already_sent:
+                continue
+                
+            title_label = last_title or "the item you saved"
+            msg = (
+                f"You've saved {node_count} things in Recall, but I haven't heard from you in a few days. "
+                f"Still thinking about \"{title_label}\"? I'm not doing anything with it yet — "
+                f"just checking if it's still on your mind, or if it's already done its job."
+            )
+            reply_markup = {
+                "inline_keyboard": [
+                    [{"text": "Still on my mind 💭", "callback_data": "onboarding_opt:mind"}],
+                    [{"text": "Already done its job ✓", "callback_data": "onboarding_opt:done"}]
+                ]
+            }
+            await redis.setex(f"pending_context:{chat_id}", 86400 * 2, str(last_id))
+            await redis.setex(nudge_key, 86400 * 10, "1")
+            
+            await send_telegram_message(str(chat_id), msg, reply_markup=reply_markup)
+
+    except Exception as e:
+        logger.error("mid_graph_re_engagement_dispatcher background job failed: %s", e, exc_info=True)
+
+
 # ---------------------------------------------------------------------------
 # Scheduler Manager
 # ---------------------------------------------------------------------------
@@ -783,9 +1209,25 @@ async def start_scheduler(app=None) -> None:
         id="offpeak_quiz_generator",
         misfire_grace_time=60
     )
+
+    # 9. onboarding_sequence_dispatcher (hourly at minute 5 UTC)
+    _scheduler.add_job(
+        onboarding_sequence_dispatcher,
+        trigger=CronTrigger(hour="*", minute=5, timezone="UTC"),
+        id="onboarding_sequence_dispatcher",
+        misfire_grace_time=60
+    )
+
+    # 10. mid_graph_re_engagement_dispatcher (hourly at minute 10 UTC)
+    _scheduler.add_job(
+        mid_graph_re_engagement_dispatcher,
+        trigger=CronTrigger(hour="*", minute=10, timezone="UTC"),
+        id="mid_graph_re_engagement_dispatcher",
+        misfire_grace_time=60
+    )
     
     _scheduler.start()
-    logger.info("Background job scheduler started successfully with all 8 jobs.")
+    logger.info("Background job scheduler started successfully with all 10 jobs.")
 
 
 async def stop_scheduler() -> None:

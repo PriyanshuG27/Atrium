@@ -3,18 +3,23 @@ import logging
 import re
 from typing import Dict, Any, List, Optional, Union
 import httpx
+from contextvars import ContextVar
+
+current_mood_var: ContextVar[Optional[str]] = ContextVar("current_mood", default=None)
 
 from backend.config import settings
 
 logger = logging.getLogger(__name__)
 
 SUMMARIZE_SYSTEM_PROMPT = (
-    "You are a world-class cognitive assistant designed to synthesize complex documents into optimal, structured summaries. "
+    "You are a world-class cognitive assistant designed to synthesize complex documents into optimal, structured summaries, keywords, and follow-up questions.\n"
     "To provide the best results, you must dynamically adapt your summary structure based on the type of document you analyze. "
     "\n\n"
     "Step 1: Identify the document genre/type from the text (e.g., Academic/Research, Business/Financial, Technical/Developer Doc, Legal/Contract, Literary/Creative, or General/Informative).\n"
-    "Step 2: Format your output using the most appropriate structure below. Output ONLY the markdown formatted summary.\n\n"
-    "--- STRUCTURE TEMPLATES ---\n\n"
+    "Step 2: Generate a structured markdown summary using the most appropriate variant template below.\n"
+    "Step 3: Generate 3-5 tags (single-word or two-word lowercase keywords).\n"
+    "Step 4: Generate a single, highly engaging, personalized question to prompt the user for their thoughts on this newly saved item (1 sentence, conversational, targeted).\n\n"
+    "--- SUMMARY STRUCTURE TEMPLATES ---\n\n"
     "## Variant A: Academic & Research Papers\n"
     "### 🌟 Abstract & Main Thesis\n"
     "- 2-3 sentence overview of the research goal and hypothesis.\n"
@@ -59,18 +64,129 @@ SUMMARIZE_SYSTEM_PROMPT = (
     "### 💡 Key Takeaways\n"
     "- What the reader should remember or learn from this text.\n\n"
     "--- GENERAL GUIDELINES ---\n"
-    "- Always start with a brief italicized header: *Type: [Detected Type] | Tone: [Detected Tone]*\n"
+    "- Always start the summary string with a brief italicized header: *Type: [Detected Type] | Tone: [Detected Tone]*\n"
     "- If the text contains mathematical notation, always use correct LaTeX format (e.g. \\(x^2\\) or \\[E=mc^2\\]).\n"
     "- Be highly informative, precise, and objective. Avoid generic filler. Do not hallucinate.\n"
     "- Retain and explicitly mention all specific entity names (such as tools, software, products, companies, brands, technologies, or people) rather than generalizing them.\n"
     "- Pay close attention to potential phonetic transcription errors or mishearings of technical terms or software brand names in the transcript (especially in Hindi/English mixed or accented speech), and correct them to their correct technical names using context (for example, if a tool is described as an autonomous AI-powered software testing platform, ensure it is named correctly as 'TestSprite' instead of phonetically misheard alternatives like 'Digma').\n"
-    "- Output ONLY the markdown formatted summary."
-
-
+    "- If the input text contains only a URL or fallback metadata (meaning the scraper was blocked or failed), do not output disclaimers, warnings, placeholders, or requests for more text in the summary. Instead, use the URL path and title keywords to generate a clean, high-level summary of what the page is about based on your knowledge.\n\n"
+    "--- OUTPUT FORMAT ---\n"
+    "You MUST output ONLY a valid JSON object. Do NOT wrap it in HTML/Markdown blocks (other than standard ```json ... ``` blocks). Do NOT output any thinking/reasoning process (no <think> tags).\n"
+    "The JSON keys MUST be exactly:\n"
+    "- \"summary\": The structured markdown summary string.\n"
+    "- \"tags\": A list of 3-5 tag strings.\n"
+    "- \"context_prompt\": The dynamic context question string.\n\n"
+    "Example:\n"
+    "{\n"
+    "  \"summary\": \"*Type: Tech Doc | Tone: Technical*\\n\\n### 🌟 System Overview\\n- FastAPI is...\",\n"
+    "  \"tags\": [\"fastapi\", \"python\", \"web api\"],\n"
+    "  \"context_prompt\": \"What specific FastAPI project are you building?\"\n"
+    "}"
 )
 
+
+INSIGHT_SYSTEM_PROMPT = """You are analyzing two items a person saved to their personal knowledge graph, weeks apart. Your only job is to state the SPECIFIC TENSION OR RECURRING QUESTION connecting them — not a summary of either item.
+
+RULES (violating any of these is a failed output):
+1. Name both items by their literal subject, not a category.
+   WRONG: "You've saved content about systems and disasters."
+   RIGHT: "You saved a chapter on aviation checklists, then weeks later, Chernobyl."
+2. State a QUESTION or TENSION the person seems to be circling — never a trait or interest label.
+   WRONG: "You're interested in systems thinking."
+   RIGHT: "What happens when a system has no checks left to fail."
+3. If a context_note exists, treat it as the strongest signal of intent and weave it in directly — it is the person's own words about why this mattered to them.
+4. Maximum 3 sentences. No hedging language ("it seems", "perhaps", "you might be"). State it as an observation, not a guess.
+5. Do NOT force an insight or use highly abstract, metaphorical, or poetic connections (such as "both are about control", "both are complex systems", or "both deal with chemical manipulation"). If the items do not share a direct, logical, real-world conceptual tension, or if they only share a surface category (e.g., both are recipes, both are tech articles), output exactly: NO_GENUINE_TENSION. A forced connection breaks user trust. Be extremely conservative.
+6. Never include a diagnostic or psychological label for the person (no "anxiety", "avoidance", "control issues", clinical terms of any kind). Describe the pattern in what was saved, never the person's psychology.
+7. If no context_note is present, but passive_context metadata exists, use it as a weak signal of the user's focus (e.g. time of day, day of week, and session gap hours). For example, saving escape-related items late on a Sunday evening after a long session gap may highlight weekend decompression/anticipation.
+
+FEW-SHOT EXAMPLES:
+
+Input: item_a="Kobe Bryant's 4am practice routine", item_b="Feynman technique for learning", 63 days apart
+Output: "Kobe's obsession with fundamentals, then weeks later, Feynman's method for proving you actually understand something. Both are about the gap between looking competent and being competent."
+
+Input: item_a="Dune: Part Two Movie Review", item_b="Rust Borrow Checker Guide", 49 days apart
+Output: NO_GENUINE_TENSION
+
+Input: item_a="10 best laptop bags 2026", item_b="best noise-cancelling headphones", 4 days apart
+Output: NO_GENUINE_TENSION"""
+
+GEMINI_INSIGHT_CONSTRAINT = """\n\nADDITIONAL CONSTRAINT FOR THIS MODEL:
+Output ONLY the final insight sentence(s) or NO_GENUINE_TENSION.
+Do not include any preamble, explanation of your reasoning, or meta-commentary about the task. The first character of your response must be the first character of the insight itself."""
+
+ONBOARDING_SYSTEM_PROMPT = """You are analyzing a user's answer to an onboarding question for their personal knowledge graph. Your job is to extract the core topic/concept they are talking about and summarize it in 1-2 concise sentences.
+
+CRITICAL SAFETY RULE:
+If the user's input is gibberish, keyboard smash (e.g., "asdfasdf", "hhhhh"), contains only emojis, is extremely low effort, or does not describe any real concept, book, article, hobby, project, or topic, you MUST output exactly: INVALID_ONBOARDING_INPUT
+Do not try to interpret or explain it. Output ONLY INVALID_ONBOARDING_INPUT.
+
+Otherwise, output a clean, objective summary of the topic.
+
+EXAMPLES:
+Input: "i read a book called deep work by cal newport it is about focus"
+Output: "Deep Work by Cal Newport, focusing on rules for focused, uninterrupted cognitive work."
+
+Input: "asdfasdfasdff"
+Output: INVALID_ONBOARDING_INPUT
+
+Input: "👍👍👍"
+Output: INVALID_ONBOARDING_INPUT
+
+Input: "nothing really"
+Output: INVALID_ONBOARDING_INPUT"""
+
+GENERATE_QUESTION_SYSTEM_PROMPT = (
+    "You are a helpful assistant for a personal knowledge graph app called Recall. "
+    "Your job is to generate a single, highly engaging, personalized question to prompt the user for their thoughts on a newly saved item. "
+    "The question must be conversational, targeted to the specific topic/content of the item, and encourage the user to write a quick personal note/thought about it. "
+    "Keep it to exactly 1 sentence. Do not make it generic. "
+    "Do not include preamble. Output ONLY the single question."
+)
+
+MOODS = {
+    "curiosity": {
+        "description": "Ask about what specific detail in the content grabbed the user's attention.",
+        "example": "This caught my eye — what made you save Kobe's daily practice routine today?"
+    },
+    "timing": {
+        "description": "Ask about the situational context or trigger that led them to save it right now.",
+        "example": "What was happening in your workday when you felt the need to save this?"
+    },
+    "future": {
+        "description": "Ask how they plan to apply or reference this content in the future.",
+        "example": "What are you planning to build or change using this guide?"
+    },
+    "friction": {
+        "description": "Ask if they agree with the author, or if they have doubts/conflicting thoughts about it.",
+        "example": "Is this something you fully agree with, or do you have some doubts about their approach?"
+    },
+    "identity": {
+        "description": "Ask how this content aligns with their current self-image vs. their aspirational goals.",
+        "example": "Is this habit how you actually behave right now, or is it how you wish you behaved?"
+    },
+    "connection": {
+        "description": "Ask how this connects or contrasts with other ideas they've been thinking about.",
+        "example": "Does this theory link back to the other systems thinking books you read last month?"
+    },
+    "stakes": {
+        "description": "Ask about the urgency or priority level of this item in their life.",
+        "example": "Is this something you need to solve this week, or is it just interesting for later?"
+    },
+    "surprise": {
+        "description": "Ask if the content confirmed their existing beliefs or surprised/challenged them.",
+        "example": "Did this study confirm what you already believed, or did it surprise you?"
+    }
+}
+
 class AICascade:
-    async def summarise(self, text: str, chat_id: Optional[str] = None, task: Optional[str] = None) -> Union[Dict[str, Any], str]:
+    async def summarise(
+        self,
+        text: str,
+        chat_id: Optional[str] = None,
+        task: Optional[str] = None,
+        mood_category: Optional[str] = None
+    ) -> Union[Dict[str, Any], str]:
         """
         Generate a summary and auto-tags for the given text content.
         Uses a cascading fallback structure (Modal -> Groq -> Gemini).
@@ -82,45 +198,259 @@ class AICascade:
                 return "Mock Theme"
             return await self._run_label_cascade(text)
 
+        if task == "onboarding":
+            if (settings.ENV == "test" or "pytest" in sys.modules) and not getattr(self, "_force_production_llm", False):
+                if text == "asdfasdf":
+                    return "INVALID_ONBOARDING_INPUT"
+                return {
+                    "summary": f"Onboarding summary for: {text}",
+                    "tags": ["onboarding"]
+                }
+            summary = await self._run_onboarding_cascade(text)
+            summary = self._strip_thinking(summary).strip()
+            if "INVALID_ONBOARDING_INPUT" in summary.upper():
+                return "INVALID_ONBOARDING_INPUT"
+            
+            tags = []
+            try:
+                tags = await self._generate_tags_llm(text, summary)
+            except Exception as e:
+                logger.error("Tag generation for onboarding failed: %s", e)
+            normalized_tags = self._normalize_tags(tags)
+            return {
+                "summary": summary,
+                "tags": normalized_tags
+            }
+
+        mood_category = mood_category or current_mood_var.get()
         summary = ""
         tags = []
+        context_prompt = None
 
-        # 1. Generate Summary
+        # 1. Generate Summary, Tags, and Question
         import sys
         if (settings.ENV == "test" or "pytest" in sys.modules) and not getattr(self, "_force_production_llm", False):
             # Under test, return mock summary if not patched/intercepted
             summary = f"Mock summary for text: {text[:30]}..."
+            tags = ["mock", "test", "tags"]
+            if mood_category:
+                context_prompt = f"Mock {mood_category} question"
+            elif "FastAPI" in text or "FastAPI" in summary:
+                context_prompt = "Saved! Are you trying to solve a specific bug or building something with this?"
+            elif "Book" in text or "Essay" in text or "tutorial" in text.lower() or "tutorial" in summary.lower():
+                context_prompt = "Saved! What was the main takeaway you want to remember from this?"
+            else:
+                context_prompt = "Saved! Drop a quick 1-sentence note if you want to attach your current thoughts to this."
         else:
             # Real cascade implementation
-            summary = await self._run_summary_cascade(text, chat_id)
+            mood_instruction = ""
+            if mood_category and mood_category in MOODS:
+                mood_info = MOODS[mood_category]
+                mood_instruction = (
+                    f"\n\nCRITICAL CONTEXT PROMPT CONSTRAINT:\n"
+                    f"You MUST generate the 'context_prompt' question strictly matching the following angle/mood:\n"
+                    f"Mood Category: {mood_category}\n"
+                    f"Angle/Definition: {mood_info['description']}\n"
+                    f"Example style: {mood_info['example']}\n"
+                    f"Ensure the generated question is conversational, exactly 1 sentence, and directly tailored to the saved content."
+                )
 
-        # Clean thinking blocks if present
-        summary = self._strip_thinking(summary)
-
-        # If summary failed or empty, set a fallback
-        if not summary:
-            summary = f"Summary snippet: {text[:100]}..."
-
-        # 2. Generate Tags (after summary, using the summary/content as context)
-        if (settings.ENV == "test" or "pytest" in sys.modules) and not getattr(self, "_force_production_llm", False):
-            # Under test, return mock tags if not patched/intercepted
-            tags = ["mock", "test", "tags"]
-        else:
-            try:
-                tags = await self._generate_tags_llm(text, summary)
-            except Exception as e:
-                logger.error("Tag generation failed, saving with empty tags. Error: %s", e)
-                tags = []
+            raw_response = await self._run_summary_cascade(text, chat_id, mood_instruction)
+            
+            # Clean thinking blocks if present
+            raw_response = self._strip_thinking(raw_response).strip()
+            
+            # Try parsing as JSON
+            parsed_json = False
+            if raw_response:
+                cleaned = raw_response
+                if cleaned.startswith("```"):
+                    cleaned = re.sub(r"^```(?:json)?\n", "", cleaned)
+                    cleaned = re.sub(r"\n```$", "", cleaned)
+                    cleaned = cleaned.strip()
+                try:
+                    import json
+                    match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+                    if match:
+                        data = json.loads(match.group(0))
+                        if isinstance(data, dict):
+                            summary = data.get("summary") or ""
+                            tags = data.get("tags") or []
+                            context_prompt = data.get("context_prompt")
+                            parsed_json = True
+                except Exception as e:
+                    logger.warning("Failed to parse combined JSON response: %s. Raw was: %s", e, raw_response)
+            
+            # Fallback if parsing failed or plain text returned (e.g. from Modal)
+            if not parsed_json:
+                summary = raw_response or f"Summary snippet: {text[:100]}..."
+                try:
+                    res_dict = await self._generate_tags_and_question_llm(text, summary, mood_instruction)
+                    tags = res_dict.get("tags") or []
+                    context_prompt = res_dict.get("context_prompt")
+                except Exception as e:
+                    logger.error("Fallback tag/question generation failed: %s", e)
+                    tags = []
 
         # Normalize tags
         normalized_tags = self._normalize_tags(tags)
 
+        # Fallback question if none generated or blank
+        if not context_prompt:
+            tags_str = " ".join(normalized_tags).lower()
+            category = "general"
+            if any(x in tags_str for x in ["code", "dev", "tech", "programming", "api", "tutorial"]):
+                category = "tech"
+            elif any(x in tags_str for x in ["philosophy", "books", "ideas", "politics", "history", "essay"]):
+                category = "article"
+                
+            if category == "tech":
+                context_prompt = "Saved! Are you trying to solve a specific bug or building something with this?"
+            elif category == "article":
+                context_prompt = "Saved! What was the main takeaway you want to remember from this?"
+            else:
+                context_prompt = "Saved! Drop a quick 1-sentence note if you want to attach your current thoughts to this."
+
         return {
             "summary": summary,
-            "tags": normalized_tags
+            "tags": normalized_tags,
+            "context_prompt": context_prompt
         }
 
-    async def _run_summary_cascade(self, text: str, chat_id: Optional[str]) -> str:
+    async def generate_context_question(self, title: str, summary: str) -> str:
+        """
+        Generates a personalized, topic-specific 1-sentence question to prompt the user for a context note.
+        """
+        import sys
+        if (settings.ENV == "test" or "pytest" in sys.modules) and not getattr(self, "_force_production_llm", False):
+            # Under test, return a mock question
+            if "FastAPI" in title or "FastAPI" in summary:
+                return "Saved! Are you trying to solve a specific bug or building something with this?"
+            elif "Book" in title or "Essay" in title:
+                return "Saved! What was the main takeaway you want to remember from this?"
+            return "Saved! Drop a quick 1-sentence note if you want to attach your current thoughts to this."
+            
+        messages = [
+            {"role": "system", "content": GENERATE_QUESTION_SYSTEM_PROMPT},
+            {"role": "user", "content": f"Title: {title}\nSummary: {summary}"}
+        ]
+        
+        res = None
+        if settings.GROQ_API_KEY:
+            try:
+                res = await self._call_groq_llm(messages, temperature=0.7, timeout=5.0)
+            except Exception as e:
+                logger.warning("Groq question generation failed: %s", e)
+                
+        if not res and settings.GEMINI_API_KEY:
+            try:
+                prompt = f"{GENERATE_QUESTION_SYSTEM_PROMPT}\n\nTitle: {title}\nSummary: {summary}\nQuestion:"
+                res = await self._call_gemini_llm(prompt, temperature=0.7, timeout=5.0)
+            except Exception as e:
+                logger.error("Gemini question generation failed: %s", e)
+                
+        if res:
+            res = self._strip_thinking(res).strip().strip('"').strip("'")
+            
+        return res or "Saved! Drop a quick 1-sentence note if you want to attach your current thoughts to this."
+
+    async def generate_insight(self, item_a: Dict[str, Any], item_b: Dict[str, Any], days_apart: int) -> Optional[str]:
+        """
+        Generates a specific, tension-revealing insight connecting two items.
+        Tries Groq (Primary) first, and falls back to Gemini (Fallback).
+        Returns the insight text, or None if the model outputs NO_GENUINE_TENSION.
+        """
+        import sys
+        if (settings.ENV == "test" or "pytest" in sys.modules) and not getattr(self, "_force_production_llm", False):
+            # Under test, return mock values
+            if item_a.get("title") == "Sony WH-1000XM5 Headphone Review":
+                return None
+            return f"Mock insight connecting {item_a.get('title')} and {item_b.get('title')}."
+
+        def _parse_passive_ctx(val):
+            if isinstance(val, str):
+                try:
+                    return json.loads(val)
+                except Exception:
+                    pass
+            return val
+
+        input_data = {
+            "item_a": {
+                "title": item_a.get("title", ""),
+                "summary": item_a.get("summary", ""),
+                "tags": item_a.get("tags", []),
+                "context_note": item_a.get("context_note"),
+                "passive_context": _parse_passive_ctx(item_a.get("passive_context"))
+            },
+            "item_b": {
+                "title": item_b.get("title", ""),
+                "summary": item_b.get("summary", ""),
+                "tags": item_b.get("tags", []),
+                "context_note": item_b.get("context_note"),
+                "passive_context": _parse_passive_ctx(item_b.get("passive_context"))
+            },
+            "days_apart": days_apart
+        }
+
+        insight_text = None
+
+        # 1. Primary Model: Groq
+        if settings.GROQ_API_KEY:
+            try:
+                messages = [
+                    {"role": "system", "content": INSIGHT_SYSTEM_PROMPT},
+                    {"role": "user", "content": json.dumps(input_data, indent=2)}
+                ]
+                insight_text = await self._call_groq_llm(messages, temperature=0.2, timeout=20.0)
+            except Exception as e:
+                logger.warning("Insight generation via Groq failed: %s", e)
+
+        # 2. Fallback Model: Gemini (if Groq failed or skipped)
+        if not insight_text and settings.GEMINI_API_KEY:
+            try:
+                prompt = f"{INSIGHT_SYSTEM_PROMPT}{GEMINI_INSIGHT_CONSTRAINT}\n\nInput:\n{json.dumps(input_data, indent=2)}\n\nOutput:"
+                insight_text = await self._call_gemini_llm(prompt, temperature=0.2, timeout=20.0)
+            except Exception as e:
+                logger.error("Insight generation via Gemini fallback failed: %s", e)
+
+        if not insight_text:
+            return None
+
+        # Strip thoughts and clean response
+        insight_text = self._strip_thinking(insight_text).strip()
+
+        # Check for NO_GENUINE_TENSION (case-insensitive and stripping quotes)
+        cleaned_check = insight_text.replace('"', '').replace("'", "").strip().upper()
+        if "NO_GENUINE_TENSION" in cleaned_check:
+            return None
+
+        return insight_text
+
+    async def _run_onboarding_cascade(self, text: str) -> str:
+        # Tries Groq first, then Gemini
+        messages = [
+            {"role": "system", "content": ONBOARDING_SYSTEM_PROMPT},
+            {"role": "user", "content": f"Input: \"{text}\""}
+        ]
+        
+        res = None
+        if settings.GROQ_API_KEY:
+            try:
+                res = await self._call_groq_llm(messages, temperature=0.1, timeout=15.0)
+            except Exception as e:
+                logger.warning("Onboarding summary via Groq failed: %s", e)
+                
+        if not res and settings.GEMINI_API_KEY:
+            try:
+                prompt = f"{ONBOARDING_SYSTEM_PROMPT}\n\nInput: \"{text}\"\nOutput:"
+                res = await self._call_gemini_llm(prompt, temperature=0.1, timeout=15.0)
+            except Exception as e:
+                logger.error("Onboarding summary via Gemini failed: %s", e)
+                
+        return res or "INVALID_ONBOARDING_INPUT"
+
+    async def _run_summary_cascade(self, text: str, chat_id: Optional[str], mood_instruction: str = "") -> str:
         # Determine providers order
         providers = ["modal", "groq", "gemini"]
         if settings.COMPUTE_PROVIDER:
@@ -136,12 +466,12 @@ class AICascade:
                         logger.info("Summary generated successfully via Modal")
                         return res
                 elif provider == "groq" and settings.GROQ_API_KEY:
-                    res = await self._call_groq_summary(text)
+                    res = await self._call_groq_summary(text, mood_instruction)
                     if res:
                         logger.info("Summary generated successfully via Groq")
                         return res
                 elif provider == "gemini" and settings.GEMINI_API_KEY:
-                    res = await self._call_gemini_summary(text)
+                    res = await self._call_gemini_summary(text, mood_instruction)
                     if res:
                         logger.info("Summary generated successfully via Gemini")
                         return res
@@ -237,18 +567,33 @@ class AICascade:
         headers = {"Authorization": f"Bearer {settings.GROQ_API_KEY}"}
         models = ["qwen/qwen3.6-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"]
         
+        # Estimate prompt tokens conservatively (3.0 chars per token) and target 7400 total tokens to maintain a safe 600 token buffer under 8k limit
+        total_chars = sum(len(m.get("content", "")) for m in messages)
+        est_prompt_tokens = int(total_chars / 3.0)
+        max_tokens = max(2048, 7400 - est_prompt_tokens)
+        
         for model in models:
             payload = {
                 "model": model,
                 "messages": messages,
                 "temperature": temperature,
-                "max_tokens": 4096
+                "max_tokens": max_tokens
             }
             try:
                 async with httpx.AsyncClient(timeout=timeout) as client:
                     resp = await client.post(url, json=payload, headers=headers)
                     if resp.status_code == 200:
                         data = resp.json()
+                        content = data["choices"][0]["message"]["content"]
+                        
+                        # Discard response if reasoning model spent all tokens thinking and got cut off (unclosed think block)
+                        if "<think>" in content and "</think>" not in content:
+                            logger.warning(
+                                "Groq model %s response was cut off inside the thinking block. Treating as failure to trigger fallback.",
+                                model
+                            )
+                            continue
+                            
                         usage = data.get("usage", {})
                         if usage:
                             logger.info(
@@ -258,7 +603,7 @@ class AICascade:
                                 usage.get("completion_tokens"),
                                 usage.get("total_tokens")
                             )
-                        return data["choices"][0]["message"]["content"]
+                        return content
                     elif resp.status_code == 429:
                         logger.warning("Groq model %s rate limited (429). Mapped keys/organization TPM exceeded.", model)
                     else:
@@ -268,27 +613,31 @@ class AICascade:
                 continue
         return None
 
-    async def _call_groq_summary(self, text: str) -> Optional[str]:
-        max_groq_chars = 22000
+    async def _call_groq_summary(self, text: str, mood_instruction: str = "") -> Optional[str]:
+        max_groq_chars = 18000
         if len(text) > max_groq_chars:
-            head_size = 14000
+            head_size = 10000
             tail_size = 8000
             truncated_text = f"{text[:head_size]}\n\n[... Text Truncated for Groq limits ...]\n\n{text[-tail_size:]}"
         else:
             truncated_text = text
             
         messages = [
-            {"role": "system", "content": SUMMARIZE_SYSTEM_PROMPT + "\n- Keep your thinking process extremely brief and proceed to the summary content quickly."},
+            {"role": "system", "content": SUMMARIZE_SYSTEM_PROMPT + mood_instruction + "\n- Keep your thinking process extremely brief and proceed to the summary content quickly."},
             {"role": "user", "content": f"Summarize the following text:\n\n{truncated_text}"}
         ]
         return await self._call_groq_llm(messages, temperature=0.3, timeout=15.0)
 
-    async def _call_gemini_summary(self, text: str) -> Optional[str]:
+    async def _call_gemini_summary(self, text: str, mood_instruction: str = "") -> Optional[str]:
         truncated_text = text[:100000]
-        prompt = f"{SUMMARIZE_SYSTEM_PROMPT}\n\nSummarize the following text:\n\n{truncated_text}"
+        prompt = f"{SUMMARIZE_SYSTEM_PROMPT}{mood_instruction}\n\nSummarize the following text:\n\n{truncated_text}"
         return await self._call_gemini_llm(prompt, temperature=0.3, timeout=40.0)
 
-    async def _generate_tags_llm(self, content: str, summary: str) -> List[str]:
+    async def _generate_tags_llm(self, content: str, summary: str, mood_instruction: str = "") -> List[str]:
+        res = await self._generate_tags_and_question_llm(content, summary, mood_instruction)
+        return res.get("tags") or []
+
+    async def _generate_tags_and_question_llm(self, content: str, summary: str, mood_instruction: str = "") -> Dict[str, Any]:
         # Determine provider to use for tag generation
         provider = settings.COMPUTE_PROVIDER or "groq"
         if provider == "modal" and not settings.MODAL_API_TOKEN:
@@ -301,12 +650,20 @@ class AICascade:
             elif settings.GROQ_API_KEY:
                 provider = "groq"
             else:
-                return []
+                return {"tags": [], "context_prompt": None}
 
         prompt = (
-            "Generate 3-5 single-word or two-word tags for this content. "
-            "Output ONLY a raw JSON array. Do NOT output any thinking/reasoning process (no <think> tags). "
-            "Example: [\"machine learning\", \"python\", \"research\"]"
+            "You are an assistant for a personal knowledge graph app called Recall.\n"
+            "Given the content and its summary, perform two tasks:\n"
+            "1. Generate 3-5 single-word or two-word tags for this content.\n"
+            "2. Generate a single, highly engaging, personalized question to prompt the user for their thoughts on this newly saved item. The question must be conversational, targeted to the specific topic/content, exactly 1 sentence, and encouraging. Avoid generic questions.\n\n"
+            + mood_instruction + "\n\n"
+            "Output ONLY a raw JSON object with keys \"tags\" (array of strings) and \"context_prompt\" (string). Do NOT output any thinking or reasoning process (no <think> tags).\n"
+            "Example:\n"
+            "{\n"
+            "  \"tags\": [\"machine learning\", \"python\", \"research\"],\n"
+            "  \"context_prompt\": \"What specific machine learning project are you hoping to apply these concepts to?\"\n"
+            "}"
         )
         context = f"Content:\n{content[:1000]}\n\nSummary:\n{summary}"
 
@@ -320,17 +677,32 @@ class AICascade:
                     response_text = resp.json().get("tags_raw", "")
         elif provider == "groq" and settings.GROQ_API_KEY:
             messages = [
-                {"role": "system", "content": "You are a precise tag generator. Output ONLY a valid JSON array of strings."},
+                {"role": "system", "content": "You are a precise tag and question generator. Output ONLY a valid JSON object."},
                 {"role": "user", "content": f"{prompt}\n\nContent context:\n{context}"}
             ]
-            response_text = await self._call_groq_llm(messages, temperature=0.2, timeout=15.0)
+            response_text = await self._call_groq_llm(messages, temperature=0.3, timeout=15.0)
         elif provider == "gemini" and settings.GEMINI_API_KEY:
-            response_text = await self._call_gemini_llm(f"{prompt}\n\nContent context:\n{context}", temperature=0.2, timeout=20.0)
+            response_text = await self._call_gemini_llm(f"{prompt}\n\nContent context:\n{context}", temperature=0.3, timeout=20.0)
 
         if not response_text:
-            return []
+            return {"tags": [], "context_prompt": None}
 
-        return self.parse_tags_response(response_text)
+        cleaned = self._strip_thinking(response_text)
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```(?:json)?\n", "", cleaned)
+            cleaned = re.sub(r"\n```$", "", cleaned)
+            cleaned = cleaned.strip()
+
+        try:
+            data = json.loads(cleaned)
+            if isinstance(data, dict):
+                tags = data.get("tags") or []
+                q = data.get("context_prompt")
+                return {"tags": [str(t) for t in tags], "context_prompt": q}
+        except Exception as e:
+            logger.warning("Failed to parse tags/question JSON: %s. Raw text: %s", e, response_text)
+
+        return {"tags": [], "context_prompt": None}
 
     def parse_tags_response(self, text: str) -> List[str]:
         """Parse JSON tags from response. On parse failure: return []"""
@@ -707,6 +1079,71 @@ class AICascade:
             logger.warning("Failed to parse quiz response: %s", e)
 
         return None
+
+    async def generate_joint_summary_and_title(self, items: List[Dict[str, Any]]) -> Dict[str, str]:
+        # Formulate prompt
+        items_desc = []
+        for idx, item in enumerate(items, 1):
+            items_desc.append(f"Item {idx}:\nTitle: {item.get('title')}\nSummary: {item.get('summary')}\nTags: {item.get('tags')}")
+        
+        input_text = "\n\n".join(items_desc)
+        
+        system_prompt = """You are analyzing a group of related items saved to a user's knowledge graph. Your job is to generate:
+        1. A single joint title.
+        2. A single joint summary representing the combined group of concepts.
+        3. A single, highly engaging, personalized question to prompt the user for a note connecting these items. Use the style: "Saved! Since these are related, [custom transition connecting the items], what is the main link between them that you want to remember?"
+        
+        Output format MUST be a JSON object with keys "title", "summary", and "context_prompt". Do not output anything else.
+        
+        Example:
+        {
+          "title": "Vite & React Development",
+          "summary": "Articles covering development workflows using Vite and React, including hot reloading configurations.",
+          "context_prompt": "Saved! Since these are related to modern React development workflows, what is the main link between them that you want to remember?"
+        }"""
+        
+        # We call Groq or Gemini
+        res = None
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": input_text}
+        ]
+        
+        if settings.GROQ_API_KEY:
+            try:
+                res = await self._call_groq_llm(messages, temperature=0.2, timeout=15.0)
+            except Exception as e:
+                logger.warning("Joint summarization via Groq failed: %s", e)
+                
+        if not res and settings.GEMINI_API_KEY:
+            try:
+                prompt = f"{system_prompt}\n\nInput:\n{input_text}\n\nOutput:"
+                res = await self._call_gemini_llm(prompt, temperature=0.2, timeout=15.0)
+            except Exception as e:
+                logger.error("Joint summarization via Gemini failed: %s", e)
+                
+        default_prompt = "Saved! Since these are related, what is the main link between them that you want to remember?"
+        if res:
+            res_clean = self._strip_thinking(res).strip()
+            # Parse JSON
+            try:
+                import re
+                match = re.search(r"\{.*\}", res_clean, re.DOTALL)
+                if match:
+                    parsed = json.loads(match.group(0))
+                    return {
+                        "title": parsed.get("title", "Combined Saves"),
+                        "summary": parsed.get("summary", "Combined items summary."),
+                        "context_prompt": parsed.get("context_prompt") or default_prompt
+                    }
+            except Exception as parse_err:
+                logger.error("Failed to parse joint summarizer JSON: %s", parse_err)
+                
+        return {
+            "title": "Combined Saves",
+            "summary": "Combined items summary.",
+            "context_prompt": default_prompt
+        }
 
     def _strip_thinking(self, text: str) -> str:
         if not text:

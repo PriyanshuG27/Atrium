@@ -14,6 +14,7 @@ from backend.config import settings
 from backend.db.connection import get_db
 from backend.services.user_service import upsert_user
 from backend.services.rate_limiter import check_rate_limit, RateLimitExceeded
+from backend.services.redis_client import redis
 import psycopg
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,10 @@ def detect_content_type(message: dict) -> Tuple[str, Optional[str], Optional[str
             file_id = photo_sizes[-1].get("file_id")
             return "photo", None, file_id
             
+    # 3.5 Location
+    if "location" in message:
+        return "location", json.dumps(message["location"]), None
+        
     # 4. Text/URL
     if "text" in message:
         text = message["text"]
@@ -174,6 +179,7 @@ async def telegram_webhook(
     Enforces idempotency, parses message type, pushes tasks, and responds in < 50ms.
     """
     start_time = time.perf_counter()
+    base_url = str(request.base_url).rstrip("/")
     try:
         update = await request.json()
         update_id = update.get("update_id")
@@ -218,16 +224,29 @@ async def telegram_webhook(
         if callback_query:
             callback_query_id = callback_query.get("id")
             data = callback_query.get("data", "")
+            
+            # Acknowledge immediately to stop Telegram loading spinner instantly!
+            is_onboarding_or_settings = (
+                data == "quiz:next" or
+                data == "onboarding_tz_menu" or
+                data == "onboarding_tz_back" or
+                data == "onboarding_tz_custom" or
+                data == "onboarding_tz_location_request" or
+                data.startswith("onboarding_drive_sync:") or
+                data.startswith("onboarding_drive_disconnect:") or
+                data.startswith("onboarding_skip:") or
+                data.startswith("onboarding_opt:")
+            )
+            if is_onboarding_or_settings:
+                url_ans = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
+                try:
+                    await http_client.post(url_ans, json={"callback_query_id": callback_query_id})
+                except Exception as ans_err:
+                    logger.error("Failed to answer callback query: %s", ans_err)
+            
             user_id = await upsert_user(chat_id, db)
             
             if data == "quiz:next":
-                # Acknowledge callback
-                url_ans = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
-                payload_ans = {
-                    "callback_query_id": callback_query_id
-                }
-                background_tasks.add_task(http_client.post, url_ans, json=payload_ans)
-                
                 async with db.cursor() as cur:
                     await cur.execute(
                         """
@@ -283,7 +302,248 @@ async def telegram_webhook(
                     background_tasks.add_task(http_client.post, url_edit, json=payload_edit)
                     logger.info("Processed quiz:next: loaded next quiz %d for chat_id %s", quiz_id, chat_id)
                     
-                return {"status": "ok", "detail": "callback_query_processed"}
+            if data.startswith("onboarding_skip:"):
+                parts = data.split(":")
+                if len(parts) == 2:
+                    step = int(parts[1])
+                    current_step_str = await redis.get(f"onboarding_step:{chat_id}")
+                    if current_step_str and int(current_step_str) == step:
+                        background_tasks.add_task(advance_onboarding_step, chat_id, user_id, step, db, background_tasks)
+                return {"status": "ok", "detail": "onboarding_skip_processed"}
+                
+            elif data == "onboarding_tz_menu" or data == "onboarding_tz_back":
+                timezone_keyboard = {
+                    "inline_keyboard": [
+                        [
+                            {"text": "GMT-8 (PST)", "callback_data": "onboarding_tz_set:-480"},
+                            {"text": "GMT-5 (EST)", "callback_data": "onboarding_tz_set:-300"}
+                        ],
+                        [
+                            {"text": "GMT+0 (UTC)", "callback_data": "onboarding_tz_set:0"},
+                            {"text": "GMT+1 (BST/CET)", "callback_data": "onboarding_tz_set:60"}
+                        ],
+                        [
+                            {"text": "GMT+5:30 (IST)", "callback_data": "onboarding_tz_set:330"},
+                            {"text": "GMT+8 (SGT/CST)", "callback_data": "onboarding_tz_set:480"}
+                        ],
+                        [
+                            {"text": "Custom Offset 🌍", "callback_data": "onboarding_tz_custom"}
+                        ],
+                        [
+                            {"text": "Auto-Detect via Location 📍", "callback_data": "onboarding_tz_location_request"}
+                        ],
+                        [
+                            {"text": "« Back to Settings", "callback_data": "onboarding_tz_back" if data == "onboarding_tz_menu" else "onboarding_tz_menu"}
+                        ]
+                    ]
+                }
+                
+                url_edit = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/editMessageText"
+                if data == "onboarding_tz_menu":
+                    payload_edit = {
+                        "chat_id": chat_id,
+                        "message_id": callback_query["message"]["message_id"],
+                        "text": "⏰ *Select Your Timezone Offset*\n\nChoose one of the standard options below or configure a custom hour offset:",
+                        "parse_mode": "Markdown",
+                        "reply_markup": timezone_keyboard
+                    }
+                else:
+                    backup_url = f"{settings.VITE_API_URL or 'http://localhost:8000'}/api/auth/google?chat_id={chat_id}"
+                    dashboard_url = settings.WEBSITE_URL
+                    payload_edit = {
+                        "chat_id": chat_id,
+                        "message_id": callback_query["message"]["message_id"],
+                        "text": "⚙️ *Setup & Settings*\n\nOnboarding complete! To get the most out of Recall, let's configure your settings:\n\n1. **Timezone**: Ensures your daily digests, Morning Mystery, and reminders arrive at the correct local hour.\n2. **Web Dashboard**: Access your interactive 3D mind-graph.\n3. **Google Drive**: Secure automated daily backups of your saved items.",
+                        "parse_mode": "Markdown",
+                        "reply_markup": {
+                            "inline_keyboard": [
+                                [{"text": "Set Timezone ⏰", "callback_data": "onboarding_tz_menu"}],
+                                [{"text": "Web Dashboard 🌐", "url": dashboard_url}],
+                                [{"text": "Backup to Drive 💾", "url": backup_url}]
+                            ]
+                        }
+                    }
+                background_tasks.add_task(http_client.post, url_edit, json=payload_edit)
+                return {"status": "ok", "detail": "timezone_menu_processed"}
+
+            elif data.startswith("onboarding_tz_set:"):
+                parts = data.split(":")
+                if len(parts) == 2:
+                    try:
+                        offset_minutes = int(parts[1])
+                    except ValueError:
+                        offset_minutes = 0
+                        
+                    async with db.cursor() as cur:
+                        await cur.execute(
+                            "UPDATE users SET timezone_offset = %s WHERE id = %s;",
+                            (offset_minutes, user_id)
+                        )
+                        await db.commit()
+                        
+                    url_ans = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
+                    try:
+                        await http_client.post(url_ans, json={"callback_query_id": callback_query_id, "text": "Timezone updated! ⏰"})
+                    except Exception as ans_err:
+                        logger.error("Failed to answer callback query: %s", ans_err)
+                    
+                    sign = "+" if offset_minutes >= 0 else "-"
+                    hours = abs(offset_minutes) // 60
+                    mins = abs(offset_minutes) % 60
+                    tz_str = f"GMT{sign}{hours:02d}:{mins:02d}"
+                    status_banner = f"✅ *Timezone configured successfully to {tz_str}!*"
+                    
+                    settings_msg, markup = await get_onboarding_settings_payload(chat_id, user_id, status_banner)
+                    url_edit = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/editMessageText"
+                    payload_edit = {
+                        "chat_id": chat_id,
+                        "message_id": callback_query["message"]["message_id"],
+                        "text": settings_msg,
+                        "parse_mode": "Markdown",
+                        "reply_markup": markup
+                    }
+                    background_tasks.add_task(http_client.post, url_edit, json=payload_edit)
+                return {"status": "ok", "detail": "timezone_set_processed"}
+
+            elif data == "onboarding_tz_custom":
+                await redis.setex(f"pending_timezone:{chat_id}", 300, "1")
+                
+                url_edit = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/editMessageText"
+                payload_edit = {
+                    "chat_id": chat_id,
+                    "message_id": callback_query["message"]["message_id"],
+                    "text": "🌍 *Custom Timezone Setup*\n\nPlease reply to this message with your UTC offset in hours.\n\n*Examples*:\n• `+5.5` for GMT+5:30 (India)\n• `-8` for GMT-8:00 (PST)\n• `+0` for GMT/UTC\n• `+1` for GMT+1:00 (BST)\n\n_Type `cancel` to return to settings._",
+                    "parse_mode": "Markdown",
+                    "reply_markup": {
+                        "inline_keyboard": [
+                            [{"text": "« Cancel", "callback_data": "onboarding_tz_back"}]
+                        ]
+                    }
+                }
+                background_tasks.add_task(http_client.post, url_edit, json=payload_edit)
+                return {"status": "ok", "detail": "timezone_custom_prompted"}
+                
+            elif data == "onboarding_tz_location_request":
+                # Send message with reply keyboard requesting location
+                url_msg = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
+                payload_msg = {
+                    "chat_id": chat_id,
+                    "text": "📍 Please tap the button below to share your location and auto-detect your timezone offset:",
+                    "reply_markup": {
+                        "keyboard": [
+                            [{"text": "Share Location 📍", "request_location": True}]
+                        ],
+                        "resize_keyboard": True,
+                        "one_time_keyboard": True
+                    }
+                }
+                background_tasks.add_task(http_client.post, url_msg, json=payload_msg)
+                return {"status": "ok", "detail": "location_requested"}
+                
+            elif data.startswith("onboarding_drive_sync:"):
+                parts = data.split(":", 1)
+                cb_base_url = parts[1] if len(parts) > 1 else ""
+                background_tasks.add_task(background_drive_sync, user_id, chat_id, cb_base_url)
+                settings_msg, markup = await get_onboarding_settings_payload(chat_id, user_id, "🔄 *Google Drive backup sync started in the background...*", cb_base_url)
+                url_edit = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/editMessageText"
+                payload_edit = {
+                    "chat_id": chat_id,
+                    "message_id": callback_query["message"]["message_id"],
+                    "text": settings_msg,
+                    "parse_mode": "Markdown",
+                    "reply_markup": markup
+                }
+                background_tasks.add_task(http_client.post, url_edit, json=payload_edit)
+                return {"status": "ok", "detail": "drive_sync_started"}
+                
+            elif data.startswith("onboarding_drive_disconnect:"):
+                parts = data.split(":", 1)
+                cb_base_url = parts[1] if len(parts) > 1 else ""
+                async with db.cursor() as cur:
+                    await cur.execute(
+                        "SELECT google_refresh_token FROM users WHERE id = %s;",
+                        (user_id,)
+                    )
+                    row = await cur.fetchone()
+                    google_refresh_token = row[0] if row else None
+
+                if google_refresh_token:
+                    from backend.services.encryption import decrypt
+                    try:
+                        decrypted_token = decrypt(google_refresh_token)
+                    except Exception:
+                        decrypted_token = None
+
+                    if decrypted_token:
+                        try:
+                            url_revoke = f"https://oauth2.googleapis.com/revoke?token={decrypted_token}"
+                            background_tasks.add_task(http_client.post, url_revoke)
+                        except Exception as e:
+                            logger.error("Google token revoke failed: %s", e)
+
+                    async with db.cursor() as cur:
+                        await cur.execute(
+                            "UPDATE users SET google_refresh_token = NULL, google_last_sync = NULL WHERE id = %s;",
+                            (user_id,)
+                        )
+                        await db.commit()
+
+                settings_msg, markup = await get_onboarding_settings_payload(chat_id, user_id, "🔌 *Google Drive disconnected successfully.*", cb_base_url)
+                url_edit = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/editMessageText"
+                payload_edit = {
+                    "chat_id": chat_id,
+                    "message_id": callback_query["message"]["message_id"],
+                    "text": settings_msg,
+                    "parse_mode": "Markdown",
+                    "reply_markup": markup
+                }
+                background_tasks.add_task(http_client.post, url_edit, json=payload_edit)
+                return {"status": "ok", "detail": "drive_disconnected"}
+                
+            elif data.startswith("onboarding_opt:"):
+                parts = data.split(":")
+                if len(parts) == 2:
+                    choice = parts[1]
+                    pending_item_id = await redis.get(f"pending_context:{chat_id}")
+                    if pending_item_id:
+                        item_id = int(pending_item_id)
+                        await redis.delete(f"pending_context:{chat_id}")
+                        
+                        note_text = ""
+                        if choice == "for_me":
+                            note_text = "Just for me"
+                        elif choice == "act":
+                            note_text = "To act on it"
+                        elif choice == "share":
+                            note_text = "To share with someone"
+                        elif choice == "mind":
+                            note_text = "Still on my mind"
+                        elif choice == "done":
+                            note_text = "Already done its job"
+                            
+                        async with db.cursor() as cur:
+                            await cur.execute(
+                                "UPDATE items SET context_note = %s WHERE id = %s AND user_id = %s;",
+                                (note_text, item_id, user_id)
+                            )
+                            await db.commit()
+                            
+                        url_ans = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
+                        background_tasks.add_task(http_client.post, url_ans, json={"callback_query_id": callback_query_id, "text": "Preference saved! ✓"})
+                        
+                        emoji = "👤" if choice == "for_me" else "🚀" if choice == "act" else "👥" if choice == "share" else "💭" if choice == "mind" else "✓"
+                        url_edit = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/editMessageText"
+                        payload_edit = {
+                            "chat_id": chat_id,
+                            "message_id": callback_query["message"]["message_id"],
+                            "text": f"{emoji} *Preference saved*: {note_text}.",
+                            "parse_mode": "Markdown"
+                        }
+                        background_tasks.add_task(http_client.post, url_edit, json=payload_edit)
+                    else:
+                        url_ans = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
+                        background_tasks.add_task(http_client.post, url_ans, json={"callback_query_id": callback_query_id, "text": "Session expired or already saved."})
+                return {"status": "ok", "detail": "onboarding_opt_processed"}
                 
             elif data.startswith("quiz:"):
                 parts = data.split(":")
@@ -475,10 +735,64 @@ async def telegram_webhook(
                 command_part = "/file"
             
             if command_part == "/start":
-                welcome_msg = "Welcome to Recall! Forward me any link, voice note, PDF, or image and I'll remember it for you."
-                background_tasks.add_task(send_telegram_ack, chat_id, welcome_msg)
+                # Check item count to see if we should start onboarding
+                async with db.cursor() as cur:
+                    await cur.execute("SELECT COUNT(*) FROM items WHERE user_id = %s;", (user_id,))
+                    count_row = await cur.fetchone()
+                    item_count = count_row[0] if count_row else 0
+                    
+                if item_count < 3:
+                    welcome_msg = (
+                        "Welcome to Recall! Let's build your initial mind-graph.\n\n"
+                        "Question 1/3: What is a book or article you read recently that changed how you think?"
+                    )
+                    markup = {"inline_keyboard": [[{"text": "Skip Question ⏭️", "callback_data": "onboarding_skip:1"}]]}
+                    await redis.setex(f"onboarding_step:{chat_id}", 86400, "1")
+                    url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
+                    payload = {
+                        "chat_id": chat_id,
+                        "text": welcome_msg,
+                        "reply_markup": markup
+                    }
+                    background_tasks.add_task(http_client.post, url, json=payload)
+                else:
+                    welcome_msg_standard = "Welcome back to Recall! Forward me any link, voice note, PDF, or image and I'll remember it for you."
+                    background_tasks.add_task(send_telegram_ack, chat_id, welcome_msg_standard)
+                    
                 logger.info("Processed /start: created/retrieved user %d for chat_id %s", user_id, chat_id)
                 return {"status": "ok", "detail": "welcome_sent"}
+                
+            elif command_part == "/reset_onboarding":
+                async with db.cursor() as cur:
+                    await cur.execute("DELETE FROM items WHERE user_id = %s;", (user_id,))
+                    await cur.execute("UPDATE users SET onboarding_day = 0, onboarding_last_sent = NULL, timezone_offset = 0 WHERE id = %s;", (user_id,))
+                    await db.commit()
+                await redis.delete(f"onboarding_step:{chat_id}")
+                await redis.delete(f"pending_context:{chat_id}")
+                await redis.delete(f"pending_timezone:{chat_id}")
+                
+                welcome_msg = (
+                    "🔄 *Onboarding reset successful!* All items deleted.\n\n"
+                     "Let's build your initial mind-graph.\n\n"
+                     "Question 1/3: What is a book or article you read recently that changed how you think?"
+                )
+                markup = {"inline_keyboard": [[{"text": "Skip Question ⏭️", "callback_data": "onboarding_skip:1"}]]}
+                await redis.setex(f"onboarding_step:{chat_id}", 86400, "1")
+                url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
+                payload = {
+                    "chat_id": chat_id,
+                    "text": welcome_msg,
+                    "parse_mode": "Markdown",
+                    "reply_markup": markup
+                }
+                background_tasks.add_task(http_client.post, url, json=payload)
+                logger.info("Processed /reset_onboarding: reset user %d onboarding", user_id)
+                return {"status": "ok", "detail": "onboarding_reset"}
+                
+            elif command_part == "/settings":
+                background_tasks.add_task(send_onboarding_settings_card, chat_id, user_id, "", base_url)
+                logger.info("Processed /settings command for user %d", user_id)
+                return {"status": "ok", "detail": "settings_sent"}
                 
             elif command_part == "/help":
                 help_msg = (
@@ -987,33 +1301,195 @@ async def telegram_webhook(
         content_type, text_content, file_id = detect_content_type(message)
         logger.info("Detected message content type '%s' for update_id=%s.", content_type, update_id_str)
         
-        # 6. Dispatch immediate Telegram ACK
-        ack_message = ACK_MESSAGES.get(content_type, ACK_MESSAGES["unsupported"])
-        background_tasks.add_task(send_telegram_ack, chat_id, ack_message)
+        # 5.5 Handle location-based timezone auto-detection
+        if content_type == "location" and text_content:
+            try:
+                loc_data = json.loads(text_content)
+                lon = float(loc_data.get("longitude", 0.0))
+                offset_hours = round(lon / 15.0 * 2) / 2
+                offset_minutes = int(offset_hours * 60)
+                
+                user_id = await upsert_user(chat_id, db)
+                async with db.cursor() as cur:
+                    await cur.execute(
+                        "UPDATE users SET timezone_offset = %s WHERE id = %s;",
+                        (offset_minutes, user_id)
+                    )
+                    await db.commit()
+                
+                url_dismiss = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
+                background_tasks.add_task(http_client.post, url_dismiss, json={
+                    "chat_id": chat_id,
+                    "text": "📍 Location received. Resolving timezone...",
+                    "reply_markup": {"remove_keyboard": True}
+                })
+                
+                sign = "+" if offset_minutes >= 0 else "-"
+                h_abs = abs(offset_minutes) // 60
+                m_abs = abs(offset_minutes) % 60
+                tz_str = f"GMT{sign}{h_abs:02d}:{m_abs:02d}"
+                background_tasks.add_task(send_onboarding_settings_card, chat_id, user_id, status_banner, base_url)
+                return {"status": "ok", "detail": "timezone_location_detected"}
+            except Exception as loc_err:
+                logger.error("Failed to parse/save location timezone: %s", loc_err)
+                user_id = await upsert_user(chat_id, db)
+                background_tasks.add_task(send_onboarding_settings_card, chat_id, user_id, "⚠️ Failed to auto-detect timezone from location.", base_url)
+                return {"status": "ok", "detail": "timezone_location_failed"}
         
-        # 7. Push task JSON to Upstash Redis queue (LPUSH recall:tasks) ONLY if supported
-        if content_type != "unsupported":
+        # 6. Check onboarding state
+        user_id = await upsert_user(chat_id, db)
+        onboarding_step_str = await redis.get(f"onboarding_step:{chat_id}")
+        
+        is_onboarding = False
+        if onboarding_step_str:
+            is_onboarding = True
+        else:
+            async with db.cursor() as cur:
+                await cur.execute("SELECT COUNT(*) FROM items WHERE user_id = %s;", (user_id,))
+                count_row = await cur.fetchone()
+                item_count = count_row[0] if count_row else 0
+            if item_count < 3:
+                is_onboarding = True
+                onboarding_step_str = "1"
+                await redis.setex(f"onboarding_step:{chat_id}", 86400, "1")
+
+        if is_onboarding:
+            step = int(onboarding_step_str)
+            
+            if content_type != "text" or not text_content:
+                unsupported_msg = "Please reply with a text answer to seed your graph, or click 'Skip Question'."
+                markup = {"inline_keyboard": [[{"text": "Skip Question ⏭️", "callback_data": f"onboarding_skip:{step}"}]]}
+                url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
+                payload = {
+                    "chat_id": chat_id,
+                    "text": unsupported_msg,
+                    "reply_markup": markup
+                }
+                background_tasks.add_task(http_client.post, url, json=payload)
+                return {"status": "ok", "detail": "onboarding_invalid_type"}
+                
+            if text_content.strip().lower() == "skip":
+                background_tasks.add_task(advance_onboarding_step, chat_id, user_id, step, db, background_tasks)
+                return {"status": "ok", "detail": "onboarding_text_skip"}
+                
+            # Length guardrail (at least 3 words)
+            if len(text_content.strip().split()) < 3:
+                short_msg = "That's a bit short! Could you tell me a little more? Or click 'Skip' to move on."
+                markup = {"inline_keyboard": [[{"text": "Skip Question ⏭️", "callback_data": f"onboarding_skip:{step}"}]]}
+                url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
+                payload = {
+                    "chat_id": chat_id,
+                    "text": short_msg,
+                    "reply_markup": markup
+                }
+                background_tasks.add_task(http_client.post, url, json=payload)
+                return {"status": "ok", "detail": "onboarding_input_too_short"}
+                
+            # Queue onboarding task
             task = {
                 "update_id": update_id_str,
                 "chat_id": chat_id,
-                "content_type": content_type
+                "content_type": "text",
+                "text": text_content,
+                "is_onboarding": True,
+                "onboarding_step": step
             }
-            if content_type in ("text", "url"):
-                task["text"] = text_content
-            elif content_type in ("voice", "pdf", "photo"):
-                task["file_id"] = file_id
+            background_tasks.add_task(redis.lpush, "recall:tasks", json.dumps(task))
+            
+            ack_msg = "Got it! Summarizing and adding to your graph..."
+            background_tasks.add_task(send_telegram_ack, chat_id, ack_msg)
+            return {"status": "ok", "detail": "onboarding_task_queued"}
+
+        # 6.5 Check for custom timezone offset text reply
+        if content_type == "text" and text_content:
+            is_pending_tz = await redis.get(f"pending_timezone:{chat_id}")
+            if is_pending_tz:
+                await redis.delete(f"pending_timezone:{chat_id}")
+                cleaned_val = text_content.strip()
+                if cleaned_val.lower() == "cancel":
+                    background_tasks.add_task(send_onboarding_settings_card, chat_id, user_id, "", base_url)
+                    return {"status": "ok", "detail": "timezone_setup_cancelled"}
                 
-            command = ["LPUSH", "recall:tasks", json.dumps(task)]
-            background_tasks.add_task(run_upstash_command, command)
-            logger.info(
-                "Queued background task (Redis push) for update_id=%s, chat_id=%s, type=%s",
-                update_id_str, chat_id, content_type
-            )
+                try:
+                    parse_val = cleaned_val
+                    if parse_val.startswith("+"):
+                        parse_val = parse_val[1:]
+                    hours = float(parse_val)
+                    if -12.0 <= hours <= 14.0:
+                        offset_minutes = int(hours * 60)
+                        async with db.cursor() as cur:
+                            await cur.execute(
+                                "UPDATE users SET timezone_offset = %s WHERE id = %s;",
+                                (offset_minutes, user_id)
+                            )
+                            await db.commit()
+                        
+                        sign = "+" if offset_minutes >= 0 else "-"
+                        h_abs = abs(offset_minutes) // 60
+                        m_abs = abs(offset_minutes) % 60
+                        tz_str = f"GMT{sign}{h_abs:02d}:{m_abs:02d}"
+                        status_banner = f"✅ *Timezone configured successfully to {tz_str}!*"
+                        background_tasks.add_task(send_onboarding_settings_card, chat_id, user_id, status_banner, base_url)
+                        return {"status": "ok", "detail": "custom_timezone_set"}
+                except ValueError:
+                    pass
+                
+                await redis.setex(f"pending_timezone:{chat_id}", 300, "1")
+                err_msg = "⚠️ I couldn't parse that. Please reply with a valid number like `+5.5`, `-8`, or `+0`. Type `cancel` to go back."
+                url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
+                background_tasks.add_task(http_client.post, url, json={
+                    "chat_id": chat_id,
+                    "text": err_msg,
+                    "parse_mode": "Markdown",
+                    "reply_markup": {
+                        "inline_keyboard": [
+                            [{"text": "« Cancel", "callback_data": "onboarding_tz_back"}]
+                        ]
+                    }
+                })
+                return {"status": "ok", "detail": "custom_timezone_invalid"}
+
+        # 7. Check for pending context note capture (steady state only)
+        if content_type == "text" and text_content:
+            pending_item_id = await redis.get(f"pending_context:{chat_id}")
+            if pending_item_id:
+                await redis.delete(f"pending_context:{chat_id}")
+                background_tasks.add_task(
+                    save_context_note,
+                    int(pending_item_id),
+                    user_id,
+                    text_content,
+                    chat_id
+                )
+                return {"status": "ok", "detail": "context_note_capture_triggered"}
+
+        # 8. Steady-state Batch Debouncing
+        if content_type != "unsupported":
+            item_payload = {
+                "update_id": update_id_str,
+                "content_type": content_type,
+                "text": text_content,
+                "file_id": file_id,
+                "timestamp": time.time()
+            }
+            # Add payload to batch list in Redis
+            batch_len = await redis.rpush(f"batch:{chat_id}", json.dumps(item_payload))
+            
+            expected_time = str(time.time())
+            await redis.setex(f"batch_last:{chat_id}", 60, expected_time)
+            
+            background_tasks.add_task(wait_and_process_batch, chat_id, user_id, expected_time)
+            
+            # Send immediate ACK only for the first item in the batch
+            if batch_len == 1:
+                ack_message = ACK_MESSAGES.get(content_type, ACK_MESSAGES["unsupported"])
+                background_tasks.add_task(send_telegram_ack, chat_id, ack_message)
+                
+            logger.info("Queued item in debounce batch for chat_id %s, batch_size=%d", chat_id, batch_len)
         else:
-            logger.info(
-                "Skipped Redis queue push for unsupported content type on update_id=%s, chat_id=%s",
-                update_id_str, chat_id
-            )
+            unsupported_msg = ACK_MESSAGES["unsupported"]
+            background_tasks.add_task(send_telegram_ack, chat_id, unsupported_msg)
+            logger.info("Skipped queue for unsupported content type on update_id=%s, chat_id=%s", update_id_str, chat_id)
         
     except RateLimitExceeded as e:
         logger.warning(
@@ -1260,19 +1736,6 @@ async def process_remind_set_callback(
             "reply_markup": {"inline_keyboard": []}
         }
         await http_client.post(url_edit, json=payload_edit)
-
-    except ValueError as val_err:
-        url_ans = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
-        await http_client.post(url_ans, json={"callback_query_id": callback_query_id})
-        
-        url_edit = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/editMessageText"
-        payload_edit = {
-            "chat_id": chat_id,
-            "message_id": message_id,
-            "text": f"❌ {str(val_err)}",
-            "reply_markup": {"inline_keyboard": []}
-        }
-        await http_client.post(url_edit, json=payload_edit)
     except Exception as e:
         logger.error("Failed to set callback reminder: %s", e)
         url_ans = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
@@ -1286,3 +1749,273 @@ async def process_remind_set_callback(
             "reply_markup": {"inline_keyboard": []}
         }
         await http_client.post(url_edit, json=payload_edit)
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 Conversational Onboarding & Debouncing Helper Functions
+# ---------------------------------------------------------------------------
+
+async def advance_onboarding_step(chat_id: str, user_id: int, current_step: int, db: psycopg.AsyncConnection, background_tasks: Optional[BackgroundTasks] = None, base_url: str = ""):
+    next_step = current_step + 1
+    if next_step <= 3:
+        await redis.setex(f"onboarding_step:{chat_id}", 86400, str(next_step))
+        if next_step == 2:
+            msg = "Question 2/3: What is a hobby or technical topic you are obsessed with right now?\n\n(Click 'Skip' if you don't want to answer)"
+            markup = {"inline_keyboard": [[{"text": "Skip Question ⏭️", "callback_data": "onboarding_skip:2"}]]}
+        else: # next_step == 3
+            msg = "Question 3/3: What is a problem or project you are currently working on at work or in life?\n\n(Click 'Skip' if you don't want to answer)"
+            markup = {"inline_keyboard": [[{"text": "Skip Question ⏭️", "callback_data": "onboarding_skip:3"}]]}
+            
+        url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = {
+            "chat_id": chat_id,
+            "text": msg,
+            "reply_markup": markup
+        }
+        await http_client.post(url, json=payload)
+    else:
+        # Completed onboarding!
+        await redis.delete(f"onboarding_step:{chat_id}")
+        if background_tasks:
+            background_tasks.add_task(trigger_first_session_magic, chat_id, user_id, base_url)
+        else:
+            await trigger_first_session_magic(chat_id, user_id, base_url)
+
+
+async def get_onboarding_settings_payload(chat_id: str, user_id: int, status_banner: str = "", base_url: str = ""):
+    from backend.db.connection import _pool
+    
+    google_refresh_token = None
+    google_last_sync = None
+    timezone_offset = 0
+    
+    if _pool:
+        try:
+            async with _pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("SELECT google_refresh_token, google_last_sync, timezone_offset FROM users WHERE id = %s;", (user_id,))
+                    row = await cur.fetchone()
+                    if row:
+                        google_refresh_token, google_last_sync, timezone_offset = row
+        except Exception as db_err:
+            logger.error("Failed to query user drive status in settings card: %s", db_err)
+
+    is_connected = google_refresh_token is not None
+    
+    sign = "+" if timezone_offset >= 0 else "-"
+    h_abs = abs(timezone_offset) // 60
+    m_abs = abs(timezone_offset) % 60
+    tz_str = f"GMT{sign}{h_abs:02d}:{m_abs:02d}"
+
+    backup_url = f"{settings.VITE_API_URL or 'http://localhost:8000'}/api/auth/google?chat_id={chat_id}"
+    if base_url:
+        backup_url = f"{base_url}/api/auth/google?chat_id={chat_id}"
+        
+    dashboard_url = settings.WEBSITE_URL
+
+    # Always rewrite localhost and 127.0.0.1 to lvh.me so Telegram Bot API allows loopbacks in inline keyboard buttons
+    backup_url = backup_url.replace("localhost", "lvh.me").replace("127.0.0.1", "lvh.me")
+    dashboard_url = dashboard_url.replace("localhost", "lvh.me").replace("127.0.0.1", "lvh.me")
+
+    settings_msg = (
+        f"{status_banner}\n"
+        "⚙️ *Setup & Settings*\n\n"
+        "Onboarding complete! To get the most out of Recall, let's configure your settings:\n\n"
+        f"1. **Timezone**: {tz_str} (Ensures digests and reminders arrive at the correct local hour).\n"
+        f"2. **Web Dashboard**: Access your interactive 3D mind-graph.\n"
+    )
+    
+    if is_connected:
+        sync_time_str = ""
+        if google_last_sync:
+            sync_time_str = f" (Last sync: {google_last_sync.strftime('%d %b %H:%M')})"
+        settings_msg += f"3. **Google Drive**: Connected ✅{sync_time_str}"
+    else:
+        settings_msg += "3. **Google Drive**: Secure automated daily backups of your saved items."
+
+    inline_keyboard = [
+        [{"text": "Set Timezone ⏰", "callback_data": "onboarding_tz_menu"}],
+        [{"text": "Web Dashboard 🌐", "url": dashboard_url}]
+    ]
+
+    if is_connected:
+        inline_keyboard.append([
+            {"text": "Sync Drive Now 🔄", "callback_data": f"onboarding_drive_sync:{base_url}"},
+            {"text": "Disconnect Drive 🔌", "callback_data": f"onboarding_drive_disconnect:{base_url}"}
+        ])
+    else:
+        inline_keyboard.append([{"text": "Backup to Drive 💾", "url": backup_url}])
+
+    settings_msg = settings_msg.strip()
+    markup = {"inline_keyboard": inline_keyboard}
+    return settings_msg, markup
+
+
+async def send_onboarding_settings_card(chat_id: str, user_id: int, status_banner: str = "", base_url: str = ""):
+    settings_msg, markup = await get_onboarding_settings_payload(chat_id, user_id, status_banner, base_url)
+    
+    url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": settings_msg,
+        "parse_mode": "Markdown",
+        "reply_markup": markup
+    }
+    
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        await client.post(url, json=payload)
+
+
+async def background_drive_sync(user_id: int, chat_id: str, base_url: str = ""):
+    from backend.db.connection import _pool
+    from backend.services.drive_sync import sync_user_to_drive
+    try:
+        if _pool:
+            async with _pool.connection() as conn:
+                await sync_user_to_drive(user_id, conn)
+            
+            # Send completion message and refresh settings card
+            url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
+            payload = {
+                "chat_id": chat_id,
+                "text": "✅ *Google Drive backup sync completed successfully!*"
+            }
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                await client.post(url, json=payload)
+                
+            await send_onboarding_settings_card(chat_id, user_id, base_url=base_url)
+    except Exception as e:
+        logger.error("Background drive sync failed for user %d: %s", user_id, e)
+        url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = {
+            "chat_id": chat_id,
+            "text": "⚠️ *Google Drive backup sync failed. Please try again later.*"
+        }
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            await client.post(url, json=payload)
+
+
+async def trigger_first_session_magic(chat_id: str, user_id: int, base_url: str = ""):
+    # Send a completion message first
+    complete_msg = "🎉 Onboarding complete! Your starting mind-graph has been seeded.\n\nRunning first-session scan..."
+    await send_telegram_ack(chat_id, complete_msg)
+    
+    from backend.db.connection import _pool
+    if not _pool:
+        return
+    try:
+        async with _pool.connection() as conn:
+            async with conn.cursor() as cur:
+                # Get the 3 items
+                await cur.execute(
+                    "SELECT id, title, summary, tags, context_note, passive_context FROM items WHERE user_id = %s ORDER BY created_at DESC LIMIT 3;",
+                    (user_id,)
+                )
+                rows = await cur.fetchall()
+                
+        if len(rows) < 2:
+            await send_telegram_ack(chat_id, "Your graph is seeded. Start forwarding links to grow it!")
+            await send_onboarding_settings_card(chat_id, user_id, base_url=base_url)
+            return
+            
+        best_pair = None
+        best_sim = 0.0
+        
+        async with _pool.connection() as conn:
+            async with conn.cursor() as cur:
+                for i in range(len(rows)):
+                    for j in range(i+1, len(rows)):
+                        id1, t1, s1, tg1, cn1, pc1 = rows[i]
+                        id2, t2, s2, tg2, cn2, pc2 = rows[j]
+                        await cur.execute(
+                            "SELECT 1 - (embedding <=> (SELECT embedding FROM items WHERE id = %s)) FROM items WHERE id = %s;",
+                            (id2, id1)
+                        )
+                        sim_row = await cur.fetchone()
+                        sim = sim_row[0] if (sim_row and sim_row[0] is not None) else 0.0
+                        if sim > best_sim:
+                            best_sim = sim
+                            best_pair = (rows[i], rows[j])
+                            
+        if best_pair and best_sim >= 0.68:
+            item_a, item_b = best_pair
+            
+            from backend.services.ai_cascade import AICascade
+            cascade = AICascade()
+            cascade._force_production_llm = True
+            
+            dict_a = {"title": item_a[1], "summary": item_a[2], "tags": item_a[3], "context_note": item_a[4], "passive_context": item_a[5]}
+            dict_b = {"title": item_b[1], "summary": item_b[2], "tags": item_b[3], "context_note": item_b[4], "passive_context": item_b[5]}
+            
+            insight = await cascade.generate_insight(dict_a, dict_b, 1)
+            if insight:
+                await send_telegram_ack(chat_id, "🔍 Scan complete: I found a connection between your seed topics!")
+                msg = f"💡 **Recall Connection**:\n\n{insight}"
+                await send_telegram_ack(chat_id, msg)
+            else:
+                await send_telegram_ack(chat_id, "Scan complete! No strong conceptual connections found yet, but they are saved. Forward me more links to find deeper connections!")
+        else:
+            await send_telegram_ack(chat_id, "Scan complete! No strong conceptual connections found yet, but they are saved. Forward me more links to find deeper connections!")
+            
+        await send_onboarding_settings_card(chat_id, user_id, base_url=base_url)
+    except Exception as e:
+        logger.error("First session magic failed: %s", e)
+
+
+async def save_context_note(item_id: int, user_id: int, note_text: str, chat_id: str):
+    from backend.db.connection import _pool
+    from backend.services.redis_client import redis
+    if not _pool:
+        logger.error("DB pool not initialized in save_context_note")
+        return
+    try:
+        # 1. Reset ignore count since they replied
+        await redis.delete(f"context_prompt:ignore_count:{chat_id}")
+        
+        # 2. Fetch and delete the pending mood variant name
+        variant_name = await redis.get(f"pending_context_variant:{chat_id}")
+        if variant_name:
+            await redis.delete(f"pending_context_variant:{chat_id}")
+            reply_len = len(note_text)
+            await redis._request("", ["HINCRBY", f"context_prompt:scores:{chat_id}", variant_name, str(reply_len)])
+            
+        async with _pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "UPDATE items SET context_note = %s WHERE id = %s AND user_id = %s;",
+                    (note_text.strip(), item_id, user_id)
+                )
+                await conn.commit()
+        await send_telegram_ack(chat_id, "Got it, context note attached! ✓")
+        logger.info("Saved context note for item_id %d, user_id %d", item_id, user_id)
+    except Exception as e:
+        logger.error("Failed to save context note: %s", e)
+
+
+async def wait_and_process_batch(chat_id: str, user_id: int, expected_time: str):
+    await asyncio.sleep(4.0)
+    # Check if a newer message has arrived and reset the timer
+    last_time = await redis.get(f"batch_last:{chat_id}")
+    if last_time != expected_time:
+        return
+
+    # Process the batch
+    raw_items = await redis.lrange(f"batch:{chat_id}", 0, -1)
+    await redis.delete(f"batch:{chat_id}")
+    await redis.delete(f"batch_last:{chat_id}")
+
+    if not raw_items:
+        return
+
+    items = [json.loads(x) for x in raw_items]
+    
+    batch_task = {
+        "chat_id": chat_id,
+        "user_id": user_id,
+        "is_batch": True,
+        "items": items
+    }
+    
+    await redis.lpush("recall:tasks", json.dumps(batch_task))
+    logger.info("Consolidated batch task of %d items queued for chat_id %s", len(items), chat_id)
+

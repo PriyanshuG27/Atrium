@@ -83,6 +83,7 @@ async def ingest_image(file_id: str, user_id: int, chat_id: str, db: AsyncConnec
         cascade = AICascade()
         
         # Determine if we use OCR or Gemini captioning
+        context_prompt = None
         if len(ocr_text) > 50:
             logger.info("Using OCR text for image ingestion (length > 50)")
             raw_text = f"OCR Text:\n{ocr_text}"
@@ -91,6 +92,7 @@ async def ingest_image(file_id: str, user_id: int, chat_id: str, db: AsyncConnec
             ai_res = await cascade.summarise(ocr_text, chat_id)
             summary = ai_res.get("summary") or f"OCR summary: {ocr_text[:100]}..."
             tags = ai_res.get("tags") or ["image", "ocr"]
+            context_prompt = ai_res.get("context_prompt")
             title = f"OCR: {ocr_text[:80].strip()}"
         else:
             logger.info("OCR text <= 50 chars. Requesting Gemini caption...")
@@ -128,11 +130,11 @@ async def ingest_image(file_id: str, user_id: int, chat_id: str, db: AsyncConnec
             async with conn.cursor() as cur:
                 await cur.execute(
                     """
-                    INSERT INTO items (user_id, source_type, source_url, raw_text, summary, title, embedding, tags, content_hash)
-                    VALUES (%s, 'image', %s, %s, %s, %s, %s::vector, %s, %s)
+                    INSERT INTO items (user_id, source_type, source_url, raw_text, summary, title, embedding, tags, content_hash, context_prompt)
+                    VALUES (%s, 'image', %s, %s, %s, %s, %s::vector, %s, %s, %s)
                     RETURNING id;
                     """,
-                    (user_id, file_id, encrypted_raw_text, summary, title, embedding, normalized_tags, content_hash)
+                    (user_id, file_id, encrypted_raw_text, summary, title, embedding, normalized_tags, content_hash, context_prompt)
                 )
                 row = await cur.fetchone()
                 if not row:

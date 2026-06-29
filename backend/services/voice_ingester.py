@@ -86,6 +86,7 @@ async def ingest_voice(file_id: str, user_id: int, chat_id: str, db: AsyncConnec
         ai_res = await cascade.summarise(transcript, chat_id)
         summary = ai_res.get("summary") or f"Transcription summary for voice note: {transcript[:100]}..."
         tags = ai_res.get("tags") or ["voice"]
+        context_prompt = ai_res.get("context_prompt")
         
         normalized_tags = [t.strip().lower() for t in tags if isinstance(t, str) and t.strip()][:5]
         
@@ -115,11 +116,11 @@ async def ingest_voice(file_id: str, user_id: int, chat_id: str, db: AsyncConnec
             async with conn.cursor() as cur:
                 await cur.execute(
                     """
-                    INSERT INTO items (user_id, source_type, source_url, raw_text, summary, title, embedding, tags, content_hash)
-                    VALUES (%s, 'voice', %s, %s, %s, %s, %s::vector, %s, %s)
+                    INSERT INTO items (user_id, source_type, source_url, raw_text, summary, title, embedding, tags, content_hash, context_prompt)
+                    VALUES (%s, 'voice', %s, %s, %s, %s, %s::vector, %s, %s, %s)
                     RETURNING id;
                     """,
-                    (user_id, file_id, encrypted_raw_text, summary, title, embedding, normalized_tags, content_hash)
+                    (user_id, file_id, encrypted_raw_text, summary, title, embedding, normalized_tags, content_hash, context_prompt)
                 )
                 row = await cur.fetchone()
                 if not row:

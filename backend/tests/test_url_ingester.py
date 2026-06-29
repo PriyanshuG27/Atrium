@@ -31,7 +31,7 @@ class MockConnection:
 @pytest.fixture
 def mock_deps(monkeypatch):
     mock_cascade = mock.MagicMock()
-    mock_cascade.summarise = mock.AsyncMock(return_value={"summary": "Mock summary", "tags": ["url", "test"]})
+    mock_cascade.summarise = mock.AsyncMock(return_value={"summary": "Mock summary", "tags": ["url", "test"], "context_prompt": "Mock question?"})
     monkeypatch.setattr("backend.services.url_ingester.AICascade", lambda: mock_cascade)
     monkeypatch.setattr("backend.services.url_ingester.embed_text", mock.AsyncMock(return_value=[0.1]*384))
     monkeypatch.setattr("backend.services.url_ingester.encrypt", lambda x: "encrypted_" + x)
@@ -89,6 +89,27 @@ async def test_ingest_url_success(monkeypatch, mock_deps):
     assert params[3] == "Mock summary"
     assert params[4] == "Success Title"
     assert params[6] == ["url", "test"]
+    assert params[7] == "Mock question?"
+
+@pytest.mark.asyncio
+async def test_ingest_url_fallback(monkeypatch, mock_deps):
+    mock_resp = mock.Mock()
+    mock_resp.status_code = 403
+    
+    async def mock_get(*args, **kwargs):
+        return mock_resp
+        
+    monkeypatch.setattr("httpx.AsyncClient.get", mock_get)
+    
+    mock_embed = mock.AsyncMock(return_value=[0.5]*384)
+    monkeypatch.setattr("backend.services.url_ingester.embed_text", mock_embed)
+    
+    conn = MockConnection()
+    item_id = await ingest_url("https://example.com/blocked", user_id=4, db=conn)
+    assert item_id == 201
+    
+    # Verify embed_text was called with the summary + title fallback string
+    mock_embed.assert_called_with("https://example.com/blocked\nMock summary")
 
 @pytest.mark.asyncio
 async def test_scrape_url_private_google_drive(monkeypatch):
