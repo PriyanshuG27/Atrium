@@ -946,7 +946,9 @@ async def onboarding_sequence_dispatcher() -> None:
             async with conn.cursor() as cur:
                 await cur.execute(
                     """
-                    SELECT u.id, u.telegram_chat_id, MIN(i.id) as first_item_id
+                    SELECT u.id, u.telegram_chat_id,
+                           MIN(i.id) as first_item_id,
+                           (SELECT title FROM items WHERE id = MIN(i.id)) as first_item_title
                     FROM users u
                     JOIN items i ON u.id = i.user_id
                     WHERE u.onboarding_day = 0 AND u.onboarding_last_sent IS NULL
@@ -956,8 +958,11 @@ async def onboarding_sequence_dispatcher() -> None:
                 )
                 day0_users = await cur.fetchall()
 
-        for u_id, chat_id, item_id in day0_users:
-            msg = "I looked at the thing you sent me. Quick question — was this for you, or were you planning to act on it or share it with someone?"
+        for u_id, chat_id, item_id, item_title in day0_users:
+            title_label = item_title or "the item you saved"
+            if len(title_label) > 60:
+                title_label = title_label[:57] + "..."
+            msg = f"I looked at \"{title_label}\" you sent me. Quick question — was this for you, or were you planning to act on it or share it with someone?"
             reply_markup = {
                 "inline_keyboard": [
                     [{"text": "Just for me 👤", "callback_data": "onboarding_opt:for_me"}],

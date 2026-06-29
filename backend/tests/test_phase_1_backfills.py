@@ -160,7 +160,7 @@ async def test_onboarding_sequence_dispatcher_day0():
     # User at day 0 with first save 3 hours ago (eligible for Day 0 message)
     mock_redis.store.clear()
     
-    cursor_fetchall_sequence = [[(12, "chat_123", 101)], [], [], []]
+    cursor_fetchall_sequence = [[(12, "chat_123", 101, "Test Article Title")], [], [], []]
     async def seq_fetchall():
         return cursor_fetchall_sequence.pop(0) if cursor_fetchall_sequence else []
 
