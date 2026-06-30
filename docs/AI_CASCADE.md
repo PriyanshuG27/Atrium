@@ -107,6 +107,30 @@ In practice, Tier 0 or Tier 1 handles >95% of requests.
 
 ---
 
+---
+
+## Deployment Architecture & Modal GPU Planning
+
+To maintain 100% stability on the Render free tier (512MB RAM cap) while keeping the compute cost completely free, the system leverages a hybrid split between Render and Modal:
+
+### 1. Render Server (FastAPI API ONLY)
+*   **FastAPI & DB Interface:** Low-memory baseline (under 150MB).
+*   **Offloaded Embeddings:** To prevent loading heavy `torch` and `sentence-transformers` libraries (which take ~300MB RAM), the Render server does NOT install or run embeddings locally. Instead, it offloads vector generation to the **Hugging Face Serverless Inference API** (completely free, ~100ms response time) or **Modal** as a backup.
+*   **No local OCR:** PaddleOCR is offloaded entirely to Modal to keep Render's memory usage minimal.
+
+### 2. Modal Serverless GPU (Heavy Lift)
+All heavy, memory-intensive ML and GPU pipelines run on Modal using a single **Nvidia L4 (24GB VRAM)** GPU class (costing ~$0.80/hour or $0.000222/second):
+
+*   **PaddleOCR:** Offloaded here (runs in milliseconds on GPU, saving Render's memory completely).
+*   **Whisper STT:** Runs `whisper-large-v3-turbo` for rapid audio transcription (takes ~1.5s).
+*   **Self-Hosted LLM Choice — Qwen3.6-35B-A3B (MoE):**
+    *   **Architecture:** Sparse Mixture-of-Experts (35B capacity, 3B active parameters per token).
+    *   **Precision:** Loaded in **4-bit quantization** (consuming ~17.5 GB VRAM, fitting easily on the L4 GPU).
+    *   **Inference Quality:** Outperforms standard 27B dense models on reasoning, coding, and abstract Connection/Insight scans due to specialized expert routing.
+    *   **Speed & Cost:** Generates tokens ~3x faster than dense 27B models (70-90 tokens/sec), consuming 3x less GPU billing time. Allows **65,000+ monthly requests** completely free under Modal's $30/month starter credits.
+
+---
+
 ## Override
 
 Set `COMPUTE_PROVIDER` env var to `groq`, `gemini`, or `modal` to pin to a specific tier. For testing and CI only.

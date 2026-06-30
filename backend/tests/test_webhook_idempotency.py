@@ -195,7 +195,7 @@ def test_first_delivery(client, db_state, mock_redis, mock_telegram_ack):
     
     # Verify Telegram ACK dispatched
     assert mock_telegram_ack.call_count == 1
-    mock_telegram_ack.assert_called_with("12345", ACK_MESSAGES["text"])
+    mock_telegram_ack.assert_called_with("12345", ACK_MESSAGES["text"], None, 999)
     
     # Time must be < 50ms (0.05 seconds)
     assert (end_time - start_time) < 0.05
@@ -299,7 +299,7 @@ def test_content_type_ack_mapping(client, mock_redis, mock_telegram_ack, message
     
     # Verify Telegram ACK string
     assert mock_telegram_ack.call_count == 1
-    mock_telegram_ack.assert_called_with("12345", expected_ack)
+    mock_telegram_ack.assert_called_with("12345", expected_ack, None, 999)
 
 
 def test_webhook_start_command(client, db_state, mock_redis, mock_telegram_ack):
@@ -318,9 +318,12 @@ def test_webhook_start_command(client, db_state, mock_redis, mock_telegram_ack):
     assert mock_redis.rpush.call_count == 0
     
     # Welcome ACK message sent to user
-    welcome_msg = "Welcome back to Recall! Forward me any link, voice note, PDF, or image and I'll remember it for you."
+    welcome_msg = (
+        "Welcome back to Recall! Forward me any link, voice note, PDF, or image and I'll remember it for you.\n\n"
+        "💡 <b>We also support screenshots!</b> You can send us screenshots of your <b>WhatsApp Saved Messages</b> (or chats containing links), and we will automatically scrape, clean, and save them for you!"
+    )
     assert mock_telegram_ack.call_count == 1
-    mock_telegram_ack.assert_called_with("77777", welcome_msg)
+    mock_telegram_ack.assert_called_with("77777", welcome_msg, "HTML")
 
 
 def test_webhook_rate_limit_exceeded(client, mock_redis, mock_telegram_ack):

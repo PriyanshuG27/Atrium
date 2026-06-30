@@ -120,6 +120,7 @@ export default function Dashboard() {
 
   const [dashboardItems, setDashboardItems] = useState([]);
   const [initialGraph, setInitialGraph] = useState({ nodes: [], edges: [], hubs: [] });
+  const [activeCandidates, setActiveCandidates] = useState([]);
 
   const {
     nodes: hookNodes,
@@ -375,9 +376,11 @@ export default function Dashboard() {
             edges: graphData.edges || [],
             hubs: graphData.hubs || []
           });
+          setActiveCandidates(graphData.candidates || []);
         }
       } else {
         setInitialGraph({ nodes: [], edges: [], hubs: [] });
+        setActiveCandidates([]);
       }
     } catch (err) {
       console.error('Failed to initialize dashboard:', err);
@@ -424,6 +427,8 @@ export default function Dashboard() {
           const hasVisibleMember = hub.member_ids.some(mid => valid_item_ids.has(mid));
           if (hasVisibleMember) {
             const hubNodeId = -hub.id;
+            const lastActiveStr = hub.last_active_at || new Date().toISOString();
+            const daysSince = Math.max(0, Math.floor((Date.now() - new Date(lastActiveStr).getTime()) / (1000 * 60 * 60 * 24)));
             finalNodes.push({
               id: hubNodeId,
               title: hub.label,
@@ -434,7 +439,10 @@ export default function Dashboard() {
               summary: `Semantic cluster containing: ${hub.label}`,
               tags: ['hub', 'semantic'],
               source_url: '',
-              updated_at: hub.updated_at
+              updated_at: hub.updated_at,
+              last_active_at: lastActiveStr,
+              streak_days: hub.streak_days || 0,
+              daysSince: daysSince
             });
           }
         }
@@ -505,6 +513,17 @@ export default function Dashboard() {
       window.removeEventListener('online-refetch', handleRefetch);
     };
   }, []);
+
+  // Sync selectedNode state with updated item in dashboardItems list (for real-time updates)
+  useEffect(() => {
+    if (!selectedNode) return;
+    const updated = dashboardItems.find(item => String(item.id) === String(selectedNode.id));
+    if (updated) {
+      if (updated.context_note !== selectedNode.context_note || JSON.stringify(updated.tags) !== JSON.stringify(selectedNode.tags)) {
+        setSelectedNode(updated);
+      }
+    }
+  }, [dashboardItems, selectedNode]);
 
   // Telegram WebApp SDK bindings
   useEffect(() => {
@@ -995,7 +1014,14 @@ export default function Dashboard() {
           }}
           hubs={hubs}
           activeNodes={activeNodes}
+          activeCandidates={activeCandidates}
           onViewAllMembers={handleViewAllMembers}
+          onDelete={(id) => {
+            setActiveNodes(prev => prev.filter(n => n.id !== id));
+            setSelectedNode(null);
+            initializeDashboard();
+            window.dispatchEvent(new CustomEvent('items-updated'));
+          }}
         />
       </ErrorBoundary>
 

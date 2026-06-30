@@ -48,6 +48,7 @@ class PaginatedItem(BaseModel):
     source_url: Optional[str] = Field(None, description="Original source URL.")
     tags: List[str] = Field(default_factory=list, description="List of auto-generated tags.")
     created_at: AwareDateTime = Field(..., description="Item creation timestamp.")
+    context_note: Optional[str] = Field(None, description="User-provided context note.")
 
 
 class PaginatedItemsResponse(BaseModel):
@@ -117,6 +118,8 @@ class GraphHub(BaseModel):
     id: int = Field(..., description="Hub ID.")
     label: str = Field(..., description="LLM-generated community label.")
     member_ids: List[int] = Field(..., description="List of validated member item IDs in the hub.")
+    last_active_at: Optional[AwareDateTime] = Field(None, description="Most recent member item timestamp.")
+    streak_days: int = Field(0, description="Consecutive active days of saves in this hub.")
 
 class GraphCandidate(BaseModel):
     id: int = Field(..., description="Candidate internal ID.")
@@ -124,7 +127,7 @@ class GraphCandidate(BaseModel):
     item_id_b: int = Field(..., description="Target item node ID.")
     similarity_score: float = Field(..., description="Candidate connection similarity.")
     insight_text: Optional[str] = Field(None, description="Tension connection insight text.")
-    expires_at: AwareDateTime = Field(..., description="Drift countdown expiration time.")
+    expires_at: Optional[AwareDateTime] = Field(None, description="Drift countdown expiration time.")
     status: str = Field(..., description="Connection status enum.")
 
 class GraphResponse(BaseModel):

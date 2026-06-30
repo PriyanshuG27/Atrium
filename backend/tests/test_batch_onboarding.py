@@ -47,7 +47,7 @@ async def test_process_onboarding_task_normal(mock_db_connection):
         
         # Verify onboarding flow executed
         mock_cascade.summarise.assert_called_once_with("I really enjoy building backend APIs with Python and FastAPI.", "12345", task="onboarding")
-        mock_send.assert_called_once_with("12345", "Saved: I really enjoy building backend APIs with Python and FastAPI. ✓")
+        mock_send.assert_called_once_with("12345", "Saved: I really enjoy building backend APIs with Python and FastAPI. ✓", reply_to_message_id=None)
         mock_advance.assert_called_once()
 
 

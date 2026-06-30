@@ -69,9 +69,10 @@ async def send_failure_message(chat_id: str, content_type: str) -> None:
     }
     
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.post(url, json=payload)
-            resp.raise_for_status()
-            logger.info("Sent failure notification to chat_id %s for content_type %s", chat_id_str, content_type)
+        from backend.services.http_client import get_http_client
+        client = get_http_client()
+        resp = await client.post(url, json=payload, timeout=5.0)
+        resp.raise_for_status()
+        logger.info("Sent failure notification to chat_id %s for content_type %s", chat_id_str, content_type)
     except Exception as e:
         logger.error("Failed to send Telegram failure notification to chat_id %s: %s", chat_id_str, e)

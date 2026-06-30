@@ -379,12 +379,12 @@ def test_head_tail_sampling():
 
 @pytest.mark.anyio
 async def test_scanned_pdf_processing_with_tesseract(monkeypatch):
-    """Test scanned PDF processing when Tesseract is available."""
-    # Mock check_tesseract_available to return True
-    monkeypatch.setattr("backend.services.pdf_ingester.check_tesseract_available", lambda: True)
+    """Test scanned PDF processing when PaddleOCR is available."""
+    # Mock check_paddleocr_available to return True
+    monkeypatch.setattr("backend.services.ocr_service.check_paddleocr_available", lambda: True)
     
-    # Mock pytesseract.image_to_string
-    monkeypatch.setattr("pytesseract.image_to_string", lambda img: "Mocked OCR Text from Tesseract")
+    # Mock perform_ocr
+    monkeypatch.setattr("backend.services.ocr_service.perform_ocr", AsyncMock(return_value="Mocked OCR Text from PaddleOCR"))
     
     # Create a dummy scanned PDF
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -398,13 +398,13 @@ async def test_scanned_pdf_processing_with_tesseract(monkeypatch):
         
         # Extract text - should run mock OCR
         text = await extract_pdf_text(pdf_path, cascade=None)
-        assert "Mocked OCR Text from Tesseract" in text
+        assert "Mocked OCR Text from PaddleOCR" in text
 
 @pytest.mark.anyio
 async def test_scanned_pdf_processing_gemini_fallback(monkeypatch):
-    """Test scanned PDF processing fallback to Gemini Vision when Tesseract is missing."""
-    # Mock check_tesseract_available to return False
-    monkeypatch.setattr("backend.services.pdf_ingester.check_tesseract_available", lambda: False)
+    """Test scanned PDF processing fallback to Gemini Vision when PaddleOCR is missing."""
+    # Mock check_paddleocr_available to return False
+    monkeypatch.setattr("backend.services.ocr_service.check_paddleocr_available", lambda: False)
     
     # Create mock AICascade
     mock_cascade = MagicMock()

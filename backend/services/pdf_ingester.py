@@ -3,7 +3,6 @@ import re
 import io
 import os
 import logging
-import pytesseract
 from PIL import Image
 from typing import List, Optional, Any
 from psycopg import AsyncConnection
@@ -13,32 +12,20 @@ from backend.services.search_service import embed_text
 
 logger = logging.getLogger(__name__)
 
-def check_tesseract_available() -> bool:
-    """Check if local Tesseract OCR binary is installed and configured."""
-    # Check standard Windows path first to avoid PATH issues in background workers
-    std_path = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-    if os.path.exists(std_path):
-        pytesseract.pytesseract.tesseract_cmd = std_path
-        return True
-    try:
-        pytesseract.get_tesseract_version()
-        return True
-    except Exception:
-        return False
-
 async def extract_pdf_text(pdf_path: str, cascade: Optional[Any] = None) -> str:
     """
     Extract plain text from a PDF file using PyMuPDF (fitz).
     Enforces layout sorting (sort=True) for multi-column documents.
-    If a page is scanned/image-only, falls back to local Tesseract OCR or budgeted Gemini Vision.
+    If a page is scanned/image-only, falls back to local PaddleOCR or budgeted Gemini Vision.
     """
+    from backend.services.ocr_service import check_paddleocr_available, perform_ocr
     doc = fitz.open(pdf_path)
     text_parts = []
     page_count = len(doc)
     
-    tesseract_ok = check_tesseract_available()
-    if not tesseract_ok:
-        logger.warning("Local Tesseract binary not found. Scanned pages will fall back to Gemini Vision.")
+    paddleocr_ok = check_paddleocr_available()
+    if not paddleocr_ok:
+        logger.warning("Local PaddleOCR binary/package not found. Scanned pages will fall back to Gemini Vision.")
         
     for page_idx, page in enumerate(doc):
         # Extract text in reading order (sort=True)
@@ -52,16 +39,10 @@ async def extract_pdf_text(pdf_path: str, cascade: Optional[Any] = None) -> str:
                 pix = page.get_pixmap(dpi=150)
                 image_bytes = pix.tobytes("png")
                 
-                if tesseract_ok:
+                if paddleocr_ok:
                     # Run local OCR (free, local, no rate limit)
                     img = Image.open(io.BytesIO(image_bytes))
-                    # Run OCR in executor to avoid blocking the main event loop
-                    import asyncio
-                    loop = asyncio.get_running_loop()
-                    ocr_text = await loop.run_in_executor(
-                        None, 
-                        lambda: pytesseract.image_to_string(img)
-                    )
+                    ocr_text = await perform_ocr(img)
                     page_text = ocr_text.strip() or f"[Scanned Page {page_idx + 1} (No text recognized)]"
                 else:
                     # Fallback to Gemini Vision with budget (first 5 and last 3 pages)
@@ -139,7 +120,8 @@ async def ingest_pdf(
     user_id: int,
     title: str,
     source_url: Optional[str],
-    db: AsyncConnection
+    db: AsyncConnection,
+    user_context: str | None = None
 ) -> int:
     """
     Extract, chunk, embed, and store PDF contents.
@@ -196,6 +178,8 @@ async def ingest_pdf(
     try:
         # Get head-tail sampled context for document-level summary (up to 60,000 characters)
         summary_context = get_summarization_context(full_text, max_chars=60000)
+        if user_context:
+            summary_context = f"[User's Note/Context: {user_context}]\n" + summary_context
         ai_res = await cascade.summarise(summary_context)
         summary = ai_res.get("summary")
         tags = ai_res.get("tags") or []

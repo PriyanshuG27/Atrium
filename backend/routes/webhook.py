@@ -120,13 +120,22 @@ async def run_upstash_command(command: list) -> dict:
 # ---------------------------------------------------------------------------
 # Telegram API sendMessage Helper
 # ---------------------------------------------------------------------------
-async def send_telegram_ack(chat_id: str, ack_message: str):
+async def send_telegram_ack(
+    chat_id: str,
+    ack_message: str,
+    parse_mode: Optional[str] = None,
+    reply_to_message_id: Optional[int] = None
+):
     """Sends an immediate message back to the Telegram chat using the shared connection pool."""
     url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": chat_id,
         "text": ack_message
     }
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
+    if reply_to_message_id is not None:
+        payload["reply_to_message_id"] = reply_to_message_id
     try:
         resp = await http_client.post(url, json=payload)
         resp.raise_for_status()
@@ -764,6 +773,104 @@ async def telegram_webhook(
 
             return {"status": "ok", "detail": "callback_query_processed"}
         
+        # 4.4 Check if the message is a reply to a bot success message (allowing tagging / context note annotation)
+        text_content = message.get("text", "")
+        reply_to_message = message.get("reply_to_message")
+        if reply_to_message and text_content and not text_content.strip().startswith("/"):
+            replied_message_id = reply_to_message.get("message_id")
+            if replied_message_id:
+                user_id = await upsert_user(chat_id, db)
+                item_id_str = await redis.get(f"message_to_item:{chat_id}:{replied_message_id}")
+                if item_id_str:
+                    import re
+                    item_id = int(item_id_str)
+                    text_val = text_content.strip()
+                    
+                    # Check if this message is tags (hashtags)
+                    tags = re.findall(r"#([a-zA-Z0-9_-]+)", text_val)
+                    if tags:
+                        normalized_tags = [t.strip().lower() for t in tags]
+                        async with db.cursor() as cur:
+                            await cur.execute("SELECT tags FROM items WHERE id = %s AND user_id = %s;", (item_id, user_id))
+                            row = await cur.fetchone()
+                            existing_tags = row[0] if row and row[0] else []
+                            new_tags = list(set(existing_tags + normalized_tags))[:5]
+                            await cur.execute(
+                                "UPDATE items SET tags = %s WHERE id = %s AND user_id = %s;",
+                                (new_tags, item_id, user_id)
+                            )
+                            await db.commit()
+                        
+                        try:
+                            from backend.routes.websocket import broadcast
+                            await broadcast(user_id, {
+                                "type": "new_node",
+                                "node": {
+                                    "id": str(item_id),
+                                    "title": "",
+                                    "source_type": "url",
+                                    "created_at": datetime.now(timezone.utc).isoformat()
+                                }
+                            })
+                        except Exception as ws_err:
+                            logger.error("Failed to broadcast reply tags update: %s", ws_err)
+
+                        tags_display = " ".join(f"#{t}" for t in new_tags)
+                        ack_msg = f"🏷️ *Tags updated*: {tags_display} ✓"
+                        background_tasks.add_task(send_telegram_ack, chat_id, ack_msg, "Markdown")
+                        logger.info("Updated tags for item_id=%d from reply message", item_id)
+                        return {"status": "ok", "detail": "reply_tags_saved"}
+                    else:
+                        async with db.cursor() as cur:
+                            await cur.execute(
+                                "UPDATE items SET context_note = %s WHERE id = %s AND user_id = %s;",
+                                (text_val, item_id, user_id)
+                            )
+                            await db.commit()
+                        
+                        try:
+                            from backend.routes.websocket import broadcast
+                            await broadcast(user_id, {
+                                "type": "new_node",
+                                "node": {
+                                    "id": str(item_id),
+                                    "title": "",
+                                    "source_type": "url",
+                                    "created_at": datetime.now(timezone.utc).isoformat()
+                                }
+                            })
+                        except Exception as ws_err:
+                            logger.error("Failed to broadcast reply context note update: %s", ws_err)
+
+                        ack_msg = f"💭 *Context note saved*: \"{text_val}\" ✓"
+                        background_tasks.add_task(send_telegram_ack, chat_id, ack_msg, "Markdown")
+                        logger.info("Saved context note for item_id=%d from reply message", item_id)
+                        return {"status": "ok", "detail": "reply_context_note_saved"}
+                else:
+                    # Check if the replied-to message is from a user (not a bot)
+                    from_user = reply_to_message.get("from", {})
+                    if not from_user.get("is_bot"):
+                        # Defer the reply! Store it in Redis list
+                        logger.info("Deferring reply for message_id=%d in chat_id=%s because item is still processing", replied_message_id, chat_id)
+                        
+                        reply_payload = json.dumps({
+                            "text": text_content.strip(),
+                            "message_id": message.get("message_id")
+                        })
+                        await redis.rpush(f"deferred_replies:{chat_id}:{replied_message_id}", reply_payload)
+                        await redis.expire(f"deferred_replies:{chat_id}:{replied_message_id}", 3600)
+                        
+                        import re
+                        tags = re.findall(r"#([a-zA-Z0-9_-]+)", text_content.strip())
+                        if tags:
+                            tags_display = " ".join(f"#{t.lower()}" for t in tags)
+                            ack_msg = f"🏷️ *Tags queued*: {tags_display} ✓"
+                        else:
+                            ack_msg = f"💭 *Context note queued*: \"{text_content.strip()}\" ✓"
+                        
+                        background_tasks.add_task(send_telegram_ack, chat_id, ack_msg, "Markdown", message.get("message_id"))
+                        return {"status": "ok", "detail": "reply_deferred"}
+        
         # 4.5 Check for bot commands
         text_content = message.get("text", "")
         if text_content and text_content.strip().startswith("/"):
@@ -804,8 +911,11 @@ async def telegram_webhook(
                     }
                     background_tasks.add_task(http_client.post, url, json=payload)
                 else:
-                    welcome_msg_standard = "Welcome back to Recall! Forward me any link, voice note, PDF, or image and I'll remember it for you."
-                    background_tasks.add_task(send_telegram_ack, chat_id, welcome_msg_standard)
+                    welcome_msg_standard = (
+                        "Welcome back to Recall! Forward me any link, voice note, PDF, or image and I'll remember it for you.\n\n"
+                        "💡 <b>We also support screenshots!</b> You can send us screenshots of your <b>WhatsApp Saved Messages</b> (or chats containing links), and we will automatically scrape, clean, and save them for you!"
+                    )
+                    background_tasks.add_task(send_telegram_ack, chat_id, welcome_msg_standard, "HTML")
                     
                 logger.info("Processed /start: created/retrieved user %d for chat_id %s", user_id, chat_id)
                 return {"status": "ok", "detail": "welcome_sent"}
@@ -1440,12 +1550,13 @@ async def telegram_webhook(
                 "content_type": "text",
                 "text": text_content,
                 "is_onboarding": True,
-                "onboarding_step": step
+                "onboarding_step": step,
+                "message_id": message.get("message_id")
             }
             background_tasks.add_task(redis.lpush, "recall:tasks", json.dumps(task))
             
             ack_msg = "Got it! Summarizing and adding to your graph..."
-            background_tasks.add_task(send_telegram_ack, chat_id, ack_msg)
+            background_tasks.add_task(send_telegram_ack, chat_id, ack_msg, None, message.get("message_id"))
             return {"status": "ok", "detail": "onboarding_task_queued"}
 
         # 6.5 Check for custom timezone offset text reply
@@ -1497,6 +1608,26 @@ async def telegram_webhook(
                 })
                 return {"status": "ok", "detail": "custom_timezone_invalid"}
 
+        # 6.8 Check for pending self-description reply
+        if content_type == "text" and text_content:
+            is_pending_sd = await redis.get(f"pending_self_description:{chat_id}")
+            if is_pending_sd:
+                await redis.delete(f"pending_self_description:{chat_id}")
+                async with db.cursor() as cur:
+                    await cur.execute(
+                        "UPDATE users SET self_description = %s WHERE id = %s;",
+                        (text_content.strip(), user_id)
+                    )
+                    await db.commit()
+                # Send confirmation
+                url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
+                background_tasks.add_task(http_client.post, url, json={
+                    "chat_id": chat_id,
+                    "text": "Got it! Your stated interests have been saved to your profile. ✓",
+                    "parse_mode": "Markdown"
+                })
+                return {"status": "ok", "detail": "self_description_saved"}
+
         # 7. Check for pending context note capture (steady state only)
         if content_type == "text" and text_content:
             pending_item_id = await redis.get(f"pending_context:{chat_id}")
@@ -1531,7 +1662,8 @@ async def telegram_webhook(
                         chat_id,
                         user_id,
                         text_content,
-                        db
+                        db,
+                        message.get("message_id")
                     )
                     return {"status": "ok", "detail": "conversational_rag_triggered"}
 
@@ -1542,7 +1674,8 @@ async def telegram_webhook(
                 "content_type": content_type,
                 "text": text_content,
                 "file_id": file_id,
-                "timestamp": time.time()
+                "timestamp": time.time(),
+                "message_id": message.get("message_id")
             }
             # Add payload to batch list in Redis
             batch_len = await redis.rpush(f"batch:{chat_id}", json.dumps(item_payload))
@@ -1555,12 +1688,12 @@ async def telegram_webhook(
             # Send immediate ACK only for the first item in the batch
             if batch_len == 1:
                 ack_message = ACK_MESSAGES.get(content_type, ACK_MESSAGES["unsupported"])
-                background_tasks.add_task(send_telegram_ack, chat_id, ack_message)
+                background_tasks.add_task(send_telegram_ack, chat_id, ack_message, None, message.get("message_id"))
                 
             logger.info("Queued item in debounce batch for chat_id %s, batch_size=%d", chat_id, batch_len)
         else:
             unsupported_msg = ACK_MESSAGES["unsupported"]
-            background_tasks.add_task(send_telegram_ack, chat_id, unsupported_msg)
+            background_tasks.add_task(send_telegram_ack, chat_id, unsupported_msg, None, message.get("message_id"))
             logger.info("Skipped queue for unsupported content type on update_id=%s, chat_id=%s", update_id_str, chat_id)
         
     except RateLimitExceeded as e:
@@ -1788,7 +1921,7 @@ async def process_remind_set_callback(
         
         async with _pool.connection() as conn:
             reminder_id, final_message, was_truncated = await create_reminder(
-                user_id, message, remind_at_utc, conn
+                user_id, message, remind_at_utc, conn, item_id=item_id
             )
             await conn.commit()
 
@@ -1986,7 +2119,11 @@ async def trigger_first_session_magic(chat_id: str, user_id: int, base_url: str 
                 rows = await cur.fetchall()
                 
         if len(rows) < 2:
-            await send_telegram_ack(chat_id, "Your graph is seeded. Start forwarding links to grow it!")
+            seed_msg = (
+                "Your graph is seeded! Start forwarding links, audio, or PDFs to grow it.\n\n"
+                "💡 <b>We also support screenshots!</b> You can send us screenshots of your <b>WhatsApp Saved Messages</b> (or chats containing links), and we will automatically scrape, clean, and save them for you!"
+            )
+            await send_telegram_ack(chat_id, seed_msg, "HTML")
             await send_onboarding_settings_card(chat_id, user_id, base_url=base_url)
             return
             
@@ -2025,9 +2162,17 @@ async def trigger_first_session_magic(chat_id: str, user_id: int, base_url: str 
                 msg = f"💡 **Recall Connection**:\n\n{insight}"
                 await send_telegram_ack(chat_id, msg)
             else:
-                await send_telegram_ack(chat_id, "Scan complete! No strong conceptual connections found yet, but they are saved. Forward me more links to find deeper connections!")
+                scan_complete_msg = (
+                    "Scan complete! No strong conceptual connections found yet, but they are saved. Forward me more links to find deeper connections!\n\n"
+                    "💡 <b>We also support screenshots!</b> You can send us screenshots of your <b>WhatsApp Saved Messages</b> (or chats containing links), and we will automatically scrape, clean, and save them for you!"
+                )
+                await send_telegram_ack(chat_id, scan_complete_msg, "HTML")
         else:
-            await send_telegram_ack(chat_id, "Scan complete! No strong conceptual connections found yet, but they are saved. Forward me more links to find deeper connections!")
+            scan_complete_msg = (
+                "Scan complete! No strong conceptual connections found yet, but they are saved. Forward me more links to find deeper connections!\n\n"
+                "💡 <b>We also support screenshots!</b> You can send us screenshots of your <b>WhatsApp Saved Messages</b> (or chats containing links), and we will automatically scrape, clean, and save them for you!"
+            )
+            await send_telegram_ack(chat_id, scan_complete_msg, "HTML")
             
         await send_onboarding_settings_card(chat_id, user_id, base_url=base_url)
     except Exception as e:
@@ -2096,7 +2241,8 @@ async def handle_conversational_rag(
     chat_id: str,
     user_id: int,
     query: str,
-    db: psycopg.AsyncConnection
+    db: psycopg.AsyncConnection,
+    reply_to_message_id: Optional[int] = None
 ):
     """
     Background worker task to retrieve RAG context, run the AI cascade,
@@ -2112,7 +2258,9 @@ async def handle_conversational_rag(
         if not items:
             await send_telegram_ack(
                 chat_id,
-                "Your graph is empty! Please save some links, PDFs, images, or voice notes first so I can understand your thinking."
+                "Your graph is empty! Please save some links, PDFs, images, or voice notes first so I can understand your thinking.",
+                None,
+                reply_to_message_id
             )
             logger.info("Conversational query: user_id=%d query=%r query_type=conversational results=0", user_id, query)
             return
@@ -2146,6 +2294,8 @@ async def handle_conversational_rag(
             "text": formatted_answer,
             "parse_mode": "HTML"
         }
+        if reply_to_message_id is not None:
+            payload["reply_to_message_id"] = reply_to_message_id
         resp = await http_client.post(url, json=payload)
         resp.raise_for_status()
 
@@ -2154,7 +2304,9 @@ async def handle_conversational_rag(
         try:
             await send_telegram_ack(
                 chat_id,
-                "Sorry, I ran into an error while checking your graph. Please try again."
+                "Sorry, I ran into an error while checking your graph. Please try again.",
+                None,
+                reply_to_message_id
             )
         except Exception:
             pass

@@ -12,7 +12,39 @@ from backend.services.encryption import encrypt
 from backend.services.search_service import embed_text
 from backend.services.ai_cascade import AICascade
 
+import asyncio
+import re
+
 logger = logging.getLogger(__name__)
+
+def _clean_google_doc_title(html: str) -> str:
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html, "html.parser")
+    title = "Google Document"
+    if soup.title and soup.title.string:
+        title = soup.title.string.strip()
+        title = re.sub(r"\s*-\s*Google\s*(Docs|Sheets|Slides|Drive)$", "", title, flags=re.IGNORECASE)
+    return title
+
+def _write_temp_pdf_content(content: bytes) -> str:
+    import tempfile
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        tmp.write(content)
+        return tmp.name
+
+def _parse_url_html(html: str) -> tuple[str, str]:
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html, "html.parser")
+    title = "Untitled Link"
+    if soup.title and soup.title.string:
+        title = soup.title.string.strip()
+    
+    # Clean up scripts, styles, and other metadata
+    for script_or_style in soup(["script", "style", "meta", "noscript", "header", "footer", "nav"]):
+        script_or_style.decompose()
+        
+    text = soup.get_text(separator="\n")
+    return title, text
 
 async def scrape_url(url: str, user_id = None, db = None) -> tuple[str, str]:
     """
@@ -152,19 +184,18 @@ async def scrape_url(url: str, user_id = None, db = None) -> tuple[str, str]:
 
         # Fallback to public endpoints if we couldn't get content authenticated
         if not content_text:
-            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            from backend.services.http_client import get_http_client
+            client = get_http_client()
+            if True:
                 try:
                     # Get title from normal URL scrape first
                     headers = {
                         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
                     }
-                    resp = await client.get(url, headers=headers)
+                    resp = await client.get(url, headers=headers, timeout=15.0, follow_redirects=True)
                     if resp.status_code == 200:
-                        soup = BeautifulSoup(resp.text, "html.parser")
-                        if soup.title and soup.title.string:
-                            title = soup.title.string.strip()
-                            # Clean up title if it contains " - Google Docs" etc
-                            title = re.sub(r"\s*-\s*Google\s*(Docs|Sheets|Slides|Drive)$", "", title, flags=re.IGNORECASE)
+                        loop = asyncio.get_running_loop()
+                        title = await loop.run_in_executor(None, _clean_google_doc_title, resp.text)
                 except Exception as title_err:
                     logger.error("Failed to get public Google file title: %s", title_err)
 
@@ -172,29 +203,27 @@ async def scrape_url(url: str, user_id = None, db = None) -> tuple[str, str]:
                 try:
                     if google_type == "document":
                         export_url = f"https://docs.google.com/document/d/{google_file_id}/export?format=txt"
-                        exp_resp = await client.get(export_url)
+                        exp_resp = await client.get(export_url, timeout=15.0)
                         if exp_resp.status_code == 200:
                             content_text = exp_resp.text
                     elif google_type == "spreadsheet":
                         export_url = f"https://docs.google.com/spreadsheets/d/{google_file_id}/export?format=csv"
-                        exp_resp = await client.get(export_url)
+                        exp_resp = await client.get(export_url, timeout=15.0)
                         if exp_resp.status_code == 200:
                             content_text = exp_resp.text
                     elif google_type == "presentation":
                         export_url = f"https://docs.google.com/presentation/d/{google_file_id}/export?format=txt"
-                        exp_resp = await client.get(export_url)
+                        exp_resp = await client.get(export_url, timeout=15.0)
                         if exp_resp.status_code == 200:
                             content_text = exp_resp.text
                     elif google_type == "file":
                         dl_url = f"https://drive.google.com/uc?id={google_file_id}&export=download"
-                        exp_resp = await client.get(dl_url)
+                        exp_resp = await client.get(dl_url, timeout=15.0)
                         if exp_resp.status_code == 200:
                             if exp_resp.content.startswith(b"%PDF"):
-                                import tempfile
                                 from backend.services.pdf_ingester import extract_pdf_text
-                                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                                    tmp.write(exp_resp.content)
-                                    tmp_path = tmp.name
+                                loop = asyncio.get_running_loop()
+                                tmp_path = await loop.run_in_executor(None, _write_temp_pdf_content, exp_resp.content)
                                 try:
                                     content_text = await extract_pdf_text(tmp_path)
                                 finally:
@@ -216,8 +245,10 @@ async def scrape_url(url: str, user_id = None, db = None) -> tuple[str, str]:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-            resp = await client.get(url, headers=headers)
+        from backend.services.http_client import get_http_client
+        client = get_http_client()
+        if True:
+            resp = await client.get(url, headers=headers, timeout=10.0, follow_redirects=True)
             
             # Check for private Google Drive redirect to login screen
             if "drive.google.com" in url.lower():
@@ -229,19 +260,9 @@ async def scrape_url(url: str, user_id = None, db = None) -> tuple[str, str]:
                 return url, url
             
             html = resp.text
-            soup = BeautifulSoup(html, "html.parser")
+            loop = asyncio.get_running_loop()
+            title, text = await loop.run_in_executor(None, _parse_url_html, html)
             
-            # Extract title
-            title = "Untitled Link"
-            if soup.title and soup.title.string:
-                title = soup.title.string.strip()
-            
-            # Clean up scripts, styles, and other metadata
-            for script_or_style in soup(["script", "style", "meta", "noscript", "header", "footer", "nav"]):
-                script_or_style.decompose()
-                
-            # Get text
-            text = soup.get_text(separator="\n")
             # Clean up whitespace
             lines = (line.strip() for line in text.splitlines())
             chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
@@ -257,7 +278,7 @@ async def scrape_url(url: str, user_id = None, db = None) -> tuple[str, str]:
         logger.error("Failed to scrape URL %s: %s", url, e)
         return url, url
 
-async def ingest_url(url: str, user_id: int, db: AsyncConnection) -> int:
+async def ingest_url(url: str, user_id: int, db: AsyncConnection, user_context: str | None = None) -> int:
     """
     Scrapes, encrypts, embeds, and saves URL content.
     Returns the inserted item's ID.
@@ -273,7 +294,10 @@ async def ingest_url(url: str, user_id: int, db: AsyncConnection) -> int:
     tags = ["url"]
     context_prompt = None
     try:
-        ai_res = await cascade.summarise(raw_text)
+        summarizer_input = raw_text
+        if user_context:
+            summarizer_input = f"[User's Note/Context: {user_context}]\n" + raw_text
+        ai_res = await cascade.summarise(summarizer_input)
         summary = ai_res.get("summary") or summary
         tags = ai_res.get("tags") or tags
         context_prompt = ai_res.get("context_prompt")

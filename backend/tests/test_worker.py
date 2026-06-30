@@ -40,6 +40,14 @@ class MockCursor:
             return (b"gAAAAAB...", "Mock Voice Summary")
         return None
 
+    async def fetchall(self):
+        query = self.executed[-1][0].lower() if self.executed else ""
+        if "select id, title, summary, tags, embedding" in query:
+            # mock embedding string value with 384 dimensions
+            mock_emb_str = "[" + ",".join(["0.1"]*384) + "]"
+            return [(101, "Mock Page Title", "Mock Summary", ["tech"], mock_emb_str, "url", "https://example.com", None)]
+        return []
+
 class MockConnection:
     def __init__(self):
         self.cursor_inst = MockCursor()
@@ -330,3 +338,48 @@ async def test_process_task_failure_fallback(monkeypatch):
     mock_failure_msg.assert_called_once_with("7732257445", "text")
     # Redis graph cache should not be deleted on total ingestion failure
     mock_redis.delete.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_process_batch_with_deferred_replies(monkeypatch):
+    """Verify that process_batch_task correctly pulls and applies deferred replies from Redis."""
+    mock_pool = MockPool()
+    monkeypatch.setattr("backend.worker._pool", mock_pool)
+    
+    mock_redis = mock.AsyncMock()
+    # Mock lrange to return a deferred context note reply
+    deferred_reply = json.dumps({"text": "Delicious Noida burger concept", "message_id": 124})
+    mock_redis.lrange.side_effect = lambda key, start, stop: [deferred_reply] if "deferred_replies" in key else []
+    monkeypatch.setattr("backend.worker.redis", mock_redis)
+    
+    monkeypatch.setattr("backend.worker.upsert_user", mock.AsyncMock(return_value=42))
+    
+    # Mock process_single_item to return a fake saved item id
+    monkeypatch.setattr("backend.worker.process_single_item", mock.AsyncMock(return_value=(101, True)))
+    
+    mock_send = mock.AsyncMock()
+    monkeypatch.setattr("backend.worker.send_telegram_message", mock_send)
+    monkeypatch.setattr("backend.worker.check_user_milestones", mock.AsyncMock())
+    
+    # Pushing batch task
+    task = {
+        "is_batch": True,
+        "chat_id": "7732257445",
+        "update_id": "9999",
+        "items": [
+            {
+                "content_type": "url",
+                "text": "https://www.instagram.com/reel/abc/",
+                "message_id": 122
+            }
+        ]
+    }
+    
+    from backend.worker import process_batch_task
+    await process_batch_task(task, 42, "7732257445")
+    
+    # Verify that lrange was checked for the user's message_id
+    mock_redis.lrange.assert_called_with("deferred_replies:7732257445:122", 0, -1)
+    
+    # Verify that the deferred reply key was deleted
+    mock_redis.delete.assert_any_call("deferred_replies:7732257445:122")

@@ -116,6 +116,16 @@ async def auth_telegram(
         
     user_id = await upsert_user(telegram_chat_id, db)
     
+    # Save first_name and username
+    first_name = params.get("first_name")
+    username = params.get("username")
+    async with db.cursor() as cur:
+        await cur.execute(
+            "UPDATE users SET first_name = %s, username = %s WHERE id = %s;",
+            (first_name, username, user_id)
+        )
+        await db.commit()
+    
     # Issue JWT: {sub: users.id, chat_id: telegram_chat_id, exp: +7 days}
     payload = {
         "sub": str(user_id),

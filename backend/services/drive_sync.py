@@ -65,9 +65,10 @@ async def _send_telegram_message(chat_id: str, text: str) -> None:
         "text": text
     }
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(url, json=payload)
-            resp.raise_for_status()
+        from backend.services.http_client import get_http_client
+        client = get_http_client()
+        resp = await client.post(url, json=payload, timeout=10.0)
+        resp.raise_for_status()
     except Exception as e:
         err_msg = str(e).replace(settings.TELEGRAM_BOT_TOKEN, "[REDACTED_BOT_TOKEN]")
         logger.error("Failed to send Telegram message to chat %s: %s", chat_id, err_msg)
@@ -107,7 +108,9 @@ async def sync_user_to_drive(user_id: int, db: psycopg.AsyncConnection) -> None:
 
     try:
         # 2. Exchange refresh token for access token using Google's OAuth token endpoint
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        from backend.services.http_client import get_http_client
+        client = get_http_client()
+        if True:
             try:
                 token_resp = await client.post(
                     "https://oauth2.googleapis.com/token",

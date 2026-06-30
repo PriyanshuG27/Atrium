@@ -41,11 +41,14 @@ export default function ArchiveCard({ item, isActive, opacity, blur, onClick }) 
   const excerpt = summary.length > 160 ? summary.slice(0, 160) + '\u2026' : summary;
   const tags = item.tags || [];
 
+  const rawTitle = item.title || item.summary || 'Untitled Signal';
+  const displayTitle = rawTitle.length > 80 ? rawTitle.slice(0, 77) + '\u2026' : rawTitle;
+
   return (
     <div ref={cardRef} onClick={onClick} style={{ width: 'min(480px, 90vw)', minHeight: 280, background: 'rgba(17,15,20,0.88)', border: `1px solid rgba(207,163,101,${isActive ? 0.18 : 0.06})`, borderRadius: 16, padding: '2rem 2rem 1.5rem', cursor: isActive ? 'pointer' : 'default', opacity, filter: blur > 0 ? `blur(${blur}px)` : 'none', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', transition: 'transform 0.25s cubic-bezier(0.16,1,0.3,1), opacity 0.3s ease', position: 'relative', overflow: 'hidden', userSelect: isActive ? 'text' : 'none', boxShadow: isActive ? '0 0 60px rgba(207,163,101,0.08), 0 24px 64px rgba(0,0,0,0.5)' : '0 12px 32px rgba(0,0,0,0.4)' }}>
       <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', fontFamily: 'var(--font-display)', fontSize: 'clamp(40px,12vw,80px)', fontWeight: 700, color: 'rgba(207,163,101,0.05)', whiteSpace: 'nowrap', pointerEvents: 'none', letterSpacing: '-0.04em', lineHeight: 1 }}>{formatDate(item.created_at)}</div>
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg,${sourceColor}44,transparent)`, borderRadius: '16px 16px 0 0' }} />
-      <h2 style={{ fontFamily: 'var(--font-display)', fontSize: 'clamp(20px,3vw,36px)', fontWeight: 600, color: 'var(--text-signal)', lineHeight: 1.15, letterSpacing: '-0.02em', marginBottom: '0.875rem', position: 'relative', zIndex: 1 }}>{item.title || item.summary?.slice(0, 80) || 'Untitled Signal'}</h2>
+      <h2 style={{ fontFamily: 'var(--font-display)', fontSize: 'clamp(20px,3vw,36px)', fontWeight: 600, color: 'var(--text-signal)', lineHeight: 1.15, letterSpacing: '-0.02em', marginBottom: '0.875rem', position: 'relative', zIndex: 1, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{displayTitle}</h2>
       {excerpt && <p style={{ fontFamily: 'var(--font-body)', fontSize: 14, color: 'var(--text-muted)', lineHeight: 1.65, marginBottom: '1.25rem', position: 'relative', zIndex: 1 }}>{excerpt}</p>}
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', position: 'relative', zIndex: 1, borderTop: '1px solid rgba(244,239,235,0.06)', paddingTop: '0.875rem' }}>
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: sourceColor, letterSpacing: '0.08em', textTransform: 'uppercase', background: `${sourceColor}18`, padding: '2px 8px', borderRadius: 4 }}>{item.source_type || 'signal'}</span>

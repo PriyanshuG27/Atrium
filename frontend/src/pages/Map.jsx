@@ -373,11 +373,24 @@ export default function MapPage() {
   useEffect(() => { fetchData(); }, [fetchData]);
   useEffect(() => {
     const h = () => fetchData();
+    window.dispatchEvent(new CustomEvent('online-refetch'));
     window.addEventListener('online-refetch', h);
     return () => window.removeEventListener('online-refetch', h);
   }, [fetchData]);
 
+  // Sync selectedNode state with updated item in items list (for real-time updates)
+  useEffect(() => {
+    if (!selectedNode) return;
+    const updated = items.find(item => String(item.id) === String(selectedNode.id));
+    if (updated) {
+      if (updated.context_note !== selectedNode.context_note || JSON.stringify(updated.tags) !== JSON.stringify(selectedNode.tags)) {
+        setSelectedNode(updated);
+      }
+    }
+  }, [items, selectedNode]);
+
   const handleNodeClick = useCallback((node) => {
+    console.log('[Map] Node clicked:', node);
     if (node.type === 'hub') { 
       // T4.3: toggle burst expansion on hub click
       setBurstHubId(prev => prev === node.id ? null : node.id);
@@ -385,7 +398,9 @@ export default function MapPage() {
       setSelectedNode(null); 
     } else { 
       setBurstHubId(null);
-      setSelectedNode(items.find(it => it.id === node.id) || node); 
+      const foundItem = items.find(it => it.id === node.id) || node;
+      console.log('[Map] Setting selected node:', foundItem);
+      setSelectedNode(foundItem); 
       setSelectedHub(null); 
     }
   }, [items]);
@@ -1099,7 +1114,14 @@ export default function MapPage() {
       </div>
 
       {/* Floating Info Panels */}
-      {selectedNode && <NodePanel node={selectedNode} onClose={() => setSelectedNode(null)} />}
+      {selectedNode && (
+        <NodePanel
+          node={selectedNode}
+          activeCandidates={activeCandidates}
+          activeNodes={graphNodes}
+          onClose={() => setSelectedNode(null)}
+        />
+      )}
       {selectedHub  && <HubPanel  hub={selectedHub} memberItems={hubMemberItems} onItemSelect={handleItemSelect} onClose={() => setSelectedHub(null)} />}
 
       {/* Error state */}

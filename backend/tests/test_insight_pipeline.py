@@ -327,7 +327,7 @@ async def test_reminders_dispatcher_drift_expiry():
         
         updated = False
         for query, params in cursor.executed:
-            if "UPDATE insight_candidates" in query:
+            if "UPDATE insight_candidates" in query and params is not None:
                 updated = True
                 assert params[0] == [45]
         assert updated

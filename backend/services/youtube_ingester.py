@@ -7,6 +7,7 @@ Service layer for YouTube URL ingestion in Recall.
 import os
 import uuid
 import logging
+import asyncio
 import yt_dlp
 from psycopg import AsyncConnection
 
@@ -16,7 +17,15 @@ from backend.services.ai_cascade import AICascade
 
 logger = logging.getLogger(__name__)
 
-async def ingest_youtube(url: str, user_id: int, db: AsyncConnection) -> int:
+def _sync_yt_dlp_extract_info(url: str, ydl_opts: dict) -> dict | None:
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        return ydl.extract_info(url, download=False)
+
+def _sync_yt_dlp_download(url: str, ydl_opts: dict) -> None:
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([url])
+
+async def ingest_youtube(url: str, user_id: int, db: AsyncConnection, user_context: str = None) -> int:
     """
     Ingests a YouTube URL.
     Attempts to download the audio track via yt-dlp, transcribes using Whisper,
@@ -42,11 +51,11 @@ async def ingest_youtube(url: str, user_id: int, db: AsyncConnection) -> int:
             'no_warnings': True,
             'extract_flat': True,
         }
-        with yt_dlp.YoutubeDL(ydl_opts_meta) as ydl:
-            info = ydl.extract_info(url, download=False)
-            if info:
-                video_title = info.get("title") or "YouTube Video"
-                video_duration = info.get("duration") or 0
+        loop = asyncio.get_running_loop()
+        info = await loop.run_in_executor(None, _sync_yt_dlp_extract_info, url, ydl_opts_meta)
+        if info:
+            video_title = info.get("title") or "YouTube Video"
+            video_duration = info.get("duration") or 0
         logger.info("  [YouTube Ingestion] Metadata resolved. Title: '%s', Duration: %d seconds", video_title, video_duration)
     except Exception as meta_err:
         logger.warning("  [YouTube Ingestion] Metadata extraction failed: %s", meta_err)
@@ -67,8 +76,8 @@ async def ingest_youtube(url: str, user_id: int, db: AsyncConnection) -> int:
             'no_warnings': True,
         }
         try:
-            with yt_dlp.YoutubeDL(ydl_opts_dl) as ydl:
-                ydl.download([url])
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, _sync_yt_dlp_download, url, ydl_opts_dl)
                 
             # Find the downloaded file
             for f in os.listdir(tmp_dir):
@@ -159,9 +168,11 @@ async def ingest_youtube(url: str, user_id: int, db: AsyncConnection) -> int:
     # 5. If we have a transcript (from audio or captions), process and save it
     if transcript:
         try:
-            logger.info("[YouTube Ingestion] Running AI Cascade summarizer & tag generator...")
+            summarizer_input = transcript
+            if user_context:
+                summarizer_input = f"[User's Note/Context: {user_context}]\n" + transcript
             cascade = AICascade()
-            ai_res = await cascade.summarise(transcript)
+            ai_res = await cascade.summarise(summarizer_input)
             summary = ai_res.get("summary") or f"Summary of video: {transcript[:200]}..."
             tags = ai_res.get("tags") or ["youtube"]
             context_prompt = ai_res.get("context_prompt")
@@ -344,14 +355,14 @@ async def _scrape_instagram_meta(url: str) -> tuple[str | None, str | None]:
     return None, None
 
 
-async def ingest_instagram(url: str, user_id: int, db: AsyncConnection) -> int:
+async def ingest_instagram(url: str, user_id: int, db: AsyncConnection, user_context: str = None) -> int:
 
     """
     Ingests an Instagram URL (Reel / Post).
 
     Pipeline:
-      1. Cobalt (self-hosted) → get direct download URL → download audio
-      2. yt-dlp direct (no proxies)
+      1. yt-dlp direct (with cookies / browser settings)
+      2. Cobalt fallback
       3. Bookmark fallback
     """
     import random
@@ -369,77 +380,121 @@ async def ingest_instagram(url: str, user_id: int, db: AsyncConnection) -> int:
     audio_path: str | None = None
 
     # ------------------------------------------------------------------ #
-    # Tier 1: Cobalt                                                       #
+    # Tier 1: yt-dlp direct (with cookies / browser settings)            #
     # ------------------------------------------------------------------ #
-    cobalt_url = getattr(settings, "COBALT_API_URL", None)
-    if cobalt_url:
-        logger.info("[Instagram Ingestion] Tier 1: Attempting download via self-hosted Cobalt...")
-        download_url = await _try_cobalt(url, cobalt_url)
-        if download_url:
-            dest = os.path.join(tmp_dir, f"{uuid.uuid4()}.mp3")
-            ok = await _download_audio_from_url(download_url, dest)
-            if ok and os.path.exists(dest):
-                audio_path = dest
-                logger.info("[Instagram Ingestion] Tier 1 SUCCESS: Audio downloaded via Cobalt.")
-            else:
-                logger.warning("[Instagram Ingestion] Tier 1 WARNING: Cobalt URL resolved, but final audio stream download failed.")
-        else:
-            logger.warning("[Instagram Ingestion] Tier 1 FAILURE: Cobalt failed to resolve media URL.")
-    else:
-        logger.info("[Instagram Ingestion] Tier 1 SKIPPED: COBALT_API_URL environment variable is not configured.")
+    logger.info("[Instagram Ingestion] Tier 1: Attempting download via direct yt-dlp...")
+    temp_filename = str(uuid.uuid4())
+    temp_path_template = os.path.join(tmp_dir, temp_filename)
 
-    # ------------------------------------------------------------------ #
-    # Tier 2: yt-dlp direct (no proxies)                                  #
-    # ------------------------------------------------------------------ #
-    if not audio_path:
-        logger.info("[Instagram Ingestion] Tier 2: Attempting fallback download via direct yt-dlp...")
-        temp_filename = str(uuid.uuid4())
-        temp_path_template = os.path.join(tmp_dir, temp_filename)
-
-        # Optional: load cookies.json if operator placed one in backend/
-        cookies_json_path = os.path.join(backend_dir, "cookies.json")
-        temp_cookies_txt = os.path.join(tmp_dir, f"cookies_{uuid.uuid4()}.txt")
-        has_cookies = _convert_cookies_json_to_netscape(cookies_json_path, temp_cookies_txt)
-
-        if has_cookies:
-            logger.info("  [Instagram Ingestion] Found valid cookies.json. Loading Netscape cookies path: %s", temp_cookies_txt)
-        else:
-            logger.info("  [Instagram Ingestion] No cookies.json found. Proceeding with unauthenticated yt-dlp request.")
-
-        ydl_opts = {
-            "format": "bestaudio/best",
-            "outtmpl": temp_path_template + ".%(ext)s",
-            "quiet": True,
-            "no_warnings": True,
-            "http_headers": {
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                ),
-                "Accept-Language": "en-US,en;q=0.9",
-            },
-        }
-        if has_cookies:
-            ydl_opts["cookiefile"] = temp_cookies_txt
-
+    # 1. Try B64 Env Var Cookies
+    import base64
+    import tempfile
+    
+    ig_cookies_b64 = os.environ.get("IG_COOKIES_B64") or getattr(settings, "IG_COOKIES_B64", None)
+    temp_b64_cookies_path = None
+    has_b64_cookies = False
+    
+    if ig_cookies_b64:
         try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
-            for fname in os.listdir(tmp_dir):
-                if fname.startswith(temp_filename):
-                    audio_path = os.path.join(tmp_dir, fname)
-                    logger.info("[Instagram Ingestion] Tier 2 SUCCESS: Audio downloaded via direct yt-dlp: %s", audio_path)
-                    break
-        except Exception as dl_err:
-            logger.warning("[Instagram Ingestion] Tier 2 FAILURE: Direct yt-dlp download failed: %s", dl_err)
-        finally:
-            if os.path.exists(temp_cookies_txt):
+            cleaned_b64 = ig_cookies_b64.strip()
+            cookie_bytes = base64.b64decode(cleaned_b64)
+            fd, temp_b64_cookies_path = tempfile.mkstemp(suffix=".txt", prefix="ig_cookies_")
+            with os.fdopen(fd, "wb") as f:
+                f.write(cookie_bytes)
+            has_b64_cookies = True
+            logger.info("  [Instagram Ingestion] Found valid IG_COOKIES_B64 env variable. Decoding to Netscape format.")
+        except Exception as e:
+            logger.warning("  [Instagram Ingestion] Failed to decode IG_COOKIES_B64: %s", e)
+            if temp_b64_cookies_path and os.path.exists(temp_b64_cookies_path):
                 try:
-                    os.remove(temp_cookies_txt)
-                    logger.info("  [Instagram Ingestion] Cleaned up temporary Netscape cookies file.")
+                    os.remove(temp_b64_cookies_path)
                 except Exception:
                     pass
+                temp_b64_cookies_path = None
+
+    # 2. Try cookies.json on disk
+    cookies_json_path = os.path.join(backend_dir, "cookies.json")
+    temp_cookies_txt = os.path.join(tmp_dir, f"cookies_{uuid.uuid4()}.txt")
+    has_json_cookies = False
+    if not has_b64_cookies:
+        has_json_cookies = _convert_cookies_json_to_netscape(cookies_json_path, temp_cookies_txt)
+        if has_json_cookies:
+            logger.info("  [Instagram Ingestion] Found valid cookies.json on disk. Converting to Netscape format.")
+
+    ydl_opts = {
+        "format": "bestaudio/best",
+        "outtmpl": temp_path_template + ".%(ext)s",
+        "quiet": True,
+        "no_warnings": True,
+        "http_headers": {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+            "Accept-Language": "en-US,en;q=0.9",
+        },
+    }
+
+    if has_b64_cookies:
+        ydl_opts["cookiefile"] = temp_b64_cookies_path
+    elif has_json_cookies:
+        ydl_opts["cookiefile"] = temp_cookies_txt
+    else:
+        browser_for_cookies = getattr(settings, "BROWSER_FOR_COOKIES", None)
+        if browser_for_cookies:
+            logger.info("  [Instagram Ingestion] Fallback: loading cookies directly from browser: %s", browser_for_cookies)
+            ydl_opts["cookiesfrombrowser"] = (browser_for_cookies,)
+        else:
+            logger.info("  [Instagram Ingestion] Proceeding unauthenticated.")
+
+    try:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None, _sync_yt_dlp_download, url, ydl_opts
+        )
+        for fname in os.listdir(tmp_dir):
+            if fname.startswith(temp_filename):
+                audio_path = os.path.join(tmp_dir, fname)
+                logger.info("[Instagram Ingestion] Tier 1 SUCCESS: Audio downloaded via direct yt-dlp: %s", audio_path)
+                break
+    except Exception as dl_err:
+        logger.warning("[Instagram Ingestion] Tier 1 FAILURE: Direct yt-dlp download failed: %s", dl_err)
+    finally:
+        # Clean up temporary cookie files
+        if temp_b64_cookies_path and os.path.exists(temp_b64_cookies_path):
+            try:
+                os.remove(temp_b64_cookies_path)
+                logger.info("  [Instagram Ingestion] Cleaned up temporary base64 cookies file.")
+            except Exception:
+                pass
+        if os.path.exists(temp_cookies_txt):
+            try:
+                os.remove(temp_cookies_txt)
+                logger.info("  [Instagram Ingestion] Cleaned up temporary Netscape cookies file.")
+            except Exception:
+                pass
+
+    # ------------------------------------------------------------------ #
+    # Tier 2: Cobalt Fallback                                              #
+    # ------------------------------------------------------------------ #
+    if not audio_path:
+        cobalt_url = getattr(settings, "COBALT_API_URL", None)
+        if cobalt_url:
+            logger.info("[Instagram Ingestion] Tier 2: Attempting fallback download via self-hosted Cobalt...")
+            download_url = await _try_cobalt(url, cobalt_url)
+            if download_url:
+                dest = os.path.join(tmp_dir, f"{uuid.uuid4()}.mp3")
+                ok = await _download_audio_from_url(download_url, dest)
+                if ok and os.path.exists(dest):
+                    audio_path = dest
+                    logger.info("[Instagram Ingestion] Tier 2 SUCCESS: Audio downloaded via Cobalt.")
+                else:
+                    logger.warning("[Instagram Ingestion] Tier 2 WARNING: Cobalt URL resolved, but final audio stream download failed.")
+            else:
+                logger.warning("[Instagram Ingestion] Tier 2 FAILURE: Cobalt failed to resolve media URL.")
+        else:
+            logger.info("[Instagram Ingestion] Tier 2 SKIPPED: COBALT_API_URL environment variable is not configured.")
 
     # ------------------------------------------------------------------ #
     # Transcribe + save (Tiers 1 & 2 share the same processing block)     #
@@ -476,12 +531,14 @@ async def ingest_instagram(url: str, user_id: int, db: AsyncConnection) -> int:
             video_description = None
             try:
                 logger.info("[Instagram Ingestion] Extracting metadata title via yt-dlp...")
-                with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True}) as ydl:
-                    info = ydl.extract_info(url, download=False)
-                    if info:
-                        raw_title = info.get("title") or info.get("description") or ""
-                        video_title = (raw_title[:97] + "...") if len(raw_title) > 100 else raw_title or "Instagram Video"
-                        video_description = info.get("description")
+                loop = asyncio.get_running_loop()
+                info = await loop.run_in_executor(
+                    None, _sync_yt_dlp_extract_info, url, {"quiet": True, "no_warnings": True, "extract_flat": True}
+                )
+                if info:
+                    raw_title = info.get("title") or info.get("description") or ""
+                    video_title = (raw_title[:97] + "...") if len(raw_title) > 100 else raw_title or "Instagram Video"
+                    video_description = info.get("description")
                 logger.info("[Instagram Ingestion] Metadata extraction title resolved: '%s'", video_title)
             except Exception as meta_err:
                 logger.info("  [Instagram Ingestion] Metadata extract via yt-dlp failed, trying crawler fallback... Error: %s", meta_err)
@@ -497,6 +554,8 @@ async def ingest_instagram(url: str, user_id: int, db: AsyncConnection) -> int:
             cascade = AICascade()
             
             summarizer_input = ""
+            if user_context:
+                summarizer_input += f"[User's Note/Context: {user_context}]\n"
             if video_title and video_title != "Instagram Video":
                 summarizer_input += f"Video Title: {video_title}\n"
             if video_description:
@@ -549,6 +608,73 @@ async def ingest_instagram(url: str, user_id: int, db: AsyncConnection) -> int:
         except Exception as save_err:
             logger.error("[Instagram Ingestion] Database insertion or encryption failed: %s. Falling back to bookmark.", save_err)
 
+    if not transcript:
+        # Fallback metadata ingestion
+        logger.info("[Instagram Ingestion] Audio ingestion failed, trying metadata scraper fallback...")
+        try:
+            scraped_title, scraped_desc = await _scrape_instagram_meta(url)
+            if scraped_title or scraped_desc:
+                logger.info("[Instagram Ingestion] Scraped metadata fallback success. Title: '%s', Description length: %d", scraped_title, len(scraped_desc) if scraped_desc else 0)
+                
+                video_title = scraped_title or "Instagram Video"
+                video_description = scraped_desc
+                
+                logger.info("[Instagram Ingestion] Running AI Cascade summarizer & tag generator on scraped metadata...")
+                cascade = AICascade()
+                summarizer_input = (
+                     "[METADATA-ONLY FALLBACK: Audio/video transcription was unavailable. "
+                     "Do NOT hallucinate or assume any details of the video content. "
+                     "Summarize ONLY the provided video title and description/caption below. "
+                     "Explicitly state that the transcription was unavailable.]\n"
+                 )
+                if user_context:
+                    summarizer_input += f"[User's Note/Context: {user_context}]\n"
+                if video_title and video_title != "Instagram Video":
+                    summarizer_input += f"Video Title: {video_title}\n"
+                if video_description:
+                    summarizer_input += f"Video Description/Caption: {video_description}\n"
+                
+                ai_res = await cascade.summarise(summarizer_input)
+                summary = ai_res.get("summary") or f"Instagram Reel (Metadata): {video_description[:200] if video_description else ''}"
+                tags = ai_res.get("tags") or ["instagram", "reel"]
+                context_prompt = ai_res.get("context_prompt")
+                normalized_tags = [t.strip().lower() for t in tags if isinstance(t, str) and t.strip()][:5]
+                
+                # Now we need to save it!
+                raw_text = f"Instagram: {url}\nTitle: {video_title}\nDescription: {video_description or ''}"
+                embedding = await embed_text(raw_text)
+                encrypted_raw_text = encrypt(raw_text)
+                
+                if hasattr(db, "connection"):
+                    db_ctx = db.connection()
+                else:
+                    class DummyContext:
+                        async def __aenter__(self): return db
+                        async def __aexit__(self, *a): pass
+                    db_ctx = DummyContext()
+                    
+                async with db_ctx as conn:
+                    if hasattr(db, "connection"):
+                        await conn.execute("SET statement_timeout = '30s'")
+                    async with conn.cursor() as cur:
+                        await cur.execute(
+                            """
+                            INSERT INTO items (user_id, source_type, source_url, raw_text, summary, title, embedding, tags, context_prompt)
+                            VALUES (%s, 'url', %s, %s, %s, %s, %s::vector, %s, %s)
+                            RETURNING id;
+                            """,
+                            (user_id, url, encrypted_raw_text, summary, video_title, embedding, normalized_tags, context_prompt),
+                        )
+                        row = await cur.fetchone()
+                        if not row:
+                            raise RuntimeError("DB INSERT returned no ID.")
+                        item_id = row[0]
+                        await conn.commit()
+                logger.info("[Instagram Ingestion] SUCCESS (Metadata Fallback): Ingested Instagram Item ID=%d for User ID=%d", item_id, user_id)
+                return item_id
+        except Exception as e:
+            logger.error("[Instagram Ingestion] Metadata fallback failed: %s", e)
+
     # ------------------------------------------------------------------ #
     # Tier 3: Bookmark fallback                                            #
     # ------------------------------------------------------------------ #
@@ -556,6 +682,10 @@ async def ingest_instagram(url: str, user_id: int, db: AsyncConnection) -> int:
     val = 1.0 / (384 ** 0.5)
     mock_emb = [val] * 384
     encrypted_raw = encrypt(url)
+
+    fallback_summary = "Could not process this Instagram Reel. Saved as a placeholder bookmark."
+    if user_context:
+        fallback_summary = f"[User's Note/Context: {user_context}] " + fallback_summary
 
     if hasattr(db, "connection"):
         db_ctx = db.connection()
@@ -579,7 +709,7 @@ async def ingest_instagram(url: str, user_id: int, db: AsyncConnection) -> int:
                 """,
                 (
                     user_id, url, encrypted_raw,
-                    "Could not process this Instagram Reel. Saved as a placeholder bookmark.",
+                    fallback_summary,
                     "Bookmark: Instagram Video",
                     mock_emb,
                     ["bookmark", "instagram"]

@@ -59,11 +59,52 @@ def mock_open_dispatch(file, mode="r", *a, **kw):
     return io.StringIO("")
 
 
-# ─── Tests: Cobalt happy path ─────────────────────────────────────────────────
+# ─── Tests: Direct yt-dlp happy path (Tier 1) ───────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_ytdlp_direct_happy_path(monkeypatch, mock_ai, mock_settings_cobalt):
+    """Direct yt-dlp succeeds first (Tier 1) -> full item saved."""
+    monkeypatch.setattr("os.path.exists", lambda p: True)
+    monkeypatch.setattr("os.path.getsize", lambda p: 1024)
+    monkeypatch.setattr("os.remove", lambda p: None)
+
+    class MockYDL:
+        def __init__(self, opts=None): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+        def extract_info(self, url, download=False): return {"title": "Direct YTDL Reel", "duration": 30}
+        def download(self, urls): pass
+
+    monkeypatch.setattr("yt_dlp.YoutubeDL", MockYDL)
+    monkeypatch.setattr("os.listdir", lambda p: ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.mp3"])
+
+    conn = MockConnection()
+    with mock.patch("backend.services.youtube_ingester.open", side_effect=mock_open_dispatch):
+        item_id = await ingest_instagram("https://www.instagram.com/reel/abc/", 7, conn)
+
+    assert item_id == 202
+    q, params = conn.cursor_inst.executed[0]
+    assert "INSERT INTO items" in q
+    assert params[0] == 7
+    assert "Mocked summary" in params[3]
+    assert params[4] == "Direct YTDL Reel"
+
+
+# ─── Tests: Cobalt fallback (Tier 2) ───────────────────────────────────────────
 
 @pytest.mark.asyncio
 async def test_cobalt_happy_path(monkeypatch, mock_ai, mock_settings_cobalt):
-    """Cobalt resolves URL, audio downloads, transcription succeeds → full item saved."""
+    """Direct yt-dlp fails -> Cobalt fallback succeeds -> full item saved."""
+    # Force direct yt-dlp to fail so it falls back to Cobalt
+    class MockYDLFail:
+        def __init__(self, opts=None): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+        def extract_info(self, url, download=False): raise RuntimeError("direct blocked")
+        def download(self, urls): raise RuntimeError("direct blocked")
+
+    monkeypatch.setattr("yt_dlp.YoutubeDL", MockYDLFail)
+
     monkeypatch.setattr(
         "backend.services.youtube_ingester._try_cobalt",
         mock.AsyncMock(return_value="https://cdn.example.com/audio.mp3"),
@@ -76,15 +117,6 @@ async def test_cobalt_happy_path(monkeypatch, mock_ai, mock_settings_cobalt):
     monkeypatch.setattr("os.path.getsize", lambda p: 1024)
     monkeypatch.setattr("os.remove", lambda p: None)
 
-    class MockYDL:
-        def __init__(self, opts=None): pass
-        def __enter__(self): return self
-        def __exit__(self, *a): pass
-        def extract_info(self, url, download=False): return {"title": "Cool Reel", "duration": 30}
-        def download(self, urls): pass
-
-    monkeypatch.setattr("yt_dlp.YoutubeDL", MockYDL)
-
     conn = MockConnection()
     with mock.patch("backend.services.youtube_ingester.open", side_effect=mock_open_dispatch):
         item_id = await ingest_instagram("https://www.instagram.com/reel/abc/", 7, conn)
@@ -92,40 +124,6 @@ async def test_cobalt_happy_path(monkeypatch, mock_ai, mock_settings_cobalt):
     assert item_id == 202
     q, params = conn.cursor_inst.executed[0]
     assert "INSERT INTO items" in q
-    assert params[0] == 7
-    assert "Mocked summary" in params[3]
-    assert params[4] == "Cool Reel"
-
-
-# ─── Tests: Cobalt fails → yt-dlp fallback ───────────────────────────────────
-
-@pytest.mark.asyncio
-async def test_cobalt_fails_ytdlp_succeeds(monkeypatch, mock_ai, mock_settings_cobalt):
-    """Cobalt returns None → yt-dlp direct download succeeds."""
-    monkeypatch.setattr(
-        "backend.services.youtube_ingester._try_cobalt",
-        mock.AsyncMock(return_value=None),
-    )
-    monkeypatch.setattr("os.path.exists", lambda p: True)
-    monkeypatch.setattr("os.path.getsize", lambda p: 1024)
-    monkeypatch.setattr("os.remove", lambda p: None)
-
-    class MockYDL:
-        def __init__(self, opts=None): pass
-        def __enter__(self): return self
-        def __exit__(self, *a): pass
-        def extract_info(self, url, download=False): return {"title": "Fallback Reel", "duration": 30}
-        def download(self, urls): pass
-
-    monkeypatch.setattr("yt_dlp.YoutubeDL", MockYDL)
-    monkeypatch.setattr("os.listdir", lambda p: ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.mp3"])
-
-    conn = MockConnection()
-    with mock.patch("backend.services.youtube_ingester.open", side_effect=mock_open_dispatch):
-        item_id = await ingest_instagram("https://www.instagram.com/reel/abc/", 7, conn)
-
-    assert item_id == 202
-    q, params = conn.cursor_inst.executed[0]
     assert "Mocked summary" in params[3]
 
 
@@ -149,6 +147,10 @@ async def test_all_tiers_fail_bookmark(monkeypatch, mock_ai, mock_settings_cobal
         def download(self, urls): raise RuntimeError("blocked")
 
     monkeypatch.setattr("yt_dlp.YoutubeDL", MockYDL)
+    monkeypatch.setattr(
+        "backend.services.youtube_ingester._scrape_instagram_meta",
+        mock.AsyncMock(return_value=(None, None)),
+    )
 
     conn = MockConnection()
     item_id = await ingest_instagram("https://www.instagram.com/reel/abc/", 7, conn)
@@ -157,6 +159,42 @@ async def test_all_tiers_fail_bookmark(monkeypatch, mock_ai, mock_settings_cobal
     q, params = conn.cursor_inst.executed[0]
     assert "Could not process this Instagram Reel" in params[3]
     assert "Bookmark: Instagram Video" == params[4]
+
+
+@pytest.mark.asyncio
+async def test_all_tiers_fail_metadata_fallback_succeeds(monkeypatch, mock_ai, mock_settings_cobalt):
+    """Cobalt + yt-dlp fail, but metadata scraping succeeds -> item saved via metadata summary."""
+    monkeypatch.setattr(
+        "backend.services.youtube_ingester._try_cobalt",
+        mock.AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr("os.path.exists", lambda p: False)
+    monkeypatch.setattr("os.remove", lambda p: None)
+
+    class MockYDL:
+        def __init__(self, opts=None): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+        def extract_info(self, url, download=False): raise RuntimeError("blocked")
+        def download(self, urls): raise RuntimeError("blocked")
+
+    monkeypatch.setattr("yt_dlp.YoutubeDL", MockYDL)
+    
+    # Mock metadata scraping to return simulated caption/title
+    monkeypatch.setattr(
+        "backend.services.youtube_ingester._scrape_instagram_meta",
+        mock.AsyncMock(return_value=("Scraped Title", "Scraped Caption")),
+    )
+
+    conn = MockConnection()
+    item_id = await ingest_instagram("https://www.instagram.com/reel/abc/", 7, conn)
+
+    assert item_id == 202
+    q, params = conn.cursor_inst.executed[0]
+    assert "INSERT INTO items" in q
+    assert params[0] == 7
+    assert "Mocked summary" in params[3]  # summary from mock_ai
+    assert params[4] == "Scraped Title"   # title from metadata fallback
 
 
 # ─── Tests: no Cobalt URL configured ─────────────────────────────────────────

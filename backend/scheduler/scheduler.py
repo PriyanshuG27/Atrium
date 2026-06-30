@@ -4,7 +4,7 @@ import networkx as nx
 import community as community_louvain
 from typing import List, Dict, Any, Optional
 import datetime
-import sys
+import sys, asyncio
 import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -84,11 +84,18 @@ async def _perform_db_hubs_swap(cur, user_id: int, hubs_to_insert: List[Dict[str
         centroid_str = "[" + ",".join(str(float(x)) for x in hub["centroid"]) + "]"
         await cur.execute(
             """
-            INSERT INTO semantic_hubs (user_id, label, centroid, member_ids)
-            VALUES (%s, %s, %s::vector, %s)
+            INSERT INTO semantic_hubs (user_id, label, centroid, member_ids, last_active_at, streak_days)
+            VALUES (%s, %s, %s::vector, %s, %s, %s)
             RETURNING id;
             """,
-            (user_id, hub["label"], centroid_str, hub["member_ids"])
+            (
+                user_id,
+                hub["label"],
+                centroid_str,
+                hub["member_ids"],
+                hub["last_active_at"],
+                hub["streak_days"]
+            )
         )
         row = await cur.fetchone()
         hub["id"] = row[0] if row else None
@@ -134,6 +141,16 @@ async def reminders_dispatcher() -> None:
                     for c_id in drift_cand_ids:
                         await redis.zrem("reminders:active", f"drift:{c_id}")
                         logger.info("Expired drift candidate %d in DB and Redis", c_id)
+
+                # 1b. Sweep expired near-misses (older than 72 hours)
+                await cur.execute(
+                    """
+                    UPDATE insight_candidates 
+                    SET status = 'expired' 
+                    WHERE bucket = 'near_miss' AND status = 'pending' AND created_at < NOW() - INTERVAL '72 hours';
+                    """
+                )
+                await conn.commit()
 
                 # 2. Process reminders
                 if due_ids:
@@ -263,6 +280,33 @@ async def scan_insight_candidates_for_user(user_id: int, pool) -> None:
     except Exception as scan_err:
         logger.error("Failed to run nightly scan for user %d: %s", user_id, scan_err)
 
+def calculate_hub_streak(item_dates, timezone_offset_minutes: int) -> int:
+    if not item_dates:
+        return 0
+    from datetime import datetime, timezone, timedelta
+    tz = timezone(timedelta(minutes=timezone_offset_minutes))
+    
+    sanitized_dates = []
+    for dt in item_dates:
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        sanitized_dates.append(dt)
+        
+    local_dates = sorted(list({dt.astimezone(tz).date() for dt in sanitized_dates}), reverse=True)
+    today = datetime.now(tz).date()
+    yesterday = today - timedelta(days=1)
+    
+    if local_dates[0] not in (today, yesterday):
+        return 0
+        
+    streak = 1
+    for i in range(len(local_dates) - 1):
+        if local_dates[i] - local_dates[i+1] == timedelta(days=1):
+            streak += 1
+        else:
+            break
+    return streak
+
 
 async def louvain_clustering() -> None:
     """
@@ -278,201 +322,845 @@ async def louvain_clustering() -> None:
         return
 
     # 1. Fetch all users
-    users = []
+    users_info = {}
     try:
         async with pool.connection() as conn:
             async with conn.cursor() as cur:
-                await cur.execute("SELECT id FROM users")
-                users = [row[0] for row in await cur.fetchall()]
+                await cur.execute("SELECT id, timezone_offset FROM users")
+                users_rows = await cur.fetchall()
+                users_info = {row[0]: (row[1] if len(row) > 1 else 0) for row in users_rows}
     except Exception as e:
         logger.error("Failed to fetch users in Louvain job: %s", e)
         return
 
+    users = list(users_info.keys())
     ai_cascade = AICascade()
     threshold = 3 if settings.ENV == "test" else 10
+    sem = asyncio.Semaphore(3)  # Caps concurrent AI tasks as per security/concurrency guidelines
 
-    for user_id in users:
-        try:
-            # Check number of new items since previous run
-            async with pool.connection() as conn:
-                async with conn.cursor() as cur:
-                    await cur.execute(
-                        """
-                        SELECT COUNT(*) 
-                        FROM items 
-                        WHERE user_id = %s 
-                          AND id NOT IN (
-                            SELECT DISTINCT unnest(member_ids) 
-                            FROM semantic_hubs 
-                            WHERE user_id = %s
-                          )
-                        """,
-                        (user_id, user_id)
+    async def process_user_louvain(user_id: int) -> None:
+        async with sem:
+            try:
+                # Check number of new items since previous run
+                async with pool.connection() as conn:
+                    async with conn.cursor() as cur:
+                        await cur.execute(
+                            """
+                            SELECT COUNT(*) 
+                            FROM items 
+                            WHERE user_id = %s 
+                              AND id NOT IN (
+                                SELECT DISTINCT unnest(member_ids) 
+                                FROM semantic_hubs 
+                                WHERE user_id = %s
+                              )
+                            """,
+                            (user_id, user_id)
+                        )
+                        row = await cur.fetchone()
+                        if row is not None:
+                            new_items_count = row[0]
+                        else:
+                            new_items_count = threshold  # Fallback for tests
+                
+                if new_items_count < threshold:
+                    logger.info(
+                        "User %s has %d new items (threshold is %d), skipping clustering.",
+                        user_id, new_items_count, threshold
                     )
-                    row = await cur.fetchone()
-                    if row is not None:
-                        new_items_count = row[0]
+                    return
+
+                logger.info("Running Louvain clustering for user %s", user_id)
+                
+                # Fetch user items
+                async with pool.connection() as conn:
+                    async with conn.cursor() as cur:
+                        await cur.execute(
+                            "SELECT id, embedding, summary, title, created_at FROM items WHERE user_id = %s",
+                            (user_id,)
+                        )
+                        item_rows = await cur.fetchall()
+
+                if len(item_rows) < 3:
+                    logger.info("User %s has < 3 items, skipping clustering.", user_id)
+                    return
+
+                # Parse embeddings, summaries, and titles
+                embeddings = {}
+                summaries = {}
+                titles = {}
+                item_created_ats = {}
+                for row in item_rows:
+                    item_id = row[0]
+                    emb_val = row[1]
+                    summary = row[2]
+                    title = row[3] if len(row) > 3 else f"Item {item_id}"
+                    created_at = row[4] if len(row) > 4 else None
+
+                    emb = parse_vector(emb_val)
+                    if emb and len(emb) == 384:
+                        embeddings[item_id] = np.array(emb)
+                        summaries[item_id] = summary or ""
+                        titles[item_id] = title or "Untitled"
+                        if created_at:
+                            item_created_ats[item_id] = created_at
+
+                if len(embeddings) < 3:
+                    logger.info("User %s has < 3 items with valid 384-dim embeddings, skipping.", user_id)
+                    return
+
+                # Normalize embeddings for cosine similarity calculation
+                normalized_embeddings = {}
+                for item_id, emb in embeddings.items():
+                    norm = np.linalg.norm(emb)
+                    if norm > 0:
+                        normalized_embeddings[item_id] = emb / norm
                     else:
-                        new_items_count = threshold  # Mock fallback to bypass threshold check in test
-            
-            if new_items_count < threshold:
-                logger.info(
-                    "User %s has %d new items (threshold is %d), skipping clustering.",
-                    user_id, new_items_count, threshold
-                )
-                continue
+                        normalized_embeddings[item_id] = emb
 
-            logger.info("Running Louvain clustering for user %s", user_id)
-            
-            # Fetch user items
-            async with pool.connection() as conn:
-                async with conn.cursor() as cur:
-                    await cur.execute(
-                        "SELECT id, embedding, summary, title FROM items WHERE user_id = %s",
-                        (user_id,)
-                    )
-                    item_rows = await cur.fetchall()
+                # Build NetworkX graph
+                G = nx.Graph()
+                G.add_nodes_from(embeddings.keys())
 
-            if len(item_rows) < 3:
-                logger.info("User %s has < 3 items, skipping clustering.", user_id)
-                continue
-
-            # Parse embeddings, summaries, and titles
-            embeddings = {}
-            summaries = {}
-            titles = {}
-            for row in item_rows:
-                item_id = row[0]
-                emb_val = row[1]
-                summary = row[2]
-                title = row[3] if len(row) > 3 else f"Item {item_id}"
-
-                emb = parse_vector(emb_val)
-                if emb and len(emb) == 384:
-                    embeddings[item_id] = np.array(emb)
-                    summaries[item_id] = summary or ""
-                    titles[item_id] = title or "Untitled"
-
-            if len(embeddings) < 3:
-                logger.info("User %s has < 3 items with valid 384-dim embeddings, skipping.", user_id)
-                continue
-
-            # Normalize embeddings for cosine similarity calculation
-            normalized_embeddings = {}
-            for item_id, emb in embeddings.items():
-                norm = np.linalg.norm(emb)
-                if norm > 0:
-                    normalized_embeddings[item_id] = emb / norm
-                else:
-                    normalized_embeddings[item_id] = emb
-
-            # Build NetworkX graph
-            G = nx.Graph()
-            G.add_nodes_from(embeddings.keys())
-
-            item_ids = list(normalized_embeddings.keys())
-            for idx, id1 in enumerate(item_ids):
-                emb1 = normalized_embeddings[id1]
-                for id2 in item_ids[idx + 1:]:
-                    emb2 = normalized_embeddings[id2]
-                    sim = float(np.dot(emb1, emb2))
-                    if sim > 0.75:
+                item_ids = list(normalized_embeddings.keys())
+                num_items = len(item_ids)
+                if num_items >= 3:
+                    # Stack all embeddings into an (N, 384) matrix
+                    matrix = np.array([normalized_embeddings[item_id] for item_id in item_ids])
+                    # Compute (N, N) similarity matrix via matrix multiplication
+                    similarity_matrix = np.dot(matrix, matrix.T)
+                    # Find indices of upper triangle elements above 0.75
+                    # k=1 ensures we exclude the main diagonal (self-similarity) and avoid duplicate pairs
+                    triu_indices = np.triu_indices(num_items, k=1)
+                    similarities = similarity_matrix[triu_indices]
+                    above_threshold = np.where(similarities > 0.75)[0]
+                    for idx in above_threshold:
+                        i = triu_indices[0][idx]
+                        j = triu_indices[1][idx]
+                        id1 = item_ids[i]
+                        id2 = item_ids[j]
+                        sim = float(similarities[idx])
                         G.add_edge(id1, id2, weight=sim)
 
-            # Partition using python-louvain
-            partition = community_louvain.best_partition(G)
+                # Partition using python-louvain
+                partition = community_louvain.best_partition(G)
 
-            # Group items by community ID
-            community_groups = {}
-            for item_id, comm_id in partition.items():
-                community_groups.setdefault(comm_id, []).append(item_id)
+                # Group items by community ID
+                community_groups = {}
+                for item_id, comm_id in partition.items():
+                    community_groups.setdefault(comm_id, []).append(item_id)
 
-            hubs_to_insert = []
-            for comm_id, member_ids in community_groups.items():
-                if len(member_ids) < 3:
-                    continue  # Only create hubs for communities with >= 3 members
+                hubs_to_insert = []
+                for comm_id, member_ids in community_groups.items():
+                    if len(member_ids) < 3:
+                        continue  # Only create hubs for communities with >= 3 members
 
-                # Compute centroid (mean of all member embeddings)
-                member_embs = [embeddings[mid] for mid in member_ids]
-                centroid = np.mean(member_embs, axis=0).tolist()
+                    # Compute centroid (mean of all member embeddings)
+                    member_embs = [embeddings[mid] for mid in member_ids]
+                    centroid = np.mean(member_embs, axis=0).tolist()
 
-                # Generate label via AI cascade summarizer
-                member_summaries = [summaries[mid] for mid in member_ids if summaries.get(mid)]
-                member_summaries = member_summaries[:5]
-                community_summaries_joined = "\n---\n".join(member_summaries)
-                
-                if len(community_summaries_joined) > 1500:
-                    community_summaries_joined = community_summaries_joined[:1500] + "..."
+                    # Generate label via AI cascade summarizer
+                    member_summaries = [summaries[mid] for mid in member_ids if summaries.get(mid)]
+                    member_summaries = member_summaries[:5]
+                    community_summaries_joined = "\n---\n".join(member_summaries)
+                    
+                    if len(community_summaries_joined) > 1500:
+                        community_summaries_joined = community_summaries_joined[:1500] + "..."
 
-                try:
-                    label = await ai_cascade.summarise(community_summaries_joined, task="label")
-                    # Truncate to 4 words or less
-                    words = label.split()
-                    if len(words) > 4:
-                        label = " ".join(words[:4])
-                except Exception as ex:
-                    logger.error("Failed to generate label for community %s: %s", comm_id, ex)
-                    # Safe fallback label using the first member's title
-                    first_member_id = member_ids[0]
-                    first_member_title = titles.get(first_member_id, "Untitled")
-                    words = first_member_title.split()
-                    if len(words) > 4:
-                        label = " ".join(words[:4])
+                    try:
+                        label = await ai_cascade.summarise(community_summaries_joined, task="label")
+                        # Truncate to 4 words or less
+                        words = label.split()
+                        if len(words) > 4:
+                            label = " ".join(words[:4])
+                    except Exception as ex:
+                        logger.error("Failed to generate label for community %s: %s", comm_id, ex)
+                        # Safe fallback label using the first member's title
+                        first_member_id = member_ids[0]
+                        first_member_title = titles.get(first_member_id, "Untitled")
+                        words = first_member_title.split()
+                        if len(words) > 4:
+                            label = " ".join(words[:4])
+                        else:
+                            label = first_member_title
+
+                    # Compute last_active_at and streak_days
+                    member_dates = [item_created_ats[mid] for mid in member_ids if mid in item_created_ats]
+                    from datetime import datetime, timezone
+                    last_active_at = max(member_dates) if member_dates else datetime.now(timezone.utc)
+                    user_timezone_offset = users_info.get(user_id, 0)
+                    streak_days = calculate_hub_streak(member_dates, user_timezone_offset)
+
+                    hubs_to_insert.append({
+                        "label": label,
+                        "centroid": centroid,
+                        "member_ids": member_ids,
+                        "last_active_at": last_active_at,
+                        "streak_days": streak_days
+                    })
+
+                # Save hubs to DB in a single transaction (DELETE old, INSERT new)
+                async with pool.connection() as conn:
+                    if hasattr(conn, "transaction"):
+                        async with conn.transaction():
+                            async with conn.cursor() as cur:
+                                await _perform_db_hubs_swap(cur, user_id, hubs_to_insert)
                     else:
-                        label = first_member_title
-
-                hubs_to_insert.append({
-                    "label": label,
-                    "centroid": centroid,
-                    "member_ids": member_ids
-                })
-
-            # Save hubs to DB in a single transaction (DELETE old, INSERT new)
-            async with pool.connection() as conn:
-                if hasattr(conn, "transaction"):
-                    async with conn.transaction():
                         async with conn.cursor() as cur:
                             await _perform_db_hubs_swap(cur, user_id, hubs_to_insert)
+                            await conn.commit()
+
+                # Invalidate Redis graph cache
+                cache_key = f"graph:{user_id}"
+                try:
+                    await redis.delete(cache_key)
+                except Exception as e:
+                    logger.warning("Failed to invalidate Redis graph cache for user %s: %s", user_id, e)
+
+                # Broadcast WS message
+                try:
+                    from backend.routes.websocket import broadcast
+                    hubs_list = [
+                        {
+                            "id": str(hub["id"]),
+                            "label": hub["label"],
+                            "member_ids": [int(x) for x in hub["member_ids"]]
+                        }
+                        for hub in hubs_to_insert if hub.get("id") is not None
+                    ]
+                    await broadcast(user_id, {
+                        "type": "hubs_updated",
+                        "hubs": hubs_list
+                    })
+                except Exception as ws_err:
+                    logger.error("Failed to broadcast hubs_updated WS message for user %s: %s", user_id, ws_err)
+
+                logger.info("Successfully completed Louvain clustering for user %s. Generated %d hubs.", user_id, len(hubs_to_insert))
+
+                # Run nightly candidate scan
+                await scan_insight_candidates_for_user(user_id, pool)
+                # Run nightly Mind Type calculation
+                await run_nightly_mind_type_for_user(user_id, pool)
+
+            except Exception as user_err:
+                logger.error("Louvain clustering failed for user %s: %s", user_id, user_err, exc_info=True)
+
+    tasks = [process_user_louvain(uid) for uid in users]
+    await asyncio.gather(*tasks, return_exceptions=True)
+    logger.info("Louvain clustering background job completed.")
+
+
+async def run_nightly_mind_type_for_user(user_id: int, pool) -> None:
+    """Nightly Mind Type calculation logic based on 4-letter binary dimensions."""
+    try:
+        async with pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute("SELECT COUNT(*) FROM items WHERE user_id = %s;", (user_id,))
+                count_row = await cur.fetchone()
+                node_count = count_row[0] if count_row else 0
+                if node_count < 15:
+                    return
+
+                # 1. Entropy
+                await cur.execute("SELECT id, member_ids FROM semantic_hubs WHERE user_id = %s;", (user_id,))
+                hubs = await cur.fetchall()
+                total_items_in_hubs = 0
+                hub_sizes = []
+                item_to_hub = {}
+                for h_id, member_ids in hubs:
+                    size = len(member_ids) if member_ids else 0
+                    hub_sizes.append(size)
+                    total_items_in_hubs += size
+                    if member_ids:
+                        for item_id in member_ids:
+                            item_to_hub[item_id] = h_id
+
+                entropy = 0.0
+                if total_items_in_hubs > 0:
+                    import math
+                    for size in hub_sizes:
+                        if size > 0:
+                            p = size / total_items_in_hubs
+                            entropy -= p * math.log(p)
+
+                # 2. Linkage
+                await cur.execute(
+                    "SELECT item_id_a, item_id_b FROM insight_candidates WHERE user_id = %s AND status = 'confirmed';",
+                    (user_id,)
+                )
+                edges = await cur.fetchall()
+                cross_hub_count = 0
+                total_edges = len(edges)
+                for a, b in edges:
+                    hub_a = item_to_hub.get(a)
+                    hub_b = item_to_hub.get(b)
+                    if hub_a is not None and hub_b is not None and hub_a != hub_b:
+                        cross_hub_count += 1
+                linkage_ratio = (cross_hub_count / total_edges) if total_edges > 0 else 0.0
+
+                # 3. Velocity
+                await cur.execute(
+                    "SELECT COUNT(*) FROM items WHERE user_id = %s AND created_at >= NOW() - INTERVAL '7 days';",
+                    (user_id,)
+                )
+                vel_row = await cur.fetchone()
+                velocity = vel_row[0] if vel_row else 0
+
+                # 4. Novelty
+                await cur.execute(
+                    "SELECT embedding FROM items WHERE user_id = %s AND created_at >= NOW() - INTERVAL '7 days' AND embedding IS NOT NULL;",
+                    (user_id,)
+                )
+                new_items = await cur.fetchall()
+                await cur.execute(
+                    "SELECT embedding FROM items WHERE user_id = %s AND created_at < NOW() - INTERVAL '7 days' AND embedding IS NOT NULL;",
+                    (user_id,)
+                )
+                old_items = await cur.fetchall()
+
+                novelty = 0.0
+                if new_items and old_items:
+                    def parse_vector(emb):
+                        if isinstance(emb, str):
+                            try:
+                                return [float(x) for x in emb.strip("[]").split(",")]
+                            except Exception:
+                                return [0.0] * 384
+                        return list(emb)
+                    new_vecs = [parse_vector(n[0]) for n in new_items]
+                    old_vecs = [parse_vector(o[0]) for o in old_items]
+
+                    total_dist = 0.0
+                    pair_count = 0
+                    for nv in new_vecs:
+                        for ov in old_vecs:
+                            sim = sum(x * y for x, y in zip(nv, ov))
+                            dist = 1.0 - sim
+                            total_dist += dist
+                            pair_count += 1
+                    if pair_count > 0:
+                        novelty = total_dist / pair_count
+
+                # Form 4-letter code (Balanced Thresholds)
+                b_code = "B" if entropy >= 1.20 else "F"
+                l_code = "L" if linkage_ratio >= 0.20 else "I"
+                v_code = "V" if velocity >= 10 else "S"
+                n_code = "N" if novelty >= 0.35 else "R"
+                new_code = f"{b_code}{l_code}{v_code}{n_code}"
+
+                # Fetch cached details
+                await cur.execute("SELECT mind_type, mind_type_trajectory FROM users WHERE id = %s;", (user_id,))
+                user_row = await cur.fetchone()
+                cached_code, traj = user_row if user_row else (None, None)
+                import json
+                traj_list = traj if traj else []
+                if isinstance(traj_list, str):
+                    try:
+                        traj_list = json.loads(traj_list)
+                    except Exception:
+                        traj_list = []
+
+                if cached_code != new_code:
+                    import datetime
+                    traj_list.append({
+                        "date": datetime.date.today().isoformat(),
+                        "mind_type": new_code,
+                        "metrics": {
+                            "breadth": float(entropy),
+                            "linkage": float(linkage_ratio),
+                            "velocity": float(velocity),
+                            "novelty": float(novelty)
+                        }
+                    })
+                    await cur.execute(
+                        "UPDATE users SET mind_type = %s, mind_type_trajectory = %s WHERE id = %s;",
+                        (new_code, json.dumps(traj_list), user_id)
+                    )
+                    await conn.commit()
+                    logger.info("Updated Mind Type trajectory for user %d to %s", user_id, new_code)
+    except Exception as e:
+        logger.error("Failed nightly Mind Type calculation for user %d: %s", user_id, e)
+
+
+async def weekly_profile_text_generator() -> None:
+    """Weekly cron to generate the 4-sentence profile summary at Sunday 8:00 PM local time."""
+    try:
+        pool = await get_pool()
+    except Exception as e:
+        logger.error("Failed to open database pool in weekly profile generator: %s", e)
+        return
+
+    try:
+        async with pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute("SELECT id, telegram_chat_id, timezone_offset, mind_type, mind_type_trajectory FROM users WHERE mind_type IS NOT NULL;")
+                users = await cur.fetchall()
+    except Exception as e:
+        logger.error("Failed to fetch users in weekly profile generator: %s", e)
+        return
+
+    import datetime
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    sem = asyncio.Semaphore(3)
+
+    async def process_user(user_id, chat_id, offset_minutes, code, traj):
+        async with sem:
+            if not chat_id:
+                return
+            if offset_minutes is None:
+                offset_minutes = 0
+            
+            # Check local time is Sunday 8:00 PM (Weekday 6, Hour 20)
+            local_time = now_utc + datetime.timedelta(minutes=offset_minutes)
+            if not (local_time.weekday() == 6 and local_time.hour == 20):
+                return
+
+            try:
+                import json
+                traj_list = traj if traj else []
+                if isinstance(traj_list, str):
+                    try:
+                        traj_list = json.loads(traj_list)
+                    except Exception:
+                        traj_list = []
+
+                # Find the most recent different mind type to track the transition delta
+                prev_code = None
+                if traj_list:
+                    for entry in reversed(traj_list):
+                        entry_code = entry.get("mind_type")
+                        if entry_code and entry_code != code:
+                            prev_code = entry_code
+                            break
+
+                transition_context = ""
+                if prev_code:
+                    transition_context = (
+                        f"Their previous Mind Type was {prev_code}. "
+                        f"Explain what shifted in their cognitive patterns (e.g. did they expand their breadth, synthesize more links, speed up velocity, or ingest more novel concepts?) that caused the transition to {code}."
+                    )
                 else:
+                    transition_context = f"This is their first classification. Focus on explaining the primary cognitive driver of their {code} signature."
+
+                async with pool.connection() as conn:
                     async with conn.cursor() as cur:
-                        await _perform_db_hubs_swap(cur, user_id, hubs_to_insert)
+                        await cur.execute(
+                            "SELECT label FROM semantic_hubs WHERE user_id = %s ORDER BY array_length(member_ids, 1) DESC LIMIT 3;",
+                            (user_id,)
+                        )
+                        hubs = [r[0] for r in await cur.fetchall()]
+                        
+                        cascade = AICascade()
+                        hubs_str = ", ".join(hubs) if hubs else "general topics"
+                        
+                        prompt = (
+                            f"You are a Cognitive Graph Profiler. The user has been classified as {code} (MBTI-style Mind Type).\n"
+                            f"Their top 3 active clusters are: {hubs_str}.\n"
+                            f"{transition_context}\n\n"
+                            f"Write a highly personalized, analytical, and engaging 4-sentence profile summary explaining their cognitive style and transition.\n"
+                            f"Constraint: Do not use clinical jargon, do not use template words, and connect the topics explicitly."
+                        )
+                        
+                        summary_text = await cascade.call_llm(prompt)
+                        if not summary_text or len(summary_text) < 10:
+                            summary_text = f"You are actively building a graph of ideas under {hubs_str}. Your current Mind Type is {code}."
+
+                        await cur.execute(
+                            "UPDATE users SET mind_type_summary = %s, mind_type_detailed = NULL WHERE id = %s;",
+                            (summary_text, user_id)
+                        )
                         await conn.commit()
 
-            # Invalidate Redis graph cache
-            cache_key = f"graph:{user_id}"
+                        ARCHETYPES = {
+                            "BLVN": "Warp Navigator",
+                            "FLVN": "Quantum Catalyst",
+                            "BLSN": "Nebula Weaver",
+                            "FLSN": "Alchemy Core",
+                            "BLVR": "Ingestion Matrix",
+                            "FLVR": "Laser Synthesizer",
+                            "BLSR": "Codex Cartographer",
+                            "FLSR": "Monolith Architect",
+                            "BIVN": "Void Collector",
+                            "FIVN": "Recon Scout",
+                            "BISN": "Archival Explorer",
+                            "FISN": "Deep Diver",
+                            "BIVR": "Cyclone Curator",
+                            "FIVR": "Sentinel Core",
+                            "BISR": "Silent Librarian",
+                            "FISR": "Singular Vault"
+                        }
+                        archetype_label = ARCHETYPES.get(code, "Mind Explorer")
+                        msg = (
+                            f"Your Sunday Mind Type trajectory report is ready! 🧠\n\n"
+                            f"You are currently classified as: *{archetype_label} ({code})*.\n\n"
+                            f"{summary_text}\n\n"
+                            f"Check the dashboard Profile page to see your metrics breakdown!"
+                        )
+                        from backend.worker import send_telegram_message
+                        await send_telegram_message(chat_id, msg)
+                        logger.info("Sent weekly Mind Type summary to user %d", user_id)
+            except Exception as user_err:
+                logger.error("Failed to generate weekly profile for user %d: %s", user_id, user_err)
+
+    tasks = []
+    for user in users:
+        uid = user[0]
+        cid = user[1]
+        offset = user[2]
+        code = user[3]
+        traj = user[4] if len(user) > 4 else None
+        tasks.append(process_user(uid, cid, offset, code, traj))
+    await asyncio.gather(*tasks)
+
+
+async def monthly_prediction_generator() -> None:
+    """Monthly prediction generator for users with >= 30 items."""
+    try:
+        pool = await get_pool()
+    except Exception as e:
+        logger.error("Failed to open database pool in monthly predictions: %s", e)
+        return
+
+    try:
+        async with pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    SELECT u.id, u.telegram_chat_id, u.last_prediction_at 
+                    FROM users u
+                    WHERE (SELECT COUNT(*) FROM items i WHERE i.user_id = u.id) >= 30
+                      AND (u.last_prediction_at IS NULL OR u.last_prediction_at <= NOW() - INTERVAL '30 days');
+                    """
+                )
+                users = await cur.fetchall()
+    except Exception as e:
+        logger.error("Failed to fetch users in monthly predictions: %s", e)
+        return
+
+    sem = asyncio.Semaphore(3)
+
+    async def process_prediction(user_id, chat_id, last_pred):
+        async with sem:
+            if not chat_id:
+                return
+
             try:
-                await redis.delete(cache_key)
-            except Exception as e:
-                logger.warning("Failed to invalidate Redis graph cache for user %s: %s", user_id, e)
+                async with pool.connection() as conn:
+                    async with conn.cursor() as cur:
+                        await cur.execute(
+                            "SELECT label FROM semantic_hubs WHERE user_id = %s ORDER BY array_length(member_ids, 1) DESC LIMIT 3;",
+                            (user_id,)
+                        )
+                        hubs = [r[0] for r in await cur.fetchall()]
+                        
+                        await cur.execute(
+                            "SELECT title, summary FROM items WHERE user_id = %s ORDER BY created_at DESC LIMIT 15;",
+                            (user_id,)
+                        )
+                        items = await cur.fetchall()
+                        recent_saves = "\n".join(f"- {title}: {summary[:100]}" for title, summary in items if title)
 
-            # Broadcast WS message
+                        cascade = AICascade()
+                        hubs_str = ", ".join(hubs) if hubs else "None"
+                        
+                        prompt = (
+                            f"You are a Predictive Cognitive Engine.\n"
+                            f"Analyze the user's recent saved ideas and semantic hubs:\n"
+                            f"Hubs: {hubs_str}\n"
+                            f"Recent saves:\n{recent_saves}\n\n"
+                            f"Predict what specific topic or concept they will save next within a 5-7 days window.\n"
+                            f"Format your reply as a JSON object with keys: \"prediction\", \"confidence\", \"explanation\".\n\n"
+                            f"Constraints:\n"
+                            f"- High specificity is required (do not predict generic topics like 'technology' or 'self-improvement').\n"
+                            f"- If your confidence is less than 0.72, return \"confidence\": 0.0 and do not make a prediction.\n"
+                            f"- Do not hedge or use placeholders."
+                        )
+
+                        res = await cascade.call_llm(prompt)
+                        if res:
+                            try:
+                                import re
+                                match = re.search(r"\{.*\}", res, re.DOTALL)
+                                if match:
+                                    parsed = json.loads(match.group(0))
+                                    prediction = parsed.get("prediction")
+                                    confidence = float(parsed.get("confidence") or 0.0)
+                                    explanation = parsed.get("explanation")
+
+                                    if confidence >= 0.72 and prediction:
+                                        msg = (
+                                            f"🔮 *Monthly Prediction*\n\n"
+                                            f"Based on your recent saves, your graph predicts you will next explore: *{prediction}* (Confidence: {confidence:.2f})\n\n"
+                                            f"_{explanation}_"
+                                        )
+                                        from backend.worker import send_telegram_message
+                                        await send_telegram_message(chat_id, msg)
+                                        logger.info("Sent monthly prediction to user %d: %s", user_id, prediction)
+                            except Exception as parse_err:
+                                logger.error("Failed to parse monthly prediction JSON: %s", parse_err)
+
+                        await cur.execute(
+                            "UPDATE users SET last_prediction_at = NOW() WHERE id = %s;",
+                            (user_id,)
+                        )
+                        await conn.commit()
+            except Exception as user_err:
+                logger.error("Failed to generate prediction for user %d: %s", user_id, user_err)
+
+    tasks = [process_prediction(uid, cid, lp) for uid, cid, lp in users]
+    await asyncio.gather(*tasks)
+
+
+async def monthly_discrepancy_scanner() -> None:
+    """Monthly scan to find cognitive discrepancies between self-description and actual saves."""
+    try:
+        pool = await get_pool()
+    except Exception as e:
+        logger.error("Failed to open database pool in discrepancy scanner: %s", e)
+        return
+
+    try:
+        async with pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    SELECT u.id, u.telegram_chat_id, u.self_description, u.last_confession_at 
+                    FROM users u
+                    WHERE u.self_description IS NOT NULL
+                      AND (SELECT COUNT(*) FROM items i WHERE i.user_id = u.id) >= 30
+                      AND (u.last_confession_at IS NULL OR u.last_confession_at <= NOW() - INTERVAL '30 days');
+                    """
+                )
+                users = await cur.fetchall()
+    except Exception as e:
+        logger.error("Failed to fetch users in discrepancy scanner: %s", e)
+        return
+
+    sem = asyncio.Semaphore(3)
+
+    async def process_confession(user_id, chat_id, self_desc, last_conf):
+        async with sem:
+            if not chat_id:
+                return
+
             try:
-                from backend.routes.websocket import broadcast
-                hubs_list = [
-                    {
-                        "id": str(hub["id"]),
-                        "label": hub["label"],
-                        "member_ids": [int(x) for x in hub["member_ids"]]
-                    }
-                    for hub in hubs_to_insert if hub.get("id") is not None
-                ]
-                await broadcast(user_id, {
-                    "type": "hubs_updated",
-                    "hubs": hubs_list
-                })
-            except Exception as ws_err:
-                logger.error("Failed to broadcast hubs_updated WS message for user %s: %s", user_id, ws_err)
+                async with pool.connection() as conn:
+                    async with conn.cursor() as cur:
+                        await cur.execute(
+                            "SELECT label, array_length(member_ids, 1) FROM semantic_hubs WHERE user_id = %s ORDER BY array_length(member_ids, 1) DESC LIMIT 3;",
+                            (user_id,)
+                        )
+                        hubs = await cur.fetchall()
+                        hubs_str = ", ".join(f"'{h[0]}' ({h[1]} saves)" for h in hubs)
 
-            logger.info("Successfully completed Louvain clustering for user %s. Generated %d hubs.", user_id, len(hubs_to_insert))
+                        await cur.execute(
+                            "SELECT title, summary FROM items WHERE user_id = %s ORDER BY created_at DESC LIMIT 15;",
+                            (user_id,)
+                        )
+                        items = await cur.fetchall()
+                        item_samples = "\n".join(f"- {t}: {s[:100]}" for t, s in items if t)
 
-            # Run nightly candidate scan
-            await scan_insight_candidates_for_user(user_id, pool)
+                        cascade = AICascade()
+                        prompt = (
+                            f"You are a Cognitive Discrepancy Analyzer.\n"
+                            f"Compare the user's stated self-description of their interests with their actual saved topics:\n"
+                            f"Stated self-description: \"{self_desc}\"\n"
+                            f"Actual saved hubs: {hubs_str}\n"
+                            f"Sample item saves:\n{item_samples}\n\n"
+                            f"Determine if the user's stated interests substantially diverge from what they actually save in practice.\n"
+                            f"If they substantially diverge, write a direct, honest, and constructive confession insight highlighting the gap (max 2 sentences).\n"
+                            f"If they align or the gap is weak, output ONLY: ALIGNED_NO_GAP\n\n"
+                            f"Constraint: Output ONLY raw conversational text. Do NOT wrap in JSON, quotes, or code block formatting."
+                        )
 
-        except Exception as e:
-            logger.error("Louvain clustering failed for user %s: %s", user_id, e, exc_info=True)
-            continue
+                        res = await cascade.call_llm(prompt)
+                        if res and "ALIGNED_NO_GAP" not in res:
+                            confession_text = res.strip()
+                            
+                            # Fallback extraction if LLM still outputs JSON
+                            if confession_text.startswith("{") and confession_text.endswith("}"):
+                                try:
+                                    import json as _json
+                                    parsed = _json.loads(confession_text)
+                                    if "insight" in parsed:
+                                        confession_text = parsed["insight"]
+                                    elif "confession" in parsed:
+                                        confession_text = parsed["confession"]
+                                except Exception:
+                                    pass
+                            
+                            await cur.execute("SELECT id FROM items WHERE user_id = %s ORDER BY created_at DESC LIMIT 2;", (user_id,))
+                            item_rows = await cur.fetchall()
+                            item_a = item_rows[0][0] if len(item_rows) > 0 else 0
+                            item_b = item_rows[1][0] if len(item_rows) > 1 else 0
 
-    logger.info("Louvain clustering background job completed.")
+                            await cur.execute(
+                                """
+                                INSERT INTO insight_candidates (user_id, item_id_a, item_id_b, similarity_score, bucket, status, insight_text, expires_at)
+                                VALUES (%s, %s, %s, 0.0, 'confession', 'delivered', %s, NOW() + INTERVAL '30 days');
+                                """,
+                                (user_id, item_a, item_b, confession_text)
+                            )
+                            await conn.commit()
+
+                            msg = (
+                                f"💭 *Graph Reflection*\n\n"
+                                f"{confession_text}"
+                            )
+                            from backend.worker import send_telegram_message
+                            await send_telegram_message(chat_id, msg)
+                            logger.info("Sent discrepancy confession reflection to user %d", user_id)
+
+                        await cur.execute(
+                            "UPDATE users SET last_confession_at = NOW() WHERE id = %s;",
+                            (user_id,)
+                        )
+                        await conn.commit()
+            except Exception as user_err:
+                logger.error("Failed to run confession scanner for user %d: %s", user_id, user_err)
+
+    tasks = [process_confession(uid, cid, sd, lc) for uid, cid, sd, lc in users]
+    await asyncio.gather(*tasks)
+
+
+async def monthly_forward_hook() -> None:
+    """Monthly scan to find adjacent-but-absent concept gaps using static_domain_centroids."""
+    try:
+        pool = await get_pool()
+    except Exception as e:
+        logger.error("Failed to open database pool in forward hook: %s", e)
+        return
+
+    try:
+        async with pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    SELECT u.id, u.telegram_chat_id, u.last_forward_hook_at 
+                    FROM users u
+                    WHERE (SELECT COUNT(*) FROM items i WHERE i.user_id = u.id) >= 15
+                      AND (u.last_forward_hook_at IS NULL OR u.last_forward_hook_at <= NOW() - INTERVAL '30 days');
+                    """
+                )
+                users = await cur.fetchall()
+    except Exception as e:
+        logger.error("Failed to fetch users in forward hook: %s", e)
+        return
+
+    sem = asyncio.Semaphore(3)
+
+    async def process_forward_hook(user_id, chat_id, last_fw):
+        async with sem:
+            if not chat_id:
+                return
+
+            try:
+                async with pool.connection() as conn:
+                    async with conn.cursor() as cur:
+                        await cur.execute(
+                            "SELECT label, member_ids FROM semantic_hubs WHERE user_id = %s ORDER BY array_length(member_ids, 1) DESC LIMIT 3;",
+                            (user_id,)
+                        )
+                        hubs = await cur.fetchall()
+                        if len(hubs) < 2:
+                            return
+                            
+                        top_hubs_labels = [h[0] for h in hubs]
+                        all_member_ids = []
+                        for h in hubs:
+                            if h[1]:
+                                all_member_ids.extend(h[1])
+                                
+                        if not all_member_ids:
+                            return
+
+                        await cur.execute(
+                            "SELECT embedding FROM items WHERE user_id = %s AND id = ANY(%s) AND embedding IS NOT NULL;",
+                            (user_id, all_member_ids)
+                        )
+                        emb_rows = await cur.fetchall()
+                        if not emb_rows:
+                            return
+
+                        def parse_vector(emb):
+                            if isinstance(emb, str):
+                                try:
+                                    return [float(x) for x in emb.strip("[]").split(",")]
+                                except Exception:
+                                    return [0.0] * 384
+                            return list(emb)
+
+                        vectors = [parse_vector(r[0]) for r in emb_rows]
+                        vector_len = len(vectors[0])
+                        centroid = [sum(v[i] for v in vectors) / len(vectors) for i in range(vector_len)]
+
+                        c_mag = math.sqrt(sum(x*x for x in centroid))
+                        if c_mag > 0:
+                            centroid = [x / c_mag for x in centroid]
+
+                        await cur.execute("SELECT title, tags FROM items WHERE user_id = %s;", (user_id,))
+                        user_saves = await cur.fetchall()
+                        saved_texts = set()
+                        for title, tags in user_saves:
+                            if title:
+                                saved_texts.add(title.lower())
+                            if tags:
+                                for t in tags:
+                                    saved_texts.add(t.lower())
+
+                        await cur.execute("SELECT domain_name, embedding FROM static_domain_centroids;")
+                        domain_rows = await cur.fetchall()
+                        
+                        best_domain = None
+                        best_score = -1.0
+
+                        for domain_name, d_emb in domain_rows:
+                            if domain_name.lower() in saved_texts:
+                                continue
+                            
+                            d_vec = parse_vector(d_emb)
+                            sim = sum(x * y for x, y in zip(centroid, d_vec))
+                            
+                            score = 0.0
+                            if 0.60 <= sim <= 0.78:
+                                score = sim
+                                
+                            if score > best_score:
+                                best_score = score
+                                best_domain = domain_name
+
+                        if best_domain and best_score > 0.0:
+                            cascade = AICascade()
+                            hubs_str = ", ".join(top_hubs_labels)
+                            
+                            prompt = (
+                                f"The user has a mind graph focused on: {hubs_str}.\n"
+                                f"A gap analysis identified that the adjacent concept of '{best_domain}' is conspicuously absent from their saves.\n\n"
+                                f"Write a concise 3-sentence observation. Explain why '{best_domain}' fits adjacent to their current interests, but is absent, prompting them to think about how it bridges their ideas.\n"
+                                f"Constraint: Do not use clinical jargon, do not use template words, and speak directly to their thinking shape."
+                            )
+
+                            hook_text = await cascade.call_llm(prompt)
+                            if hook_text:
+                                msg = (
+                                    f"Your graph has been building a framework for {hubs_str}.\n"
+                                    f"The one piece it hasn’t touched: *{best_domain}*.\n\n"
+                                    f"{hook_text}"
+                                )
+                                from backend.worker import send_telegram_message
+                                await send_telegram_message(chat_id, msg)
+                                logger.info("Sent forward hook gap notification to user %d: %s", user_id, best_domain)
+
+                        await cur.execute(
+                            "UPDATE users SET last_forward_hook_at = NOW() WHERE id = %s;",
+                            (user_id,)
+                        )
+                        await conn.commit()
+            except Exception as user_err:
+                logger.error("Failed to run forward hook for user %d: %s", user_id, user_err)
+
+    tasks = [process_forward_hook(uid, cid, lp) for uid, cid, lp in users]
+    await asyncio.gather(*tasks)
 
 
 async def partition_creator() -> None:
@@ -586,6 +1274,8 @@ async def daily_digest_sender() -> None:
     Unified daily digest loop. Runs hourly.
     Checks users' local timezone hour:
     - 8:00 AM local: Sends standard Morning Digest stats, and fires Morning Mystery (clue).
+    - 11:00 AM local: Sends Near-Miss alerts to users with a 3-day cooldown.
+    - 4:00 PM (16:00) local: Sends Living Graph lapse alert (3+ cooling hubs) with a 10-day cooldown.
     - 8:00 PM local: Sends Evening Answer (connection tension resolution).
     """
     try:
@@ -601,7 +1291,7 @@ async def daily_digest_sender() -> None:
                     FROM users
                     WHERE digest_enabled = TRUE
                       AND last_activity_date >= CURRENT_DATE - INTERVAL '14 days'
-                      AND EXTRACT(HOUR FROM (CURRENT_TIMESTAMP + (timezone_offset * INTERVAL '1 minute'))) IN (8, 20);
+                      AND EXTRACT(HOUR FROM (CURRENT_TIMESTAMP + (timezone_offset * INTERVAL '1 minute'))) IN (8, 11, 16, 20);
                     """
                 )
                 users_to_process = await cur.fetchall()
@@ -613,6 +1303,7 @@ async def daily_digest_sender() -> None:
         logger.info("Found %d users eligible for daily digest / loop closure in this hour.", len(users_to_process))
         
         import time
+        from datetime import datetime, timezone, timedelta
         from backend.services.ai_cascade import AICascade
 
         for row in users_to_process:
@@ -700,14 +1391,14 @@ async def daily_digest_sender() -> None:
                     
                     await send_telegram_message(str(chat_id), msg)
                     
-                    # 4. Check for Morning Mystery Candidate
+                    # 4. Check for Morning Mystery Candidate (bucket = 'confirmed')
                     async with pool.connection() as conn:
                         async with conn.cursor() as cur:
                             await cur.execute(
                                 """
                                 SELECT id, item_id_a, item_id_b 
                                 FROM insight_candidates
-                                WHERE user_id = %s AND status = 'pending'
+                                WHERE user_id = %s AND status = 'pending' AND bucket = 'confirmed'
                                 ORDER BY similarity_score DESC
                                 LIMIT 1;
                                 """,
@@ -732,6 +1423,103 @@ async def daily_digest_sender() -> None:
                         mystery_msg = "Your graph did something unusual overnight. Three things you saved in different weeks just collapsed into the same idea. I haven't told you what it is yet."
                         await send_telegram_message(str(chat_id), mystery_msg)
                         logger.info("Sent Morning Mystery to user %d, candidate %d", user_id, cand_id)
+
+                elif local_hour == 11:
+                    # ==========================================
+                    # NEAR-MISS ALERT (11:00 AM)
+                    # ==========================================
+                    cooldown = await redis.get(f"user:near_miss_sent_cooldown:{user_id}")
+                    if cooldown:
+                        continue
+                    
+                    async with pool.connection() as conn:
+                        async with conn.cursor() as cur:
+                            await cur.execute(
+                                """
+                                SELECT c.id, c.item_id_a, c.item_id_b, c.similarity_score,
+                                       a.title, a.created_at, b.title, b.created_at
+                                FROM insight_candidates c
+                                JOIN items a ON c.item_id_a = a.id
+                                JOIN items b ON c.item_id_b = b.id
+                                WHERE c.user_id = %s 
+                                  AND c.status = 'pending'
+                                  AND c.bucket = 'near_miss'
+                                  AND c.created_at >= NOW() - INTERVAL '72 hours'
+                                ORDER BY c.similarity_score DESC
+                                LIMIT 1;
+                                """,
+                                (user_id,)
+                            )
+                            cand = await cur.fetchone()
+                            
+                            if cand:
+                                cand_id, item_a_id, item_b_id, sim, title_a, created_a, title_b, created_b = cand
+                                
+                                # Fetch the hub label if any member belongs to a hub
+                                await cur.execute(
+                                    """
+                                    SELECT label FROM semantic_hubs 
+                                    WHERE user_id = %s AND (%s = ANY(member_ids) OR %s = ANY(member_ids))
+                                    LIMIT 1;
+                                    """,
+                                    (user_id, item_a_id, item_b_id)
+                                )
+                                hub_row = await cur.fetchone()
+                                cluster_name = hub_row[0] if hub_row else f"'{title_b}'"
+                                
+                                now_utc = datetime.now(timezone.utc)
+                                dt_a = created_a.replace(tzinfo=timezone.utc) if created_a.tzinfo is None else created_a
+                                dt_b = created_b.replace(tzinfo=timezone.utc) if created_b.tzinfo is None else created_b
+                                age_a = (now_utc - dt_a).days
+                                age_b = (now_utc - dt_b).days
+                                days_ago = max(1, max(age_a, age_b))
+                                pct = int(sim * 100)
+                                
+                                near_miss_msg = f"Your graph almost made a connection. Something from {days_ago} days ago is sitting at {pct}% similarity with '{cluster_name}'. One more save in this space and it might cross."
+                                
+                                await cur.execute(
+                                    "UPDATE insight_candidates SET status = 'near_miss' WHERE id = %s;",
+                                    (cand_id,)
+                                )
+                                await conn.commit()
+                                
+                                await send_telegram_message(str(chat_id), near_miss_msg)
+                                await redis.setex(f"user:near_miss_sent_cooldown:{user_id}", 3 * 86400, "1")
+                                logger.info("Sent Near-Miss Alert to user %d, candidate %d", user_id, cand_id)
+
+                elif local_hour == 16:
+                    # ==========================================
+                    # LIVING GRAPH LAPSE WARNING (4:00 PM / 16:00)
+                    # ==========================================
+                    cooldown = await redis.get(f"user:cooling_sent_cooldown:{user_id}")
+                    if cooldown:
+                        continue
+                        
+                    # Check if user has not opened the web app in 72+ hours
+                    last_active = await redis.get(f"user:last_frontend_active:{user_id}")
+                    if last_active:
+                        continue
+                        
+                    async with pool.connection() as conn:
+                        async with conn.cursor() as cur:
+                            # Count hubs crossing below 40% temperature in last 48 hours (inactive for 4.2 to 6.2 days)
+                            await cur.execute(
+                                """
+                                SELECT COUNT(*) FROM semantic_hubs
+                                WHERE user_id = %s
+                                  AND last_active_at <= NOW() - INTERVAL '4.2 days'
+                                  AND last_active_at >= NOW() - INTERVAL '6.2 days';
+                                """,
+                                (user_id,)
+                            )
+                            count_row = await cur.fetchone()
+                            cooling_count = count_row[0] if count_row else 0
+                            
+                            if cooling_count >= 3:
+                                lapse_msg = "Your living graph is cooling down. 3+ of your knowledge hubs are beginning to freeze. Open the dashboard to reactivate the connections."
+                                await send_telegram_message(str(chat_id), lapse_msg)
+                                await redis.setex(f"user:cooling_sent_cooldown:{user_id}", 10 * 86400, "1")
+                                logger.info("Sent Living Graph lapse alert to user %d (%d cooling hubs)", user_id, cooling_count)
 
                 elif local_hour == 20:
                     # ==========================================
@@ -823,18 +1611,24 @@ async def weekly_drive_sync() -> None:
         
         from backend.services.drive_sync import sync_user_to_drive
         
-        for user_id in users_to_sync:
-            try:
-                # Open a connection for each user sync to keep operations transactional and isolated
-                async with pool.connection() as conn:
-                    await sync_user_to_drive(user_id, conn)
-            except Exception as user_err:
-                logger.error(
-                    "Weekly Google Drive sync failed for user %d: %s",
-                    user_id,
-                    user_err,
-                    exc_info=True
-                )
+        sem = asyncio.Semaphore(3)
+
+        async def sync_one(user_id):
+            async with sem:
+                try:
+                    # Open a connection for each user sync to keep operations transactional and isolated
+                    async with pool.connection() as conn:
+                        await sync_user_to_drive(user_id, conn)
+                except Exception as user_err:
+                    logger.error(
+                        "Weekly Google Drive sync failed for user %d: %s",
+                        user_id,
+                        user_err,
+                        exc_info=True
+                    )
+        
+        tasks = [sync_one(uid) for uid in users_to_sync]
+        await asyncio.gather(*tasks, return_exceptions=True)
                 
     except Exception as e:
         logger.error("weekly_drive_sync background job failed: %s", e, exc_info=True)
@@ -962,7 +1756,11 @@ async def onboarding_sequence_dispatcher() -> None:
             title_label = item_title or "the item you saved"
             if len(title_label) > 60:
                 title_label = title_label[:57] + "..."
-            msg = f"I looked at \"{title_label}\" you sent me. Quick question — was this for you, or were you planning to act on it or share it with someone?"
+            msg = (
+                f"I looked at \"{title_label}\" you sent me. Quick question — was this for you, or were you planning to act on it or share it with someone?\n\n"
+                "💻 *Complementary Save Path*:\n"
+                "If you're usually on your laptop, the Chrome extension lets you save directly from any webpage — one click, no copy-paste. Download it here: https://chromewebstore.google.com/"
+            )
             reply_markup = {
                 "inline_keyboard": [
                     [{"text": "Just for me 👤", "callback_data": "onboarding_opt:for_me"}],
@@ -1556,9 +2354,41 @@ async def start_scheduler(app=None) -> None:
         id="recall_moment_dispatcher",
         misfire_grace_time=60
     )
+
+    # 14. weekly_profile_text_generator (hourly at minute 20 UTC)
+    _scheduler.add_job(
+        weekly_profile_text_generator,
+        trigger=CronTrigger(hour="*", minute=20, timezone="UTC"),
+        id="weekly_profile_text_generator",
+        misfire_grace_time=60
+    )
+
+    # 15. monthly_prediction_generator (hourly at minute 25 UTC)
+    _scheduler.add_job(
+        monthly_prediction_generator,
+        trigger=CronTrigger(hour="*", minute=25, timezone="UTC"),
+        id="monthly_prediction_generator",
+        misfire_grace_time=60
+    )
+
+    # 16. monthly_discrepancy_scanner (hourly at minute 30 UTC)
+    _scheduler.add_job(
+        monthly_discrepancy_scanner,
+        trigger=CronTrigger(hour="*", minute=30, timezone="UTC"),
+        id="monthly_discrepancy_scanner",
+        misfire_grace_time=60
+    )
+
+    # 17. monthly_forward_hook (hourly at minute 35 UTC)
+    _scheduler.add_job(
+        monthly_forward_hook,
+        trigger=CronTrigger(hour="*", minute=35, timezone="UTC"),
+        id="monthly_forward_hook",
+        misfire_grace_time=60
+    )
     
     _scheduler.start()
-    logger.info("Background job scheduler started successfully with all 13 jobs.")
+    logger.info("Background job scheduler started successfully with all 17 jobs.")
 
 
 async def stop_scheduler() -> None:

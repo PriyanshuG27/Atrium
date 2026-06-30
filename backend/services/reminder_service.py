@@ -72,7 +72,8 @@ async def create_reminder(
     user_id: int,
     message: str,
     remind_at_utc: datetime,
-    db: AsyncConnection
+    db: AsyncConnection,
+    item_id: Optional[int] = None
 ) -> Tuple[int, str, bool]:
     """
     Validates and creates a new reminder for the user.
@@ -104,11 +105,11 @@ async def create_reminder(
         # 3. Insert reminder
         await cur.execute(
             """
-            INSERT INTO reminders (user_id, message, remind_at, status)
-            VALUES (%s, %s, %s, 'pending')
+            INSERT INTO reminders (user_id, item_id, message, remind_at, status)
+            VALUES (%s, %s, %s, %s, 'pending')
             RETURNING id;
             """,
-            (user_id, message, remind_at_utc, )
+            (user_id, item_id, message, remind_at_utc)
         )
         insert_row = await cur.fetchone()
         if not insert_row:

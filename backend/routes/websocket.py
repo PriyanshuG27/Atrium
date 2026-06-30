@@ -1,26 +1,64 @@
 import logging
 import asyncio
 import json
+import uuid
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from backend.middleware.twa_auth import verify_jwt
 from backend.config import settings
+from backend.services.redis_client import redis
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["websocket"])
 
-# In-memory registry: {user_id: WebSocket}
+# In-memory registry for backward compatibility / single-instance fallback
 active_connections: dict[int, WebSocket] = {}
 
+# Local instance-specific registry: {connection_id: WebSocket}
+active_local_websockets: dict[str, WebSocket] = {}
+
 async def broadcast(user_id: int, event: dict) -> None:
-    """Broadcast an event to the user's active WebSocket connection."""
-    websocket = active_connections.get(user_id)
-    if websocket:
+    """Broadcast an event to all of the user's active connection queues in Redis (and fallback registry)."""
+    # Fallback/mock direct local push
+    local_ws = active_connections.get(user_id)
+    if local_ws:
         try:
-            await websocket.send_json(event)
+            await local_ws.send_json(event)
         except Exception:
-            # Clean up on failure to send
-            if user_id in active_connections and active_connections[user_id] == websocket:
+            if user_id in active_connections and active_connections[user_id] == local_ws:
                 del active_connections[user_id]
+
+    try:
+        # 1. Fetch connection IDs registered for this user
+        connection_ids = await redis.smembers(f"ws:connections:user:{user_id}")
+        if not connection_ids:
+            return
+        
+        # 2. Check heartbeat keys to verify connection liveness in a single pipeline
+        pipeline_exists_cmds = [["EXISTS", f"ws:heartbeat:{user_id}:{conn_id}"] for conn_id in connection_ids]
+        exists_results = await redis.pipeline(pipeline_exists_cmds)
+        
+        pipeline_cmds = []
+        for idx, conn_id in enumerate(connection_ids):
+            res_obj = exists_results[idx]
+            exists = False
+            if isinstance(res_obj, dict):
+                exists = bool(res_obj.get("result", 0))
+            elif isinstance(res_obj, (int, str)):
+                exists = bool(int(res_obj))
+            
+            if exists:
+                list_key = f"ws:user:{user_id}:{conn_id}"
+                pipeline_cmds.append(["RPUSH", list_key, json.dumps(event)])
+                pipeline_cmds.append(["EXPIRE", list_key, "3600"])  # 1 hour safety TTL
+            else:
+                # Prune dead connection registry
+                pipeline_cmds.append(["SREM", f"ws:connections:user:{user_id}", conn_id])
+        
+        if pipeline_cmds:
+            await redis.pipeline(pipeline_cmds)
+            
+    except Exception as broadcast_err:
+        logger.error("Failed to broadcast multi-server WebSocket event for user %d: %s", user_id, broadcast_err)
 
 @router.websocket("/ws/{token}")
 async def websocket_endpoint(websocket: WebSocket, token: str):
@@ -39,13 +77,19 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
     # Accept the connection
     await websocket.accept()
 
-    # Register the connection (last connection wins)
-    if user_id in active_connections:
-        try:
-            await active_connections[user_id].close(code=1000)
-        except Exception:
-            pass
-    active_connections[user_id] = websocket
+    # Generate a unique connection ID for horizontal routing
+    connection_id = uuid.uuid4().hex
+
+    # Register the connection in Redis
+    try:
+        await redis.sadd(f"ws:connections:user:{user_id}", connection_id)
+        await redis.setex(f"ws:heartbeat:{user_id}:{connection_id}", 60, "1")
+        active_local_websockets[connection_id] = websocket
+        active_connections[user_id] = websocket
+    except Exception as reg_err:
+        logger.error("Failed to register WebSocket in Redis: %s", reg_err)
+        await websocket.close(code=4000)
+        return
 
     # Immediately send the connected event
     try:
@@ -54,6 +98,13 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
             "user_id": user_id
         })
     except Exception:
+        # Cleanup
+        try:
+            await redis.srem(f"ws:connections:user:{user_id}", connection_id)
+            await redis.delete(f"ws:heartbeat:{user_id}:{connection_id}")
+        except Exception:
+            pass
+        active_local_websockets.pop(connection_id, None)
         if user_id in active_connections and active_connections[user_id] == websocket:
             del active_connections[user_id]
         return
@@ -65,18 +116,39 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
         try:
             while True:
                 await asyncio.sleep(30.0)
+                # Refresh heartbeat key in Redis
+                await redis.setex(f"ws:heartbeat:{user_id}:{connection_id}", 60, "1")
                 pong_received.clear()
                 await websocket.send_json({"type": "ping"})
                 try:
                     await asyncio.wait_for(pong_received.wait(), timeout=10.0)
                 except asyncio.TimeoutError:
-                    logger.info("WebSocket ping timeout for user_id=%d. Disconnecting.", user_id)
+                    logger.info("WebSocket ping timeout for user_id=%d, connection_id=%s. Disconnecting.", user_id, connection_id)
                     await websocket.close(code=4000)
                     break
         except Exception:
             pass
 
+    async def listen_redis_queue():
+        try:
+            queue_key = f"ws:user:{user_id}:{connection_id}"
+            while True:
+                # Poll Redis queue with 5s timeout
+                pop_res = await redis.brpop(queue_key, timeout=5)
+                if pop_res:
+                    _, event_str = pop_res
+                    try:
+                        event = json.loads(event_str)
+                        await websocket.send_json(event)
+                    except Exception as send_err:
+                        logger.warning("Failed to send WebSocket event to connection %s: %s", connection_id, send_err)
+        except asyncio.CancelledError:
+            pass
+        except Exception as queue_err:
+            logger.error("Error in listen_redis_queue for user_id=%d, connection_id=%s: %s", user_id, connection_id, queue_err)
+
     ping_task_handle = asyncio.create_task(ping_task())
+    queue_task_handle = asyncio.create_task(listen_redis_queue())
 
     try:
         while True:
@@ -100,6 +172,14 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
         logger.error("Error in websocket loop for user_id=%d: %s", user_id, e)
     finally:
         ping_task_handle.cancel()
+        queue_task_handle.cancel()
+        try:
+            await redis.srem(f"ws:connections:user:{user_id}", connection_id)
+            await redis.delete(f"ws:heartbeat:{user_id}:{connection_id}")
+            await redis.delete(f"ws:user:{user_id}:{connection_id}")
+        except Exception as clean_err:
+            logger.warning("Failed to clean Redis registry on disconnect: %s", clean_err)
+        active_local_websockets.pop(connection_id, None)
         if user_id in active_connections and active_connections[user_id] == websocket:
             del active_connections[user_id]
         try:

@@ -151,3 +151,18 @@ async def test_redis_get_setex_delete():
         assert res_del == 1
         mock_post.assert_called_with("", json=["DEL", "graph:42"])
 
+
+@pytest.mark.asyncio
+async def test_redis_expire():
+    mock_resp = mock.Mock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"result": 1}
+    
+    with mock.patch("httpx.AsyncClient.post", new_callable=mock.AsyncMock) as mock_post:
+        mock_post.return_value = mock_resp
+        
+        res = await redis.expire("mykey", 3600)
+        assert res is True
+        
+        mock_post.assert_called_once_with("", json=["EXPIRE", "mykey", "3600"])
+

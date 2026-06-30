@@ -147,6 +147,23 @@ async def get_twa_user(
     if not row:
         raise HTTPException(status_code=401, detail="Not authenticated")
         
+    try:
+        params = dict(urllib.parse.parse_qsl(init_data_raw, keep_blank_values=True))
+        user_json = params.get('user')
+        if user_json:
+            user_data = json.loads(user_json)
+            first_name = user_data.get('first_name')
+            username = user_data.get('username')
+            if first_name or username:
+                async with db.cursor() as cur:
+                    await cur.execute(
+                        "UPDATE users SET first_name = COALESCE(%s, first_name), username = COALESCE(%s, username) WHERE id = %s;",
+                        (first_name, username, row[0])
+                    )
+                    await db.commit()
+    except Exception:
+        pass
+        
     return UserContext(id=row[0], telegram_chat_id=str(row[1]))
 
 

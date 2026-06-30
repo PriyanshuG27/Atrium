@@ -7,7 +7,19 @@ const COLORS = {
   url: '#7C6FD4', voice: '#3DAA8A', pdf: '#C9893C',
   image: '#3D8AAA', text: '#8A8582', hub: '#CFA365', default: '#8A7A6A',
 };
-function nodeColor(n) { return n.type === 'hub' ? COLORS.hub : (COLORS[n.source_type] || COLORS.default); }
+function nodeColor(n) {
+  if (n.type === 'hub') {
+    const daysSince = n.daysSince ?? 0;
+    if (daysSince <= 1) return COLORS.hub;
+    if (daysSince >= 7) return '#8A8582';
+    const ratio = (daysSince - 1) / 6;
+    const r = Math.round(207 - (207 - 138) * ratio);
+    const g = Math.round(163 - (163 - 133) * ratio);
+    const b = Math.round(101 - (101 - 130) * ratio);
+    return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+  }
+  return COLORS[n.source_type] || COLORS.default;
+}
 function isHub(n)     { return n.type === 'hub'; }
 function nodeR(n)     { return isHub(n) ? 14 : 6; }
 function ha(hex, a)   { return hex + Math.round(Math.max(0, Math.min(1, a)) * 255).toString(16).padStart(2, '0'); }
@@ -139,7 +151,14 @@ export default function MapCanvas({
 
     const sim = d3.forceSimulation(sn)
       .force('link', d3.forceLink(sl).id(d => d.id)
-        .distance(65).strength(0.75))
+        .distance(65).strength(link => {
+          let str = 0.75;
+          const hub = isHub(link.source) ? link.source : (isHub(link.target) ? link.target : null);
+          if (hub && hub.daysSince >= 7) {
+            str *= Math.max(0.2, 1.0 - (hub.daysSince - 7) / 23);
+          }
+          return str;
+        }))
       .force('charge', d3.forceManyBody()
         .strength(n => isHub(n) ? -130 : -30)
         .distanceMax(280))
@@ -387,38 +406,55 @@ export default function MapCanvas({
         ctx.stroke();
       });
 
-      // Render active candidate connections (Drift Windows)
+      // Render active candidate connections (Drift Windows and Near-Misses)
       if (st.activeCandidates && st.activeCandidates.length > 0) {
         st.activeCandidates.forEach(cand => {
           const nodeA = sn.find(n => n.id === cand.item_id_a);
           const nodeB = sn.find(n => n.id === cand.item_id_b);
           if (nodeA && nodeB && nodeA.x != null && nodeB.x != null) {
-            // Calculate remaining time ratio against 6 hours (21600 seconds)
-            const expiresAt = new Date(cand.expires_at).getTime();
-            const now = Date.now();
-            const timeLeftMs = Math.max(0, expiresAt - now);
-            const totalDurationMs = 6 * 60 * 60 * 1000;
-            const ratio = Math.min(1.0, timeLeftMs / totalDurationMs);
+            if (cand.status === 'near_miss') {
+              // Only draw near-miss when hovering one of its nodes
+              if (hov !== cand.item_id_a && hov !== cand.item_id_b) {
+                return;
+              }
+              // Faint, low-opacity edge
+              ctx.save();
+              ctx.beginPath();
+              ctx.moveTo(nodeA.x, nodeA.y);
+              ctx.lineTo(nodeB.x, nodeB.y);
+              ctx.strokeStyle = 'rgba(138,133,130,0.28)'; // faint gray
+              ctx.lineWidth = 1.0 / k;
+              ctx.setLineDash([4, 4]); // dashed line to indicate "almost connected"
+              ctx.stroke();
+              ctx.restore();
+            } else {
+              // Calculate remaining time ratio against 6 hours (21600 seconds)
+              const expiresAt = new Date(cand.expires_at).getTime();
+              const now = Date.now();
+              const timeLeftMs = Math.max(0, expiresAt - now);
+              const totalDurationMs = 6 * 60 * 60 * 1000;
+              const ratio = Math.min(1.0, timeLeftMs / totalDurationMs);
 
-            // Pulsing effect for lineWidth
-            const pulse = Math.sin(now / 150) * 0.4 + 1.2; // fluctuates between 0.8 and 1.6
-            const lineWidth = (pulse * ratio) / k;
+              // Pulsing effect for lineWidth
+              const pulse = Math.sin(now / 150) * 0.4 + 1.2; // fluctuates between 0.8 and 1.6
+              const lineWidth = (pulse * ratio) / k;
 
-            // Opacity decay
-            const baseAlpha = 0.95;
-            const alpha = baseAlpha * ratio;
+              // Opacity decay
+              const baseAlpha = 0.95;
+              const alpha = baseAlpha * ratio;
 
-            // Interpolate color desaturation: glowing gold/orange (230, 160, 60) -> desaturated gray (138, 133, 130)
-            const r = Math.round(230 * ratio + 138 * (1 - ratio));
-            const g = Math.round(160 * ratio + 133 * (1 - ratio));
-            const b = Math.round(60 * ratio + 130 * (1 - ratio));
+              // Interpolate color desaturation: glowing gold/orange (230, 160, 60) -> desaturated gray (138, 133, 130)
+              const r = Math.round(230 * ratio + 138 * (1 - ratio));
+              const g = Math.round(160 * ratio + 133 * (1 - ratio));
+              const b = Math.round(60 * ratio + 130 * (1 - ratio));
 
-            ctx.beginPath();
-            ctx.moveTo(nodeA.x, nodeA.y);
-            ctx.lineTo(nodeB.x, nodeB.y);
-            ctx.strokeStyle = `rgba(${r},${g},${b},${alpha})`;
-            ctx.lineWidth = lineWidth;
-            ctx.stroke();
+              ctx.beginPath();
+              ctx.moveTo(nodeA.x, nodeA.y);
+              ctx.lineTo(nodeB.x, nodeB.y);
+              ctx.strokeStyle = `rgba(${r},${g},${b},${alpha})`;
+              ctx.lineWidth = lineWidth;
+              ctx.stroke();
+            }
           }
         });
       }
@@ -693,6 +729,7 @@ export default function MapCanvas({
     if (hit) {
       st.isDragging = true;
       st.dragNode   = hit;
+      st.dragStart  = { mx, my };
       hit.fx = hit.x;
       hit.fy = hit.y;
     } else {
@@ -705,6 +742,17 @@ export default function MapCanvas({
     const {mx, my} = getMouse(e);
     const st = s.current;
     if (st.isDragging && st.dragNode) {
+      const dragStart = st.dragStart;
+      const moved = dragStart ? Math.abs(mx - dragStart.mx) + Math.abs(my - dragStart.my) : 0;
+      if (dragStart && moved < 15) {
+        if (isHub(st.dragNode)) {
+          AudioEngine.playClusterChord();
+        } else {
+          AudioEngine.playClick();
+        }
+        onNodeClick?.(st.dragNode);
+      }
+
       if (!st.physicsFrozen) {
         if (!isHub(st.dragNode)) {
           st.dragNode.fx = null;
@@ -717,9 +765,10 @@ export default function MapCanvas({
       }
       st.isDragging = false;
       st.dragNode   = null;
+      st.dragStart  = null;
     } else if (st.panStart) {
       const moved = Math.abs(mx - st.panStart.mx) + Math.abs(my - st.panStart.my);
-      if (moved < 6) {
+      if (moved < 15) {
         const hit = hitNode(mx, my);
         if (hit) {
           if (isHub(hit)) {
@@ -756,6 +805,7 @@ export default function MapCanvas({
       if (hit) {
         st.isDragging = true;
         st.dragNode   = hit;
+        st.dragStart  = { mx, my };
         hit.fx = hit.x;
         hit.fy = hit.y;
       } else {
@@ -810,6 +860,25 @@ export default function MapCanvas({
   function handleTouchEnd(e) {
     const st = s.current;
     if (st.isDragging && st.dragNode) {
+      let mx = st.dragNode.x;
+      let my = st.dragNode.y;
+      if (e.changedTouches.length === 1) {
+        const touch = getTouch(e.changedTouches[0]);
+        mx = touch.mx;
+        my = touch.my;
+      }
+
+      const dragStart = st.dragStart;
+      const moved = dragStart ? Math.abs(mx - dragStart.mx) + Math.abs(my - dragStart.my) : 0;
+      if (dragStart && moved < 15) {
+        if (isHub(st.dragNode)) {
+          AudioEngine.playClusterChord();
+        } else {
+          AudioEngine.playClick();
+        }
+        onNodeClick?.(st.dragNode);
+      }
+
       if (!st.physicsFrozen) {
         if (!isHub(st.dragNode)) {
           st.dragNode.fx = null;
@@ -822,6 +891,7 @@ export default function MapCanvas({
       }
       st.isDragging = false;
       st.dragNode   = null;
+      st.dragStart  = null;
     } else if (st.panStart) {
       // Check if it was a quick tap
       if (e.changedTouches.length === 1) {

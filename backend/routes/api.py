@@ -110,7 +110,7 @@ async def get_items(
         # Retrieve items
         offset = (page - 1) * limit
         items_query = f"""
-            SELECT id, title, summary, source_type, source_url, tags, created_at
+            SELECT id, title, summary, source_type, source_url, tags, created_at, context_note
             FROM items
             {where_str}
             ORDER BY created_at DESC
@@ -122,6 +122,7 @@ async def get_items(
 
         items = []
         for r in rows:
+            context_note = r[7] if len(r) > 7 else None
             items.append(
                 PaginatedItem(
                     id=r[0],
@@ -131,6 +132,7 @@ async def get_items(
                     source_url=r[4],
                     tags=r[5] if r[5] is not None else [],
                     created_at=r[6],
+                    context_note=context_note,
                 )
             )
 
@@ -437,7 +439,7 @@ async def delete_item(
     """Delete an item and its associated quizzes."""
     try:
         async with db.cursor() as cur:
-            # 1. Delete associated quizzes and item_chunks in the same transaction
+            # 1. Delete associated quizzes, item_chunks, reminders, and insight candidates in the same transaction
             await cur.execute(
                 "DELETE FROM quizzes WHERE item_id = %s AND user_id = %s;",
                 (item_id, user.id)
@@ -445,6 +447,14 @@ async def delete_item(
             await cur.execute(
                 "DELETE FROM item_chunks WHERE item_id = %s AND user_id = %s;",
                 (item_id, user.id)
+            )
+            await cur.execute(
+                "DELETE FROM reminders WHERE item_id = %s AND user_id = %s;",
+                (item_id, user.id)
+            )
+            await cur.execute(
+                "DELETE FROM insight_candidates WHERE (item_id_a = %s OR item_id_b = %s) AND user_id = %s;",
+                (item_id, item_id, user.id)
             )
             
             # 2. Delete item with strict IDOR protection (must include user_id filter)
@@ -568,6 +578,12 @@ async def get_graph(
     from backend.services.redis_client import redis
     import json
     
+    # Register frontend liveness for Living Graph cooling trigger
+    try:
+        await redis.setex(f"user:last_frontend_active:{user.id}", 72 * 3600, "1")
+    except Exception as act_err:
+        logger.warning("Failed to register user frontend liveness: %s", act_err)
+
     # 1. Try to read from cache
     cache_key = f"graph:{user.id}"
     try:
@@ -595,7 +611,7 @@ async def get_graph(
     async with db.cursor() as cur:
         await cur.execute(
             """
-            SELECT id, label, member_ids
+            SELECT id, label, member_ids, last_active_at, streak_days
             FROM semantic_hubs
             WHERE user_id = %s
             """,
@@ -610,9 +626,23 @@ async def get_graph(
     validated_hubs = []
     hub_member_set = set()
     for h_row in hub_rows:
-        hub_id, label, raw_members = h_row
+        if len(h_row) >= 5:
+            hub_id, label, raw_members, last_active, streak = h_row[:5]
+        else:
+            hub_id, label, raw_members = h_row[:3]
+            last_active, streak = None, 0
         member_ids = [mid for mid in (raw_members or []) if mid in valid_item_ids]
-        validated_hubs.append(GraphHub(id=hub_id, label=label, member_ids=member_ids))
+        if last_active and last_active.tzinfo is None:
+            last_active = last_active.replace(tzinfo=timezone.utc)
+        validated_hubs.append(
+            GraphHub(
+                id=hub_id,
+                label=label,
+                member_ids=member_ids,
+                last_active_at=last_active,
+                streak_days=streak or 0
+            )
+        )
         hub_member_set.update(member_ids)
 
     # 5. Build nodes list
@@ -643,53 +673,41 @@ async def get_graph(
     if recent_item_ids:
         use_hub_only = len(item_rows) > 200
         async with db.cursor() as cur:
-            if use_hub_only:
-                # Skip full pairwise similarity search. Only compare items sharing a semantic hub.
-                await cur.execute(
-                    """
-                    SELECT s.id AS source_id, t.id AS target_id, t.dist
-                    FROM (
-                        SELECT id, embedding
-                        FROM items
-                        WHERE id = ANY(%s) AND user_id = %s
-                    ) s
-                    CROSS JOIN LATERAL (
-                        SELECT t_inner.id AS id, (s.embedding <=> t_inner.embedding) AS dist
-                        FROM items t_inner
-                        WHERE t_inner.user_id = %s AND t_inner.id != s.id
-                          AND EXISTS (
-                              SELECT 1 FROM semantic_hubs
-                              WHERE user_id = %s
-                                AND s.id = ANY(member_ids)
-                                AND t_inner.id = ANY(member_ids)
-                          )
-                        ORDER BY dist
-                        LIMIT 6
-                    ) t
-                    """,
-                    (recent_item_ids, user.id, user.id, user.id)
-                )
-            else:
-                # Normal pairwise comparison via HNSW index
-                await cur.execute(
-                    """
-                    SELECT s.id AS source_id, t.id AS target_id, t.dist
-                    FROM (
-                        SELECT id, embedding
-                        FROM items
-                        WHERE id = ANY(%s) AND user_id = %s
-                    ) s
-                    CROSS JOIN LATERAL (
-                        SELECT id, (s.embedding <=> embedding) AS dist
-                        FROM items
-                        WHERE user_id = %s AND id != s.id
-                        ORDER BY dist
-                        LIMIT 6
-                    ) t
-                    """,
-                    (recent_item_ids, user.id, user.id)
-                )
+            # Query standard nearest-neighbors lateral join using pgvector (HNSW index active)
+            await cur.execute(
+                """
+                SELECT s.id AS source_id, t.id AS target_id, t.dist
+                FROM (
+                    SELECT id, embedding
+                    FROM items
+                    WHERE id = ANY(%s) AND user_id = %s
+                ) s
+                CROSS JOIN LATERAL (
+                    SELECT id, (s.embedding <=> embedding) AS dist
+                    FROM items
+                    WHERE user_id = %s AND id != s.id
+                    ORDER BY dist
+                    LIMIT 6
+                ) t
+                """,
+                (recent_item_ids, user.id, user.id)
+            )
             edge_rows = await cur.fetchall()
+
+        if use_hub_only:
+            # Filter in Python: only keep edges where source and target share a hub
+            item_to_hubs = {}
+            for hub in validated_hubs:
+                for member_id in hub.member_ids:
+                    item_to_hubs.setdefault(member_id, set()).add(hub.id)
+            
+            filtered_edge_rows = []
+            for source_id, target_id, dist in edge_rows:
+                hubs_a = item_to_hubs.get(source_id, set())
+                hubs_b = item_to_hubs.get(target_id, set())
+                if hubs_a & hubs_b:
+                    filtered_edge_rows.append((source_id, target_id, dist))
+            edge_rows = filtered_edge_rows
 
         # Deduplicate edges: keep only one edge between A and B, using lower ID as source
         for source_id, target_id, dist in edge_rows:
@@ -711,20 +729,25 @@ async def get_graph(
                 SELECT id, item_id_a, item_id_b, similarity_score, expires_at, status, insight_text
                 FROM insight_candidates
                 WHERE user_id = %s
-                  AND status = 'delivered'
-                  AND expires_at > NOW()
+                  AND (
+                      (status = 'delivered' AND expires_at > NOW())
+                      OR (bucket = 'near_miss' AND status = 'near_miss' AND created_at >= NOW() - INTERVAL '72 hours')
+                  )
                 """,
                 (user.id,)
             )
             candidate_rows = await cur.fetchall()
 
         for c_row in candidate_rows:
+            exp_val = c_row[4]
+            if exp_val and exp_val.tzinfo is None:
+                exp_val = exp_val.replace(tzinfo=timezone.utc)
             cand = GraphCandidate(
                 id=c_row[0],
                 item_id_a=c_row[1],
                 item_id_b=c_row[2],
                 similarity_score=float(c_row[3]),
-                expires_at=c_row[4],
+                expires_at=exp_val,
                 status=c_row[5],
                 insight_text=c_row[6]
             )
@@ -774,8 +797,10 @@ async def get_active_candidates(
                 SELECT id, item_id_a, item_id_b, similarity_score, expires_at, status, insight_text
                 FROM insight_candidates
                 WHERE user_id = %s
-                  AND status = 'delivered'
-                  AND expires_at > NOW()
+                  AND (
+                    (status = 'delivered' AND expires_at > NOW())
+                    OR status = 'near_miss'
+                  )
                 """,
                 (user.id,)
             )
@@ -1112,7 +1137,7 @@ async def create_new_reminder(
         
     try:
         reminder_id, final_message, was_truncated = await create_reminder(
-            user.id, req.message, remind_at, db
+            user.id, req.message, remind_at, db, item_id=req.item_id
         )
         await db.commit()
     except ValueError as val_err:
@@ -1886,6 +1911,361 @@ async def export_user_data(
         media_type="application/json",
         headers=headers
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 schemas & routes
+# ---------------------------------------------------------------------------
+import json
+from pydantic import BaseModel, Field
+from fastapi import WebSocket, WebSocketDisconnect
+
+class UserMilestonesResponse(BaseModel):
+    node_count: int
+    unlocked: List[str]
+
+class UserSelfDescriptionRequest(BaseModel):
+    self_description: str
+
+class UserProfileResponse(BaseModel):
+    self_description: Optional[str]
+    mind_type: Optional[str]
+    mind_type_summary: Optional[str]
+    mind_type_trajectory: List[dict]
+
+class DetailedDimension(BaseModel):
+    score: float
+    threshold: float
+    explanation: str
+
+class DetailedProfileResponse(BaseModel):
+    breadth: DetailedDimension
+    linkage: DetailedDimension
+    velocity: DetailedDimension
+    novelty: DetailedDimension
+
+@router.get(
+    "/user/milestones",
+    response_model=UserMilestonesResponse,
+    tags=["profile"],
+    summary="Get user node milestone unlocks",
+)
+async def get_user_milestones(
+    user: UserContext = Depends(get_current_user),
+    db: psycopg.AsyncConnection = Depends(get_db),
+):
+    async with db.cursor() as cur:
+        await cur.execute("SELECT COUNT(*) FROM items WHERE user_id = %s;", (user.id,))
+        count_row = await cur.fetchone()
+        node_count = count_row[0] if count_row else 0
+
+        await cur.execute("SELECT node_milestones FROM users WHERE id = %s;", (user.id,))
+        row = await cur.fetchone()
+        milestones = row[0] if row and row[0] else {"unlocked": []}
+        if isinstance(milestones, str):
+            try:
+                milestones = json.loads(milestones)
+            except Exception:
+                milestones = {"unlocked": []}
+        
+        return {
+            "node_count": node_count,
+            "unlocked": milestones.get("unlocked", [])
+        }
+
+@router.post(
+    "/user/self-description",
+    tags=["profile"],
+    summary="Save user self-description interest statement",
+)
+async def post_self_description(
+    req: UserSelfDescriptionRequest,
+    user: UserContext = Depends(get_current_user),
+    db: psycopg.AsyncConnection = Depends(get_db),
+):
+    async with db.cursor() as cur:
+        await cur.execute(
+            "UPDATE users SET self_description = %s WHERE id = %s;",
+            (req.self_description.strip(), user.id)
+        )
+        await db.commit()
+    return {"status": "ok"}
+
+@router.get(
+    "/user/profile",
+    response_model=UserProfileResponse,
+    tags=["profile"],
+    summary="Get user cognitive profile info",
+    dependencies=[Depends(rate_limit("profile", 4))],
+)
+async def get_user_profile(
+    user: UserContext = Depends(get_current_user),
+    db: psycopg.AsyncConnection = Depends(get_db),
+):
+    async with db.cursor() as cur:
+        await cur.execute(
+            "SELECT self_description, mind_type, mind_type_summary, mind_type_trajectory FROM users WHERE id = %s;",
+            (user.id,)
+        )
+        row = await cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        self_desc, mind_type, summary, traj = row
+        
+        # Check node count to see if we should unlock and lazy-calculate
+        await cur.execute("SELECT COUNT(*) FROM items WHERE user_id = %s;", (user.id,))
+        count_row = await cur.fetchone()
+        node_count = count_row[0] if count_row else 0
+        
+        if node_count >= 15 and not summary:
+            try:
+                from backend.scheduler.scheduler import run_nightly_mind_type_for_user, get_pool
+                pool = await get_pool()
+                await run_nightly_mind_type_for_user(user.id, pool)
+                
+                await cur.execute("SELECT mind_type FROM users WHERE id = %s;", (user.id,))
+                mt_row = await cur.fetchone()
+                mind_type = mt_row[0] if mt_row else None
+                
+                if mind_type:
+                    await cur.execute(
+                        "SELECT label FROM semantic_hubs WHERE user_id = %s ORDER BY array_length(member_ids, 1) DESC LIMIT 3;",
+                        (user.id,)
+                    )
+                    hubs = [r[0] for r in await cur.fetchall()]
+                    hubs_str = ", ".join(hubs) if hubs else "general topics"
+                    
+                    from backend.services.ai_cascade import AICascade
+                    cascade = AICascade()
+                    prompt = (
+                        f"You are a Cognitive Graph Profiler. The user has been classified as {mind_type} (MBTI-style Mind Type).\n"
+                        f"Their top 3 active clusters are: {hubs_str}.\n"
+                        f"This is their first classification. Focus on explaining the primary cognitive driver of their signature.\n\n"
+                        f"Write a highly personalized, analytical, and engaging 4-sentence profile summary explaining their cognitive style based on these topics.\n"
+                        f"Constraint: Do not use clinical jargon, do not use template words, and connect the topics explicitly."
+                    )
+                    summary = await cascade.call_llm(prompt)
+                    if not summary or len(summary) < 10:
+                        summary = f"You are actively building a graph of ideas under {hubs_str}. Your current Mind Type is {mind_type}."
+                        
+                    await cur.execute(
+                        "UPDATE users SET mind_type_summary = %s, mind_type_detailed = NULL WHERE id = %s;",
+                        (summary, user.id)
+                    )
+                    await db.commit()
+                    
+                    # Reload trajectory list
+                    await cur.execute("SELECT mind_type_trajectory FROM users WHERE id = %s;", (user.id,))
+                    t_row = await cur.fetchone()
+                    traj = t_row[0] if t_row else []
+            except Exception as lazy_err:
+                logger.error("Failed to lazy generate initial mind type profile: %s", lazy_err)
+
+        traj_list = traj if traj else []
+        if isinstance(traj_list, str):
+            try:
+                traj_list = json.loads(traj_list)
+            except Exception:
+                traj_list = []
+                
+        return {
+            "self_description": self_desc,
+            "mind_type": mind_type,
+            "mind_type_summary": summary,
+            "mind_type_trajectory": traj_list
+        }
+
+@router.post(
+    "/user/profile/detailed",
+    response_model=DetailedProfileResponse,
+    tags=["profile"],
+    summary="Get detailed graph metrics and explanation on-demand",
+    dependencies=[Depends(rate_limit("profile_detailed", 4))],
+)
+async def get_detailed_profile(
+    user: UserContext = Depends(get_current_user),
+    db: psycopg.AsyncConnection = Depends(get_db),
+):
+    async with db.cursor() as cur:
+        # Check node count
+        await cur.execute("SELECT COUNT(*) FROM items WHERE user_id = %s;", (user.id,))
+        count_row = await cur.fetchone()
+        node_count = count_row[0] if count_row else 0
+        if node_count < 15:
+            raise HTTPException(status_code=403, detail="Detailed profile unlocks at 15 nodes.")
+
+        # 1. Breadth (Entropy of hubs)
+        await cur.execute("SELECT id, member_ids, label FROM semantic_hubs WHERE user_id = %s;", (user.id,))
+        hubs = await cur.fetchall()
+        hub_labels = [h[2] for h in hubs]
+        
+        total_items_in_hubs = 0
+        hub_sizes = []
+        item_to_hub = {}
+        for h_id, member_ids, label in hubs:
+            size = len(member_ids) if member_ids else 0
+            hub_sizes.append(size)
+            total_items_in_hubs += size
+            if member_ids:
+                for item_id in member_ids:
+                    item_to_hub[item_id] = h_id
+
+        entropy = 0.0
+        if total_items_in_hubs > 0:
+            import math
+            for size in hub_sizes:
+                if size > 0:
+                    p = size / total_items_in_hubs
+                    entropy -= p * math.log(p)
+
+        # 2. Linkage (Cross-hub confirmed candidates ratio)
+        await cur.execute(
+            "SELECT item_id_a, item_id_b FROM insight_candidates WHERE user_id = %s AND status = 'confirmed';",
+            (user.id,)
+        )
+        edges = await cur.fetchall()
+        cross_hub_count = 0
+        total_edges = len(edges)
+        for a, b in edges:
+            hub_a = item_to_hub.get(a)
+            hub_b = item_to_hub.get(b)
+            if hub_a is not None and hub_b is not None and hub_a != hub_b:
+                cross_hub_count += 1
+        linkage_ratio = (cross_hub_count / total_edges) if total_edges > 0 else 0.0
+
+        # 3. Velocity (Nodes saved in last 7 days)
+        await cur.execute(
+            "SELECT COUNT(*) FROM items WHERE user_id = %s AND created_at >= NOW() - INTERVAL '7 days';",
+            (user.id,)
+        )
+        vel_row = await cur.fetchone()
+        velocity = vel_row[0] if vel_row else 0
+
+        # 4. Novelty (Average distance of new saves to old saves)
+        await cur.execute(
+            "SELECT embedding FROM items WHERE user_id = %s AND created_at >= NOW() - INTERVAL '7 days' AND embedding IS NOT NULL;",
+            (user.id,)
+        )
+        new_items = await cur.fetchall()
+        
+        await cur.execute(
+            "SELECT embedding FROM items WHERE user_id = %s AND created_at < NOW() - INTERVAL '7 days' AND embedding IS NOT NULL;",
+            (user.id,)
+        )
+        old_items = await cur.fetchall()
+
+        novelty = 0.0
+        if new_items and old_items:
+            def parse_vector(emb):
+                if isinstance(emb, str):
+                    try:
+                        return [float(x) for x in emb.strip("[]").split(",")]
+                    except Exception:
+                        return [0.0] * 384
+                return list(emb)
+
+            new_vecs = [parse_vector(n[0]) for n in new_items]
+            old_vecs = [parse_vector(o[0]) for o in old_items]
+
+            total_dist = 0.0
+            pair_count = 0
+            for nv in new_vecs:
+                for ov in old_vecs:
+                    sim = sum(x * y for x, y in zip(nv, ov))
+                    dist = 1.0 - sim
+                    total_dist += dist
+                    pair_count += 1
+            if pair_count > 0:
+                novelty = total_dist / pair_count
+
+        # Check if we have cached explanations in the db
+        await cur.execute("SELECT mind_type_detailed FROM users WHERE id = %s;", (user.id,))
+        row = await cur.fetchone()
+        cached_detailed = row[0] if row else None
+        
+        explanations = {}
+        if cached_detailed:
+            if isinstance(cached_detailed, str):
+                try:
+                    explanations = json.loads(cached_detailed)
+                except Exception:
+                    pass
+            elif isinstance(cached_detailed, dict):
+                explanations = cached_detailed
+
+        # Call LLM to generate the explanations only on cache miss
+        if not explanations:
+            from backend.services.ai_cascade import AICascade
+            cascade = AICascade()
+            
+            hubs_str = ", ".join(hub_labels) if hub_labels else "None"
+            b_label = "Breadth" if entropy >= 1.20 else "Focus"
+            l_label = "Linkage" if linkage_ratio >= 0.20 else "Isolation"
+            v_label = "Velocity" if velocity >= 10 else "Stability"
+            n_label = "Novelty" if novelty >= 0.35 else "Routine"
+
+            prompt = (
+                "You are an expert Cognitive Graph Profiler analyzing a developer/knowledge worker's personal memory network.\n"
+                f"The user's top active topic clusters (hubs) are: [{hubs_str}].\n\n"
+                "Analyze the following 4 structural dimensions of their graph and write exactly one deeply analytical, personalized, and engaging sentence explanation for each, explaining what their score means for their cognitive habits.\n\n"
+                "DIMENSION DEFINITIONS:\n"
+                "1. Breadth (B/F): Shannon Entropy of topic clusters. High breadth (B) means wide curiosity across multiple domains. Low focus (F) means deep, concentrated focus on a few key areas.\n"
+                "2. Linkage (L/I): Ratio of cross-hub connections. High linkage (L) means active synthesis and connecting ideas between different domains. Low independence (I) means topics are kept clean, modular, and separate.\n"
+                "3. Velocity (V/S): Ingestion frequency of new items this week. High velocity (V) represents rapid information gathering. Low stability (S) indicates a slow, highly curated, and meditative pacing.\n"
+                "4. Novelty (N/R): Cosine distance of new saves to historical baseline. High novelty (N) means actively exploring fresh, unfamiliar territories. Low routine (R) means reinforcing and expanding current expertise.\n\n"
+                "USER PERFORMANCE STATS:\n"
+                f"- Breadth: Entropy is {entropy:.2f} (Benchmark: 1.20). Category: {b_label}.\n"
+                f"- Linkage: Cross-hub ratio is {linkage_ratio:.2f} (Benchmark: 0.20). Category: {l_label}.\n"
+                f"- Velocity: Ingestion count is {velocity} items (Benchmark: 10). Category: {v_label}.\n"
+                f"- Novelty: Distance is {novelty:.2f} (Benchmark: 0.35). Category: {n_label}.\n\n"
+                "CONSTRAINTS:\n"
+                "- Write exactly one concise sentence per dimension.\n"
+                "- Speak directly to the user (use 'you' and 'your').\n"
+                "- Avoid repeating the raw numerical values or benchmarks in the text. Focus entirely on the qualitative meaning (e.g., use phrases like 'exceeding the target baseline', 'falling short of the synthesis threshold', 'concentrating your energy', 'exploring highly unfamiliar ground').\n"
+                "- Connect the explanations back to their active topic clusters if possible.\n"
+                "- Keep the tone intellectual, precise, and highly insightful.\n\n"
+                "Format your response as a valid JSON object with keys: \"breadth\", \"linkage\", \"velocity\", \"novelty\"."
+            )
+
+            res = await cascade.call_llm(prompt)
+            if res:
+                try:
+                    import re
+                    match = re.search(r"\{.*\}", res, re.DOTALL)
+                    if match:
+                        explanations = json.loads(match.group(0))
+                        await cur.execute(
+                            "UPDATE users SET mind_type_detailed = %s WHERE id = %s;",
+                            (json.dumps(explanations), user.id)
+                        )
+                        await db.commit()
+                except Exception as e:
+                    logger.error("Failed to parse and cache detailed profile JSON: %s", e)
+
+        b_exp = explanations.get("breadth") or (
+            f"Your entropy is {entropy:.2f} (Threshold: 1.20). You maintain "
+            + ("a wide breadth across multiple hubs." if entropy >= 1.20 else "a tight focus on a few core hubs.")
+        )
+        l_exp = explanations.get("linkage") or (
+            f"Your cross-hub linkage ratio is {linkage_ratio:.2f} (Threshold: 0.20). You tend to "
+            + ("actively connect ideas across hubs." if linkage_ratio >= 0.20 else "keep your clusters relatively isolated.")
+        )
+        v_exp = explanations.get("velocity") or (
+            f"You saved {velocity} items this week (Threshold: 10). Your graph growth is "
+            + ("expanding rapidly." if velocity >= 10 else "stable and steady.")
+        )
+        n_exp = explanations.get("novelty") or (
+            f"Your new-concept distance is {novelty:.2f} (Threshold: 0.35). You are "
+            + ("frequently exploring novel directions." if novelty >= 0.35 else "reinforcing routine concepts.")
+        )
+
+        return {
+            "breadth": {"score": float(entropy), "threshold": 1.20, "explanation": b_exp},
+            "linkage": {"score": float(linkage_ratio), "threshold": 0.20, "explanation": l_exp},
+            "velocity": {"score": float(velocity), "threshold": 10.0, "explanation": v_exp},
+            "novelty": {"score": float(novelty), "threshold": 0.35, "explanation": n_exp}
+        }
 
 
 @router.websocket("/ws")

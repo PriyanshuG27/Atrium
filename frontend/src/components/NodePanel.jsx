@@ -21,6 +21,8 @@ import {
   ArrowRight,
   BookmarkSimple,
   Lightning,
+  Trash,
+  Warning,
 } from '@phosphor-icons/react';
 import { NodePanelSkeleton } from './Skeleton';
 import { useToast } from './Toast';
@@ -113,6 +115,93 @@ function QuickAction({ icon: Icon, label, onClick, href, target, rel, ariaLabel,
   );
 }
 
+function TracePanel({ candidate, currentNode, activeNodes }) {
+  const otherId = candidate.item_id_a === currentNode.id ? candidate.item_id_b : candidate.item_id_a;
+  const otherNode = activeNodes.find(n => n.id === otherId);
+  const otherTitle = otherNode ? otherNode.title : 'Another signal';
+  
+  const similarityPct = Math.round(candidate.similarity_score * 100);
+  
+  let daysApart = 0;
+  if (otherNode && currentNode.created_at && otherNode.created_at) {
+    const dateA = new Date(currentNode.created_at);
+    const dateB = new Date(otherNode.created_at);
+    daysApart = Math.abs(Math.floor((dateA.getTime() - dateB.getTime()) / (1000 * 60 * 60 * 24)));
+  }
+  
+  const isNearMiss = candidate.status === 'near_miss';
+  const [timeLeft, setTimeLeft] = useState('');
+  
+  useEffect(() => {
+    if (isNearMiss || !candidate.expires_at) return;
+    
+    const updateTimer = () => {
+      const diff = new Date(candidate.expires_at).getTime() - Date.now();
+      if (diff <= 0) {
+        setTimeLeft('Expired');
+        return;
+      }
+      const h = Math.floor(diff / 3600000).toString().padStart(2, '0');
+      const m = Math.floor((diff % 3600000) / 60000).toString().padStart(2, '0');
+      const s = Math.floor((diff % 60000) / 1000).toString().padStart(2, '0');
+      setTimeLeft(`${h}h ${m}m ${s}s`);
+    };
+    
+    updateTimer();
+    const tid = setInterval(updateTimer, 1000);
+    return () => clearInterval(tid);
+  }, [candidate.expires_at, isNearMiss]);
+  
+  return (
+    <div style={{
+      marginBottom: '1.25rem',
+      padding: '1rem',
+      borderRadius: 8,
+      background: 'rgba(207,163,101,0.03)',
+      border: '1px dashed rgba(207,163,101,0.18)',
+      fontFamily: "'Inter', sans-serif",
+    }}>
+      {/* Title & Status badge */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--accent-gold)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          🔍 Connection Trace
+        </span>
+        {isNearMiss ? (
+          <span style={{ fontSize: '0.62rem', fontFamily: 'monospace', background: 'rgba(138,133,130,0.15)', color: '#8A8582', padding: '0.2rem 0.5rem', borderRadius: 4, border: '1px dashed rgba(138,133,130,0.3)' }}>
+            NEAR-MISS (COOLDOWN)
+          </span>
+        ) : (
+          <span style={{ fontSize: '0.68rem', fontFamily: 'monospace', background: 'rgba(207,163,101,0.12)', color: 'var(--accent-gold)', padding: '0.2rem 0.5rem', borderRadius: 4, fontWeight: 'bold' }}>
+            ⏳ {timeLeft || '--h --m --s'}
+          </span>
+        )}
+      </div>
+      
+      {/* Details */}
+      <div style={{ fontSize: '0.82rem', color: '#B3ACA8', lineHeight: 1.5, marginBottom: '0.5rem' }}>
+        Connected with <span style={{ color: '#F0EDE8', fontWeight: 500 }}>"{otherTitle}"</span>
+      </div>
+      
+      <div style={{ display: 'flex', gap: '1rem', fontSize: '0.75rem', color: '#8A8582', marginBottom: '0.75rem' }}>
+        <div>🔥 <span style={{ color: 'var(--accent-gold)' }}>{similarityPct}%</span> similarity</div>
+        <div>📅 <span style={{ color: '#F0EDE8' }}>{daysApart}d</span> save gap</div>
+      </div>
+      
+      {/* Tension Insight */}
+      <div style={{
+        fontSize: '0.78rem',
+        color: '#8A8582',
+        fontStyle: 'italic',
+        lineHeight: 1.4,
+        paddingTop: '0.5rem',
+        borderTop: '1px solid rgba(240,237,232,0.06)'
+      }}>
+        "{candidate.insight_text || 'Active connection pending drift window closure.'}"
+      </div>
+    </div>
+  );
+}
+
 export default function NodePanel({
   node,
   selectedNode,
@@ -120,8 +209,10 @@ export default function NodePanel({
   onClose,
   hubs = [],
   activeNodes = [],
+  activeCandidates = [],
   onViewAllMembers,
   onViewInGraph,
+  onDelete,
 }) {
   const displayNode = node || selectedNode;
 
@@ -134,6 +225,7 @@ export default function NodePanel({
   const [selectedOptionIdx, setSelectedOptionIdx]  = useState(null);
   const [quizAnswered,      setQuizAnswered]       = useState(false);
   const [copied,            setCopied]             = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm]  = useState(false);
 
   const panelRef = useRef(null);
   const { addToast } = useToast();
@@ -157,6 +249,7 @@ export default function NodePanel({
       setSelectedOptionIdx(null);
       setQuizAnswered(false);
       setCopied(false);
+      setShowDeleteConfirm(false);
       // Scroll panel body back to top
       if (panelRef.current) panelRef.current.scrollTop = 0;
     }
@@ -168,6 +261,27 @@ export default function NodePanel({
     window.history.pushState({}, '', `${paths.archive}?search=%23${encodeURIComponent(tag)}`);
     window.dispatchEvent(new PopStateEvent('popstate'));
     if (onClose) onClose();
+  };
+
+  const handleDelete = () => {
+    setShowDeleteConfirm(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!displayNode) return;
+    try {
+      const res = await fetch(`/api/items/${displayNode.id}`, { method: 'DELETE' });
+      if (res.ok) {
+        addToast('Signal permanently deleted', 'success');
+        if (onDelete) onDelete(displayNode.id);
+        if (onClose) onClose();
+      } else {
+        addToast('Failed to delete signal', 'error');
+      }
+    } catch (err) {
+      console.error('Delete failed:', err);
+      addToast('Failed to delete signal', 'error');
+    }
   };
 
   // Escape key + Tab focus trap
@@ -255,6 +369,10 @@ export default function NodePanel({
   const readTime   = readingTime(displayNode.summary);
   const hasQuiz    = !!(displayNode.quiz || displayNode.has_quiz || displayNode.quiz_id);
 
+  const activeCandidate = !isHub && activeCandidates && activeCandidates.find(
+    cand => cand.item_id_a === displayNode.id || cand.item_id_b === displayNode.id
+  );
+
   // Hub info
   let hubInfo = null;
   if (isHub) {
@@ -322,6 +440,10 @@ export default function NodePanel({
       @keyframes nodePanelSlideInReduced {
         from { opacity: 0; }
         to   { opacity: 1; }
+      }
+      @keyframes slideUp {
+        from { transform: translateY(100%); }
+        to   { transform: translateY(0); }
       }
       .node-panel-inner {
         animation: nodePanelSlideIn 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
@@ -516,6 +638,12 @@ export default function NodePanel({
                   accentColor={cfg.color}
                 />
               )}
+              <QuickAction
+                icon={Trash}
+                label="Delete"
+                onClick={handleDelete}
+                accentColor="#ef4444"
+              />
             </div>
           )}
 
@@ -619,6 +747,53 @@ export default function NodePanel({
                 lineHeight: 1.8,
               }}>
                 <FormattedText text={displayNode.summary} />
+              </div>
+            </div>
+          )}
+
+          {/* ── CONNECTION TRACE PANEL ── */}
+          {activeCandidate && (
+            <TracePanel 
+              candidate={activeCandidate}
+              currentNode={displayNode}
+              activeNodes={activeNodes}
+            />
+          )}
+
+          {/* ── CONTEXT NOTE ── */}
+          {!isHub && displayNode.context_note && displayNode.context_note.trim() && (
+            <div style={{ 
+              marginBottom: '1.25rem',
+              padding: '0.85rem 1rem',
+              borderRadius: 8,
+              background: 'rgba(240,237,232,0.02)',
+              borderLeft: `3px solid ${cfg.color}`,
+              borderTop: '1px solid rgba(240,237,232,0.04)',
+              borderRight: '1px solid rgba(240,237,232,0.04)',
+              borderBottom: '1px solid rgba(240,237,232,0.04)',
+            }}>
+              <div style={{
+                fontFamily:    "'JetBrains Mono', monospace",
+                fontSize:      '0.56rem',
+                letterSpacing: '0.1em',
+                color:         '#8A8582',
+                textTransform: 'uppercase',
+                marginBottom:  '0.4rem',
+                display:       'flex',
+                alignItems:    'center',
+                gap:           '0.3rem'
+              }}>
+                <Sparkle size={10} color={cfg.color} weight="fill" />
+                My Context Note
+              </div>
+              <div style={{
+                fontFamily: "'Inter', sans-serif",
+                fontSize:   '0.85rem',
+                color:      '#F0EDE8',
+                lineHeight: 1.6,
+                fontStyle:  'italic'
+              }}>
+                "{displayNode.context_note}"
               </div>
             </div>
           )}
@@ -884,6 +1059,87 @@ export default function NodePanel({
               onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(240,237,232,0.06)'; e.currentTarget.style.color = '#2A2927'; }}
             >
               Close
+            </button>
+          </div>
+        </div>
+      )}
+      {showDeleteConfirm && (
+        <div style={{
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          background: 'rgba(28, 25, 23, 0.98)',
+          backdropFilter: 'blur(12px)',
+          borderTop: '1px solid rgba(240, 237, 232, 0.08)',
+          padding: '1.25rem',
+          borderTopLeftRadius: 16,
+          borderTopRightRadius: 16,
+          boxShadow: '0 -8px 32px rgba(0, 0, 0, 0.6)',
+          zIndex: 300,
+          animation: 'slideUp 0.28s cubic-bezier(0.16, 1, 0.3, 1) both',
+        }}>
+          <div style={{
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: '0.75rem',
+            color: '#ef4444',
+            marginBottom: '0.5rem',
+            letterSpacing: '0.05em',
+            textTransform: 'uppercase',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+          }}>
+            <Warning size={14} weight="fill" /> Permanent Deletion
+          </div>
+          <div style={{
+            fontFamily: "'Inter', sans-serif",
+            fontSize: '0.8125rem',
+            color: '#9E9996',
+            marginBottom: '1.25rem',
+            lineHeight: '1.5',
+          }}>
+            Are you sure you want to permanently delete this signal? This action cannot be undone.
+          </div>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button
+              onClick={confirmDelete}
+              style={{
+                flex: 1,
+                padding: '0.55rem',
+                background: '#ef4444',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 8,
+                cursor: 'pointer',
+                fontFamily: "'Outfit', sans-serif",
+                fontSize: '0.8125rem',
+                fontWeight: 600,
+                transition: 'all 0.18s ease',
+              }}
+              onMouseEnter={(e) => e.target.style.background = '#dc2626'}
+              onMouseLeave={(e) => e.target.style.background = '#ef4444'}
+            >
+              Yes, Delete
+            </button>
+            <button
+              onClick={() => setShowDeleteConfirm(false)}
+              style={{
+                flex: 1,
+                padding: '0.55rem',
+                background: 'rgba(240,237,232,0.04)',
+                color: '#D4CFC9',
+                border: '1px solid rgba(240,237,232,0.08)',
+                borderRadius: 8,
+                cursor: 'pointer',
+                fontFamily: "'Outfit', sans-serif",
+                fontSize: '0.8125rem',
+                transition: 'all 0.18s ease',
+              }}
+              onMouseEnter={(e) => { e.target.style.background = 'rgba(240,237,232,0.08)'; e.target.style.borderColor = 'rgba(240,237,232,0.15)'; }}
+              onMouseLeave={(e) => { e.target.style.background = 'rgba(240,237,232,0.04)'; e.target.style.borderColor = 'rgba(240,237,232,0.08)'; }}
+            >
+              Cancel
             </button>
           </div>
         </div>

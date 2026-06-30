@@ -39,6 +39,20 @@ const ROOMS = [
     ),
   },
   {
+    id: 'bridges',
+    path: '/bridges',
+    label: 'Bridges',
+    subtitle: 'Minds, aligned',
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="18" cy="18" r="3" />
+        <circle cx="6" cy="6" r="3" />
+        <path d="M13 6h3a2 2 0 0 1 2 2v7" />
+        <path d="M11 18H8a2 2 0 0 1-2-2V9" />
+      </svg>
+    ),
+  },
+  {
     id: 'drill',
     path: '/drill',
     label: 'Drill',
@@ -46,6 +60,18 @@ const ROOMS = [
     icon: (
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
         <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+      </svg>
+    ),
+  },
+  {
+    id: 'profile',
+    path: '/profile',
+    label: 'Profile',
+    subtitle: 'Your cognitive identity',
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+        <circle cx="12" cy="7" r="4" />
       </svg>
     ),
   },

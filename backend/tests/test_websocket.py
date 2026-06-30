@@ -1,5 +1,6 @@
 import pytest
 import time
+import asyncio
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 import unittest.mock as mock
@@ -45,6 +46,30 @@ def force_jwt_secret(monkeypatch):
     monkeypatch.setattr(backend.middleware.twa_auth, "settings", mock_settings)
     monkeypatch.setattr(backend.config, "settings", mock_settings)
 
+@pytest.fixture(autouse=True)
+def mock_redis_global(monkeypatch):
+    """Mock Redis client globally to avoid network calls and blocking pops."""
+    mock_redis = mock.AsyncMock()
+
+    async def mock_brpop(key, timeout=0):
+        await asyncio.sleep(0.01)
+        return None
+
+    mock_redis.brpop = mock.AsyncMock(side_effect=mock_brpop)
+    mock_redis.sadd = mock.AsyncMock(return_value=1)
+    mock_redis.srem = mock.AsyncMock(return_value=1)
+    mock_redis.setex = mock.AsyncMock(return_value=True)
+    mock_redis.delete = mock.AsyncMock(return_value=1)
+    mock_redis.smembers = mock.AsyncMock(return_value=[])
+    mock_redis.pipeline = mock.AsyncMock(return_value=[])
+    mock_redis.get = mock.AsyncMock(return_value=None)
+    mock_redis.zadd = mock.AsyncMock(return_value=1)
+    mock_redis.zrem = mock.AsyncMock(return_value=1)
+
+    monkeypatch.setattr("backend.routes.websocket.redis", mock_redis)
+    monkeypatch.setattr("backend.services.redis_client.redis", mock_redis)
+    return mock_redis
+
 from backend.main import app
 from backend.middleware.twa_auth import generate_jwt
 from backend.config import settings
@@ -82,7 +107,6 @@ def test_websocket_valid_jwt_and_ping_pong(client):
 def test_websocket_broadcast_to_user(client):
     token = generate_jwt({"sub": "99", "exp": int(time.time()) + 3600}, VALID_ENV["JWT_SECRET"])
     with client.websocket_connect("/api/ws", headers={"cookie": f"jwt={token}"}) as websocket:
-        import asyncio
         from backend.routes.api import manager
         asyncio.run(manager.send_personal_message({"type": "test_msg", "payload": "hello"}, 99))
         resp = websocket.receive_json()
@@ -107,7 +131,6 @@ def test_path_websocket_expired_token(client):
 def test_path_websocket_valid_connection_flow(client):
     token = generate_jwt({"sub": "42", "exp": int(time.time()) + 3600}, VALID_ENV["JWT_SECRET"])
     with client.websocket_connect(f"/ws/{token}") as websocket:
-        # Client connects and immediately receives {"type": "connected", "user_id": 42}
         resp = websocket.receive_json()
         assert resp == {"type": "connected", "user_id": 42}
 
@@ -124,7 +147,6 @@ def test_path_websocket_registry_addition_and_removal(client):
         assert active_connections[88] is not None
 
     # After connection disconnects, user should be removed from registry
-    # Use a small retry loop to allow event cleanup to run on async thread
     for _ in range(20):
         if 88 not in active_connections:
             break
@@ -132,9 +154,22 @@ def test_path_websocket_registry_addition_and_removal(client):
     assert 88 not in active_connections
 
 def test_path_websocket_mocked_broadcast(client):
-    # Mock broadcast() implementation to test calling it
     with mock.patch("backend.routes.websocket.broadcast", new_callable=mock.AsyncMock) as mock_broadcast:
         from backend.routes.websocket import broadcast
         import asyncio
         asyncio.run(broadcast(99, {"type": "ping"}))
         mock_broadcast.assert_called_once_with(99, {"type": "ping"})
+
+@pytest.mark.asyncio
+async def test_path_websocket_redis_broadcast(mock_redis_global):
+    """Verify that broadcast() fetches user connections in Redis and pushes event to their queues."""
+    from backend.routes.websocket import broadcast
+
+    # Configure Redis mock mocks
+    mock_redis_global.smembers.return_value = ["conn_abc123"]
+    mock_redis_global.pipeline.return_value = [{"result": 1}]
+    
+    await broadcast(99, {"type": "new_saved_item"})
+    
+    mock_redis_global.smembers.assert_called_once_with("ws:connections:user:99")
+    assert mock_redis_global.pipeline.call_count == 2

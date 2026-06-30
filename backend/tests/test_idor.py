@@ -103,7 +103,7 @@ def test_delete_own_item_success(client):
     response = client.delete("/api/items/5", cookies={"recall_session": token})
     
     assert response.status_code == 204
-    assert len(current_cursor.executed) == 4
+    assert len(current_cursor.executed) == 6
     
     q_query, q_params = current_cursor.executed[1]
     assert "DELETE FROM quizzes" in q_query
@@ -112,8 +112,16 @@ def test_delete_own_item_success(client):
     chunk_query, chunk_params = current_cursor.executed[2]
     assert "DELETE FROM item_chunks" in chunk_query
     assert chunk_params == (5, 42)
+
+    reminders_query, reminders_params = current_cursor.executed[3]
+    assert "DELETE FROM reminders" in reminders_query
+    assert reminders_params == (5, 42)
+
+    candidates_query, candidates_params = current_cursor.executed[4]
+    assert "DELETE FROM insight_candidates" in candidates_query
+    assert candidates_params == (5, 5, 42)
     
-    item_query, item_params = current_cursor.executed[3]
+    item_query, item_params = current_cursor.executed[5]
     assert "DELETE FROM items" in item_query
     assert "user_id = %s" in item_query
     assert item_params == (5, 42)
@@ -128,13 +136,21 @@ def test_delete_other_user_item_idor_prevented(client):
     
     assert response.status_code == 404
     assert response.json()["detail"] == "Item not found"
-    assert len(current_cursor.executed) == 4
+    assert len(current_cursor.executed) == 6
     
     chunk_query, chunk_params = current_cursor.executed[2]
     assert "DELETE FROM item_chunks" in chunk_query
     assert chunk_params == (5, 100)
+
+    reminders_query, reminders_params = current_cursor.executed[3]
+    assert "DELETE FROM reminders" in reminders_query
+    assert reminders_params == (5, 100)
+
+    candidates_query, candidates_params = current_cursor.executed[4]
+    assert "DELETE FROM insight_candidates" in candidates_query
+    assert candidates_params == (5, 5, 100)
     
-    item_query, item_params = current_cursor.executed[3]
+    item_query, item_params = current_cursor.executed[5]
     assert "DELETE FROM items" in item_query
     assert "user_id = %s" in item_query
     assert item_params == (5, 100)

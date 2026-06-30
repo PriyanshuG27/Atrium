@@ -112,13 +112,13 @@ async def test_ingest_image_ocr_path(monkeypatch, mock_deps):
     mock_remove = mock.Mock()
     monkeypatch.setattr("os.remove", mock_remove)
     
-    # Mock PIL and Tesseract to return high length text
-    monkeypatch.setattr("PIL.Image.open", lambda path: mock.Mock())
-    monkeypatch.setattr("pytesseract.image_to_string", lambda img, lang=None: "This is a very long OCR text block that is definitely longer than fifty characters to force OCR path.")
+    # Mock PIL and perform_ocr to return high length text
+    monkeypatch.setattr("PIL.Image.open", lambda path: mock.MagicMock())
+    monkeypatch.setattr("backend.services.ocr_service.perform_ocr", mock.AsyncMock(return_value="This is a very long OCR text block that is definitely longer than fifty characters to force OCR path."))
     
     conn = MockConnection()
     item_id = await ingest_image("file_id_456", user_id=4, chat_id="12345", db=conn)
-    assert item_id == 401
+    assert item_id == [401]
     
     executed = conn.cursor_inst.executed
     assert len(executed) == 2
@@ -141,15 +141,13 @@ async def test_ingest_image_caption_fallback_path(monkeypatch, mock_deps):
     monkeypatch.setattr("os.path.exists", lambda path: True)
     monkeypatch.setattr("os.remove", mock.Mock())
     
-    # Mock Tesseract to raise error (simulating not installed)
-    def mock_ocr_fail(*args, **kwargs):
-        raise RuntimeError("tesseract not found")
-    monkeypatch.setattr("PIL.Image.open", lambda path: mock.Mock())
-    monkeypatch.setattr("pytesseract.image_to_string", mock_ocr_fail)
+    # Mock perform_ocr to raise error (simulating not installed)
+    monkeypatch.setattr("PIL.Image.open", lambda path: mock.MagicMock())
+    monkeypatch.setattr("backend.services.ocr_service.perform_ocr", mock.AsyncMock(side_effect=RuntimeError("paddleocr failed")))
     
     conn = MockConnection()
     item_id = await ingest_image("file_id_456", user_id=4, chat_id="12345", db=conn)
-    assert item_id == 401
+    assert item_id == [401]
     
     # Check executed query uses Gemini caption description
     executed = conn.cursor_inst.executed
@@ -173,8 +171,8 @@ async def test_ingest_image_duplicate(monkeypatch, mock_deps):
     monkeypatch.setattr("os.path.exists", lambda path: True)
     monkeypatch.setattr("os.remove", mock.Mock())
     
-    monkeypatch.setattr("PIL.Image.open", lambda path: mock.Mock())
-    monkeypatch.setattr("pytesseract.image_to_string", lambda img, lang=None: "OCR output text")
+    monkeypatch.setattr("PIL.Image.open", lambda path: mock.MagicMock())
+    monkeypatch.setattr("backend.services.ocr_service.perform_ocr", mock.AsyncMock(return_value="OCR output text"))
     
     # Override MockCursor to return a duplicate row id
     class DuplicateCursor(MockCursor):

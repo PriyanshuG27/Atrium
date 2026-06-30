@@ -187,6 +187,11 @@ async def lifespan(app: FastAPI):
     # Open the async DB connection pool
     await open_pool()
 
+    # Initialize shared HTTP client
+    import httpx
+    app.state.client = httpx.AsyncClient(timeout=10.0)
+    logger.info("Lifespan shared HTTP client initialized.")
+
     # Start the background task worker loop (skipped in test mode to prevent test suites from hanging)
     import sys
     if settings.ENV != "test" and "pytest" not in sys.modules:
@@ -246,6 +251,11 @@ async def lifespan(app: FastAPI):
         except asyncio.CancelledError:
             pass
         logger.info("Recall task worker loop stopped.")
+
+    # Close shared HTTP client
+    from backend.services.http_client import close_http_client
+    await close_http_client()
+    logger.info("Lifespan shared HTTP client closed.")
 
     # Stop background scheduler
     from backend.scheduler.scheduler import stop_scheduler
@@ -359,11 +369,13 @@ from backend.routes.webhook import router as webhook_router
 from backend.routes.auth import router as auth_router
 from backend.routes.api import router as api_router
 from backend.routes.websocket import router as websocket_router
+from backend.routes.bridges import router as bridges_router
 
 app.include_router(webhook_router)
 app.include_router(auth_router)
 app.include_router(api_router)
 app.include_router(websocket_router)
+app.include_router(bridges_router)
 
 @app.get(
     "/health",

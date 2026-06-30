@@ -58,3 +58,14 @@ def mock_env(monkeypatch):
     for key, value in VALID_ENV.items():
         monkeypatch.setenv(key, value)
     return VALID_ENV
+
+
+@pytest.fixture(autouse=True)
+def reset_http_client_cache():
+    """
+    Clears the cached HTTP client so that each test gets a fresh client
+    and respects test-level monkeypatching of httpx.AsyncClient.
+    """
+    import backend.services.http_client as hc
+    hc._client = None
+    hc._loop_bound = None

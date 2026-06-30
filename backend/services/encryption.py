@@ -37,19 +37,14 @@ _fernet_cached: Optional[Fernet] = None
 def _get_fernet() -> Fernet:
     """
     Returns a Fernet instance initialised with the key from settings.
-    Imports Settings fresh each call so unit-test monkeypatching works correctly.
-    Caches the cipher outside of test environments to optimize performance.
+    Caches the cipher to optimize performance.
     """
     global _fernet_cached
-    import sys
     
-    if _fernet_cached is not None and "pytest" not in sys.modules:
+    if _fernet_cached is not None:
         return _fernet_cached
         
-    import importlib
-    import backend.config as _cfg_module
-    importlib.reload(_cfg_module)
-    settings = _cfg_module.settings
+    from backend.config import settings
 
     if settings is None:
         raise RuntimeError(

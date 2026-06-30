@@ -16,6 +16,8 @@ const Archive = lazy(() => import('./pages/Archive'));
 const Map     = lazy(() => import('./pages/Map'));
 const Drill   = lazy(() => import('./pages/Drill'));
 const Settings = lazy(() => import('./pages/Settings'));
+const Profile  = lazy(() => import('./pages/Profile'));
+const Bridges  = lazy(() => import('./pages/Bridges'));
 
 /* ── Map pathname → room id ──────────────────────────────── */
 function pathToRoom(pathname) {
@@ -24,6 +26,8 @@ function pathToRoom(pathname) {
   if (pathname.startsWith('/nebula'))  return 'map'; // legacy redirect
   if (pathname.startsWith('/drill'))   return 'drill';
   if (pathname.startsWith('/settings')) return 'settings';
+  if (pathname.startsWith('/profile')) return 'profile';
+  if (pathname.startsWith('/bridges')) return 'bridges';
   return 'archive';
 }
 
@@ -233,7 +237,7 @@ function App() {
 
   /* ── Navigation with transition ──────────────────────────── */
   const handleNavigate = useCallback((roomId) => {
-    const paths = { archive: '/archive', map: '/map', drill: '/drill', settings: '/settings' };
+    const paths = { archive: '/archive', map: '/map', drill: '/drill', settings: '/settings', profile: '/profile', bridges: '/bridges' };
     if (!paths[roomId] || roomId === currentRoom) return;
     prevRoomRef.current = currentRoom;
     window.history.pushState({}, '', paths[roomId]);
@@ -356,6 +360,8 @@ function App() {
               {currentRoom === 'map'     && <Map />}
               {currentRoom === 'drill'   && <Drill />}
               {currentRoom === 'settings' && <Settings />}
+              {currentRoom === 'profile'  && <Profile />}
+              {currentRoom === 'bridges'  && <Bridges />}
             </Suspense>
           </RoomTransition>
         </RoomErrorBoundary>

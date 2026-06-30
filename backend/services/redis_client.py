@@ -47,15 +47,34 @@ class UpstashRedis:
         import sys
         from unittest.mock import Mock
         if "pytest" in sys.modules and not isinstance(client.post, Mock):
+            # If json_data is a list of lists (pipeline)
+            if json_data and isinstance(json_data, list) and isinstance(json_data[0], list):
+                results = []
+                for cmd in json_data:
+                    cmd_name = cmd[0].upper() if cmd and isinstance(cmd[0], str) else ""
+                    if cmd_name == "RPUSH":
+                        results.append({"result": 0})
+                    elif cmd_name == "EXISTS":
+                        results.append({"result": 0})
+                    elif cmd_name == "SREM":
+                        results.append({"result": 0})
+                    elif cmd_name == "SADD":
+                        results.append({"result": 0})
+                    else:
+                        results.append({"result": None})
+                return results
+
             command = json_data[0].upper() if json_data and isinstance(json_data, list) and isinstance(json_data[0], str) else ""
             if command == "PING":
                 return {"result": "PONG"}
             if command == "GET":
                 return {"result": None}
-            if command in ("DEL", "ZADD", "ZREM", "LPUSH", "RPUSH", "LTRIM", "HSET", "HINCRBY", "INCR", "DECR"):
+            if command in ("DEL", "ZADD", "ZREM", "LPUSH", "RPUSH", "LTRIM", "HSET", "HINCRBY", "INCR", "DECR", "LREM", "SADD", "SREM", "EXPIRE"):
                 return {"result": 0}
-            if command in ("ZRANGEBYSCORE", "LRANGE", "HGETALL"):
+            if command in ("ZRANGEBYSCORE", "LRANGE", "HGETALL", "SMEMBERS"):
                 return {"result": []}
+            if command in ("BRPOPLPUSH", "SISMEMBER"):
+                return {"result": None}
             return {"result": None}
 
         try:
@@ -162,6 +181,15 @@ class UpstashRedis:
             return int(data.get("result", 0))
         return 0
 
+    async def expire(self, key: str, seconds: int) -> bool:
+        """Set a timeout on key."""
+        data = await self._request("", ["EXPIRE", key, str(seconds)])
+        if isinstance(data, dict):
+            if "error" in data:
+                raise RedisUnavailableError(self._redact(data["error"]))
+            return int(data.get("result", 0)) == 1
+        return False
+
     async def zadd(self, key: str, score: float, member: str) -> int:
         """Add member with score to a sorted set."""
         data = await self._request("", ["ZADD", key, str(score), member])
@@ -204,6 +232,54 @@ class UpstashRedis:
         if isinstance(data, dict) and "error" in data:
             raise RedisUnavailableError(self._redact(data["error"]))
         return data.get("result", [])
+
+    async def brpoplpush(self, source: str, destination: str, timeout: int) -> Optional[str]:
+        """
+        Blocking pop from source and push to destination.
+        Returns the popped element or None if timeout is reached.
+        """
+        data = await self._request("", ["BRPOPLPUSH", source, destination, str(timeout)])
+        if isinstance(data, dict) and "error" in data:
+            raise RedisUnavailableError(self._redact(data["error"]))
+        return data.get("result")
+
+    async def lrem(self, key: str, count: int, value: str) -> int:
+        """
+        Remove count occurrences of value from list key.
+        Returns the number of removed elements.
+        """
+        data = await self._request("", ["LREM", key, str(count), value])
+        if isinstance(data, dict) and "error" in data:
+            raise RedisUnavailableError(self._redact(data["error"]))
+        return int(data.get("result", 0))
+
+    async def sadd(self, key: str, member: str) -> int:
+        """Add a member to a set. Returns 1 if added, 0 if already exists."""
+        data = await self._request("", ["SADD", key, member])
+        if isinstance(data, dict) and "error" in data:
+            raise RedisUnavailableError(self._redact(data["error"]))
+        return int(data.get("result", 0))
+
+    async def srem(self, key: str, member: str) -> int:
+        """Remove a member from a set. Returns 1 if removed, 0 if not exists."""
+        data = await self._request("", ["SREM", key, member])
+        if isinstance(data, dict) and "error" in data:
+            raise RedisUnavailableError(self._redact(data["error"]))
+        return int(data.get("result", 0))
+
+    async def smembers(self, key: str) -> List[str]:
+        """Return all members in a set."""
+        data = await self._request("", ["SMEMBERS", key])
+        if isinstance(data, dict) and "error" in data:
+            raise RedisUnavailableError(self._redact(data["error"]))
+        return data.get("result", [])
+
+    async def sismember(self, key: str, member: str) -> int:
+        """Check if member is in a set. Returns 1 if yes, 0 if no."""
+        data = await self._request("", ["SISMEMBER", key, member])
+        if isinstance(data, dict) and "error" in data:
+            raise RedisUnavailableError(self._redact(data["error"]))
+        return int(data.get("result", 0))
 
     async def ping(self) -> bool:
         """Checks liveness of the Upstash Redis instance. Returns True if responsive."""

@@ -35,7 +35,7 @@ async def download_telegram_file(file_id: str, tmp_dir: str, file_uuid: str) -> 
     await download_telegram_file_robust(file_id, local_path, max_size_bytes=25 * 1024 * 1024)
     return local_path
 
-async def ingest_voice(file_id: str, user_id: int, chat_id: str, db: AsyncConnection) -> int:
+async def ingest_voice(file_id: str, user_id: int, chat_id: str, db: AsyncConnection, user_context: str | None = None) -> int:
     """
     Ingests a Telegram voice note / audio file.
     Downloads, transcribes, summarises, embeds, encrypts, and saves it.
@@ -83,7 +83,10 @@ async def ingest_voice(file_id: str, user_id: int, chat_id: str, db: AsyncConnec
             raise ValueError("Transcription failed — transcript was empty or failed on all tiers.")
             
         # 3. Summarise & tags
-        ai_res = await cascade.summarise(transcript, chat_id)
+        summarizer_input = transcript
+        if user_context:
+            summarizer_input = f"[User's Note/Context: {user_context}]\n" + transcript
+        ai_res = await cascade.summarise(summarizer_input, chat_id)
         summary = ai_res.get("summary") or f"Transcription summary for voice note: {transcript[:100]}..."
         tags = ai_res.get("tags") or ["voice"]
         context_prompt = ai_res.get("context_prompt")

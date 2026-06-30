@@ -191,3 +191,83 @@ async def test_daily_digest_delivery_isolation(mock_send):
     assert mock_send.call_count == 2
     assert mock_send.call_args_list[0][0][0] == "chat_failed"
     assert mock_send.call_args_list[1][0][0] == "chat_success"
+
+
+@pytest.mark.asyncio
+@mock.patch("backend.scheduler.scheduler.send_telegram_message")
+@mock.patch("backend.scheduler.scheduler.redis")
+async def test_daily_digest_near_miss_alert(mock_redis, mock_send):
+    """Verify daily_digest_sender fires near-miss alerts for Hour 11."""
+    mock_send.return_value = True
+    mock_redis.get = mock.AsyncMock(return_value=None)
+    mock_redis.setex = mock.AsyncMock()
+
+    # User, chat, streak, local_hour
+    users_data = [(200, "chat_near_miss", 3, 11)]
+    
+    class CustomMockCursor(MockCursor):
+        async def fetchall(self):
+            query_norm = " ".join(self.executed[-1][0].upper().split())
+            if "SELECT ID, TELEGRAM_CHAT_ID" in query_norm:
+                return users_data
+            return []
+            
+        async def fetchone(self):
+            query_norm = " ".join(self.executed[-1][0].upper().split())
+            if "SELECT C.ID, C.ITEM_ID_A" in query_norm:
+                import datetime
+                return (123, 1, 2, 0.82, "First Save", datetime.datetime.now() - datetime.timedelta(days=5), "Second Save", datetime.datetime.now())
+            if "SELECT LABEL FROM SEMANTIC_HUBS" in query_norm:
+                return ("Machine Learning",)
+            return None
+
+    conn = MockConnection(CustomMockCursor())
+    pool = MockPool(conn)
+
+    with mock.patch("backend.scheduler.scheduler.get_pool", return_value=pool):
+        await daily_digest_sender()
+
+    assert mock_send.call_count == 1
+    call_args = mock_send.call_args[0]
+    assert call_args[0] == "chat_near_miss"
+    assert "Your graph almost made a connection" in call_args[1]
+    assert "Machine Learning" in call_args[1]
+    mock_redis.setex.assert_called_with("user:near_miss_sent_cooldown:200", 3 * 86400, "1")
+
+
+@pytest.mark.asyncio
+@mock.patch("backend.scheduler.scheduler.send_telegram_message")
+@mock.patch("backend.scheduler.scheduler.redis")
+async def test_daily_digest_cooling_hub_warning(mock_redis, mock_send):
+    """Verify daily_digest_sender fires cooling hub warnings for Hour 16."""
+    mock_send.return_value = True
+    mock_redis.get = mock.AsyncMock(return_value=None)
+    mock_redis.setex = mock.AsyncMock()
+
+    # User, chat, streak, local_hour
+    users_data = [(300, "chat_cooling", 5, 16)]
+    
+    class CustomMockCursor(MockCursor):
+        async def fetchall(self):
+            query_norm = " ".join(self.executed[-1][0].upper().split())
+            if "SELECT ID, TELEGRAM_CHAT_ID" in query_norm:
+                return users_data
+            return []
+            
+        async def fetchone(self):
+            query_norm = " ".join(self.executed[-1][0].upper().split())
+            if "SELECT COUNT(*) FROM SEMANTIC_HUBS" in query_norm:
+                return (3,)
+            return None
+
+    conn = MockConnection(CustomMockCursor())
+    pool = MockPool(conn)
+
+    with mock.patch("backend.scheduler.scheduler.get_pool", return_value=pool):
+        await daily_digest_sender()
+
+    assert mock_send.call_count == 1
+    call_args = mock_send.call_args[0]
+    assert call_args[0] == "chat_cooling"
+    assert "Your living graph is cooling down" in call_args[1]
+    mock_redis.setex.assert_called_with("user:cooling_sent_cooldown:300", 10 * 86400, "1")

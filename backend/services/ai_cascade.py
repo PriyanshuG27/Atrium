@@ -15,7 +15,7 @@ SUMMARIZE_SYSTEM_PROMPT = (
     "You are a world-class cognitive assistant designed to synthesize complex documents into optimal, structured summaries, keywords, and follow-up questions.\n"
     "To provide the best results, you must dynamically adapt your summary structure based on the type of document you analyze. "
     "\n\n"
-    "Step 1: Identify the document genre/type from the text (e.g., Academic/Research, Business/Financial, Technical/Developer Doc, Legal/Contract, Literary/Creative, or General/Informative).\n"
+    "Step 1: Identify the document genre/type from the text (e.g., Academic/Research, Business/Financial, Technical/Developer Doc, Legal/Contract, Literary/Creative, Social Media/Short-Form Video, or General/Informative).\n"
     "Step 2: Generate a structured markdown summary using the most appropriate variant template below.\n"
     "Step 3: Generate 3-5 tags (single-word or two-word lowercase keywords).\n"
     "Step 4: Generate a single, highly engaging, personalized question to prompt the user for their thoughts on this newly saved item (1 sentence, conversational, targeted).\n\n"
@@ -63,6 +63,13 @@ SUMMARIZE_SYSTEM_PROMPT = (
     "- Key themes, character developments, or major arguments.\n"
     "### 💡 Key Takeaways\n"
     "- What the reader should remember or learn from this text.\n\n"
+    "## Variant F: Social Media, Videos & Short-Form Content (Reels, TikToks, Shorts, Social Posts)\n"
+    "### 🌟 Core Hook & Main Message\n"
+    "- 1-2 sentence overview of the central hook, announcement, or primary value proposition.\n"
+    "### 🔑 Practical Highlights & Actionable Tips\n"
+    "- Extract all specific tools, APIs, software, step-by-step instructions, or tips.\n"
+    "### 💡 Call to Action & Value Offered\n"
+    "- Any guides, DMs, promo codes, links, or specific follow-up actions mentioned by the creator.\n\n"
     "--- GENERAL GUIDELINES ---\n"
     "- Always start the summary string with a brief italicized header: *Type: [Detected Type] | Tone: [Detected Tone]*\n"
     "- If the text contains mathematical notation, always use correct LaTeX format (e.g. \\(x^2\\) or \\[E=mc^2\\]).\n"
@@ -180,6 +187,43 @@ MOODS = {
 }
 
 class AICascade:
+    def _extract_fields_from_truncated_json(self, text: str) -> dict:
+        """
+        Attempts to extract 'summary', 'tags', and 'context_prompt' from a potentially
+        truncated or malformed JSON string when standard json.loads fails.
+        """
+        res = {}
+        
+        # 1. Try to parse summary
+        summary_match = re.search(r'"summary"\s*:\s*"((?:[^"\\]|\\.)*)', text, re.DOTALL)
+        if summary_match:
+            val = summary_match.group(1)
+            try:
+                val = json.loads(f'"{val}"')
+            except Exception:
+                val = val.replace('\\"', '"').replace('\\n', '\n').replace('\\t', '\t')
+            res["summary"] = val.rstrip('\\').strip()
+        
+        # 2. Try to parse tags
+        tags_match = re.search(r'"tags"\s*:\s*\[([^\]]*)', text, re.DOTALL)
+        if tags_match:
+            tags_str = tags_match.group(1)
+            tags = re.findall(r'"([^"\\]*(?:\\.[^"\\]*)*)"', tags_str)
+            if tags:
+                res["tags"] = tags
+                
+        # 3. Try to parse context_prompt
+        context_match = re.search(r'"context_prompt"\s*:\s*"((?:[^"\\]|\\.)*)', text, re.DOTALL)
+        if context_match:
+            val = context_match.group(1)
+            try:
+                val = json.loads(f'"{val}"')
+            except Exception:
+                val = val.replace('\\"', '"').replace('\\n', '\n').replace('\\t', '\t')
+            res["context_prompt"] = val.rstrip('\\').strip()
+            
+        return res
+
     async def summarise(
         self,
         text: str,
@@ -280,6 +324,14 @@ class AICascade:
                             parsed_json = True
                 except Exception as e:
                     logger.warning("Failed to parse combined JSON response: %s. Raw was: %s", e, raw_response)
+                    # Attempt manual recovery from truncated JSON
+                    extracted = self._extract_fields_from_truncated_json(cleaned)
+                    if "summary" in extracted:
+                        summary = extracted["summary"]
+                        tags = extracted.get("tags") or []
+                        context_prompt = extracted.get("context_prompt")
+                        parsed_json = True
+                        logger.info("Successfully recovered truncated JSON summary via regex helper.")
             
             # Fallback if parsing failed or plain text returned (e.g. from Modal)
             if not parsed_json:
@@ -517,6 +569,11 @@ class AICascade:
 
     async def _call_gemini_llm(self, prompt: str, temperature: float = 0.2, timeout: float = 20.0) -> Optional[str]:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key={settings.GEMINI_API_KEY}"
+        
+        gen_config = {"temperature": temperature}
+        if "json" in prompt.lower() or "output only a valid json" in prompt.lower():
+            gen_config["responseMimeType"] = "application/json"
+            
         payload = {
             "contents": [
                 {
@@ -525,26 +582,25 @@ class AICascade:
                     ]
                 }
             ],
-            "generationConfig": {
-                "temperature": temperature
-            }
+            "generationConfig": gen_config
         }
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.post(url, json=payload)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    usage = data.get("usageMetadata", {})
-                    if usage:
-                        logger.info(
-                            "Gemini API token usage: prompt=%s, candidate=%s, total=%s",
-                            usage.get("promptTokenCount"),
-                            usage.get("candidatesTokenCount"),
-                            usage.get("totalTokenCount")
-                        )
-                    return data["candidates"][0]["content"]["parts"][0]["text"]
-                else:
-                    logger.warning("Gemini call failed with status %d: %s", resp.status_code, resp.text)
+            from backend.services.http_client import get_http_client
+            client = get_http_client()
+            resp = await client.post(url, json=payload, timeout=timeout)
+            if resp.status_code == 200:
+                data = resp.json()
+                usage = data.get("usageMetadata", {})
+                if usage:
+                    logger.info(
+                        "Gemini API token usage: prompt=%s, candidate=%s, total=%s",
+                        usage.get("promptTokenCount"),
+                        usage.get("candidatesTokenCount"),
+                        usage.get("totalTokenCount")
+                    )
+                return data["candidates"][0]["content"]["parts"][0]["text"]
+            else:
+                logger.warning("Gemini call failed with status %d: %s", resp.status_code, resp.text)
         except Exception as e:
             logger.warning("Gemini call failed with exception: %s", e)
         return None
@@ -556,10 +612,11 @@ class AICascade:
     async def _call_modal_summary(self, text: str) -> Optional[str]:
         url = "https://pri27--llama-summary.modal.run/summarize"
         headers = {"Authorization": f"Bearer {settings.MODAL_API_TOKEN}"}
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(url, json={"text": text}, headers=headers)
-            if resp.status_code == 200:
-                return resp.json().get("summary")
+        from backend.services.http_client import get_http_client
+        client = get_http_client()
+        resp = await client.post(url, json={"text": text}, headers=headers, timeout=30.0)
+        if resp.status_code == 200:
+            return resp.json().get("summary")
         return None
 
     async def _call_groq_llm(self, messages: List[Dict[str, str]], temperature: float, timeout: float = 15.0) -> Optional[str]:
@@ -567,11 +624,18 @@ class AICascade:
         headers = {"Authorization": f"Bearer {settings.GROQ_API_KEY}"}
         models = ["qwen/qwen3.6-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"]
         
-        # Estimate prompt tokens conservatively (3.0 chars per token) and target 7400 total tokens to maintain a safe 600 token buffer under 8k limit
         total_chars = sum(len(m.get("content", "")) for m in messages)
         est_prompt_tokens = int(total_chars / 3.0)
-        max_tokens = max(2048, 7400 - est_prompt_tokens)
+        # Cap max completion tokens at 2048 (the model limit) to avoid HTTP 413 Payload Too Large
+        max_tokens = min(2048, max(512, 7400 - est_prompt_tokens))
         
+        is_json_requested = False
+        for msg in messages:
+            content = msg.get("content", "").lower()
+            if "json" in content or "output only a valid json" in content:
+                is_json_requested = True
+                break
+                
         for model in models:
             payload = {
                 "model": model,
@@ -579,35 +643,38 @@ class AICascade:
                 "temperature": temperature,
                 "max_tokens": max_tokens
             }
+            if is_json_requested:
+                payload["response_format"] = {"type": "json_object"}
             try:
-                async with httpx.AsyncClient(timeout=timeout) as client:
-                    resp = await client.post(url, json=payload, headers=headers)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        content = data["choices"][0]["message"]["content"]
+                from backend.services.http_client import get_http_client
+                client = get_http_client()
+                resp = await client.post(url, json=payload, headers=headers, timeout=timeout)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    content = data["choices"][0]["message"]["content"]
+                    
+                    # Discard response if reasoning model spent all tokens thinking and got cut off (unclosed think block)
+                    if "<think>" in content and "</think>" not in content:
+                        logger.warning(
+                            "Groq model %s response was cut off inside the thinking block. Treating as failure to trigger fallback.",
+                            model
+                        )
+                        continue
                         
-                        # Discard response if reasoning model spent all tokens thinking and got cut off (unclosed think block)
-                        if "<think>" in content and "</think>" not in content:
-                            logger.warning(
-                                "Groq model %s response was cut off inside the thinking block. Treating as failure to trigger fallback.",
-                                model
-                            )
-                            continue
-                            
-                        usage = data.get("usage", {})
-                        if usage:
-                            logger.info(
-                                "Groq API token usage for model %s: prompt=%s, completion=%s, total=%s",
-                                model,
-                                usage.get("prompt_tokens"),
-                                usage.get("completion_tokens"),
-                                usage.get("total_tokens")
-                            )
-                        return content
-                    elif resp.status_code == 429:
-                        logger.warning("Groq model %s rate limited (429). Mapped keys/organization TPM exceeded.", model)
-                    else:
-                        logger.warning("Groq call failed for model %s with status %d: %s", model, resp.status_code, resp.text)
+                    usage = data.get("usage", {})
+                    if usage:
+                        logger.info(
+                            "Groq API token usage for model %s: prompt=%s, completion=%s, total=%s",
+                            model,
+                            usage.get("prompt_tokens"),
+                            usage.get("completion_tokens"),
+                            usage.get("total_tokens")
+                        )
+                    return content
+                elif resp.status_code == 429:
+                    logger.warning("Groq model %s rate limited (429). Mapped keys/organization TPM exceeded.", model)
+                else:
+                    logger.warning("Groq call failed for model %s with status %d: %s", model, resp.status_code, resp.text)
             except Exception as e:
                 logger.warning("Groq call failed for model %s with exception: %s", model, e)
                 continue
@@ -671,10 +738,11 @@ class AICascade:
         if provider == "modal" and settings.MODAL_API_TOKEN:
             url = "https://pri27--llama-summary.modal.run/generate-tags"
             headers = {"Authorization": f"Bearer {settings.MODAL_API_TOKEN}"}
-            async with httpx.AsyncClient(timeout=20.0) as client:
-                resp = await client.post(url, json={"text": context, "prompt": prompt}, headers=headers)
-                if resp.status_code == 200:
-                    response_text = resp.json().get("tags_raw", "")
+            from backend.services.http_client import get_http_client
+            client = get_http_client()
+            resp = await client.post(url, json={"text": context, "prompt": prompt}, headers=headers, timeout=20.0)
+            if resp.status_code == 200:
+                response_text = resp.json().get("tags_raw", "")
         elif provider == "groq" and settings.GROQ_API_KEY:
             messages = [
                 {"role": "system", "content": "You are a precise tag and question generator. Output ONLY a valid JSON object."},
@@ -794,10 +862,11 @@ class AICascade:
     async def _call_modal_transcribe(self, audio_bytes: bytes, file_extension: str) -> Optional[str]:
         url = "https://pri27--modal-whisper-transcribe.modal.run/transcribe"
         headers = {"Authorization": f"Bearer {settings.MODAL_API_TOKEN}"}
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(url, content=audio_bytes, headers=headers)
-            if resp.status_code == 200:
-                return resp.json().get("transcript")
+        from backend.services.http_client import get_http_client
+        client = get_http_client()
+        resp = await client.post(url, content=audio_bytes, headers=headers, timeout=30.0)
+        if resp.status_code == 200:
+            return resp.json().get("transcript")
         return None
 
     async def _call_groq_transcribe(self, audio_bytes: bytes, file_extension: str) -> Optional[str]:
@@ -808,21 +877,20 @@ class AICascade:
         files = {"file": (filename, audio_bytes, mime_type)}
         data = {"model": "whisper-large-v3-turbo"}
         
-        async with httpx.AsyncClient(timeout=20.0) as client:
-
-
-            try:
-                resp = await client.post(url, files=files, data=data, headers=headers)
-                if resp.status_code == 200:
-                    return resp.json().get("text")
-            except Exception as e:
-                logger.warning("Groq whisper-large-v3-turbo failed, falling back to whisper-large-v3: %s", e)
-                
-            # Fallback to whisper-large-v3 on Groq
-            data["model"] = "whisper-large-v3"
-            resp = await client.post(url, files=files, data=data, headers=headers)
+        from backend.services.http_client import get_http_client
+        client = get_http_client()
+        try:
+            resp = await client.post(url, files=files, data=data, headers=headers, timeout=20.0)
             if resp.status_code == 200:
                 return resp.json().get("text")
+        except Exception as e:
+            logger.warning("Groq whisper-large-v3-turbo failed, falling back to whisper-large-v3: %s", e)
+            
+        # Fallback to whisper-large-v3 on Groq
+        data["model"] = "whisper-large-v3"
+        resp = await client.post(url, files=files, data=data, headers=headers, timeout=20.0)
+        if resp.status_code == 200:
+            return resp.json().get("text")
         return None
 
     async def _call_gemini_transcribe(self, audio_bytes: bytes, file_extension: str) -> Optional[str]:
@@ -849,11 +917,12 @@ class AICascade:
                 }
             ]
         }
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.post(url, json=payload)
-            if resp.status_code == 200:
-                data = resp.json()
-                return data["candidates"][0]["content"]["parts"][0]["text"]
+        from backend.services.http_client import get_http_client
+        client = get_http_client()
+        resp = await client.post(url, json=payload, timeout=20.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            return data["candidates"][0]["content"]["parts"][0]["text"]
         return None
 
     async def caption_image(self, image_bytes: bytes) -> Optional[str]:
@@ -901,13 +970,14 @@ class AICascade:
             ]
         }
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post(url, json=payload)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    return data["candidates"][0]["content"]["parts"][0]["text"].strip()
-                else:
-                    logger.error("Gemini image captioning failed with status %d: %s", resp.status_code, resp.text)
+            from backend.services.http_client import get_http_client
+            client = get_http_client()
+            resp = await client.post(url, json=payload, timeout=30.0)
+            if resp.status_code == 200:
+                data = resp.json()
+                return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            else:
+                logger.error("Gemini image captioning failed with status %d: %s", resp.status_code, resp.text)
         except Exception as e:
             logger.error("Gemini image captioning failed: %s", e)
         return None
@@ -1077,10 +1147,11 @@ class AICascade:
     async def _call_modal_rag(self, prompt: str) -> Optional[str]:
         url = "https://pri27--llama-summary.modal.run/rag"
         headers = {"Authorization": f"Bearer {settings.MODAL_API_TOKEN}"}
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.post(url, json={"prompt": prompt}, headers=headers)
-            if resp.status_code == 200:
-                return resp.json().get("answer")
+        from backend.services.http_client import get_http_client
+        client = get_http_client()
+        resp = await client.post(url, json={"prompt": prompt}, headers=headers, timeout=20.0)
+        if resp.status_code == 200:
+            return resp.json().get("answer")
         return None
 
     async def _call_groq_rag(self, prompt: str) -> Optional[str]:
@@ -1246,6 +1317,103 @@ class AICascade:
             "summary": "Combined items summary.",
             "context_prompt": default_prompt
         }
+
+    async def call_llm(self, prompt: str, temperature: float = 0.2) -> Optional[str]:
+        """Runs a general text prompt through the AI Cascade tiers (Modal -> Groq -> Gemini)."""
+        import sys
+        if (settings.ENV == "test" or "pytest" in sys.modules) and not getattr(self, "_force_production_llm", False):
+            return "Mock completion response."
+            
+        providers = ["modal", "groq", "gemini"]
+        if settings.COMPUTE_PROVIDER:
+            if settings.COMPUTE_PROVIDER in providers:
+                providers.remove(settings.COMPUTE_PROVIDER)
+            providers.insert(0, settings.COMPUTE_PROVIDER)
+            
+        for provider in providers:
+            try:
+                res = None
+                if provider == "modal" and settings.MODAL_API_TOKEN:
+                    res = await self._call_modal_rag(prompt)
+                elif provider == "groq" and settings.GROQ_API_KEY:
+                    res = await self._call_groq_rag(prompt)
+                elif provider == "gemini" and settings.GEMINI_API_KEY:
+                    res = await self._call_gemini_llm(prompt, temperature=temperature)
+                if res:
+                    return self._strip_thinking(res).strip()
+            except Exception as e:
+                logger.warning("call_llm failed on provider %s: %s", provider, e)
+                continue
+        return None
+
+    async def extract_clean_urls_and_meta(self, ocr_text: str) -> dict:
+        """
+        Ask the AI cascade to find and correct any URLs in the raw OCR text,
+        and classify if the text only contains links and standard preview cards.
+        Returns a dict: {"urls": List[str], "is_only_links": bool}
+        """
+        system_prompt = (
+            "You are a precise link extraction and content analysis assistant. Analyze the provided OCR text from a screenshot.\n"
+            "1. Identify any URLs (which might contain typos or segmented lines) and clean them.\n"
+            "2. Determine if the screenshot is essentially just a share sheet, chat links, or list of social media post previews.\n"
+            "Output a JSON object in this format:\n"
+            "{\n"
+            "  \"urls\": [\"clean_url_1\", \"clean_url_2\"],\n"
+            "  \"is_only_links\": true or false\n"
+            "}\n"
+            "Set \"is_only_links\" to true if the text consists of links, domain names, timestamps, and standard title/preview text of the links (e.g. 'Joaquin Fernandez on Instagram: ...' or 'Veeraj Gadda on Instagram: ...'). Set it to false ONLY if there is substantial independent user conversation, personal notes, or commentary that is not part of the link previews themselves.\n"
+            "Do not include any explanation. Output raw JSON only."
+        )
+        user_prompt = f"Raw OCR text:\n{ocr_text}"
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        
+        provider = settings.COMPUTE_PROVIDER or "groq"
+        if provider == "modal" and not settings.MODAL_API_TOKEN:
+            provider = "groq"
+        if provider == "groq" and not settings.GROQ_API_KEY:
+            provider = "gemini"
+            
+        res = None
+        try:
+            if provider == "groq":
+                res = await self._call_groq_llm(messages, temperature=0.0, timeout=10.0)
+            if not res and settings.GEMINI_API_KEY:
+                prompt = f"{system_prompt}\n\n{user_prompt}"
+                res = await self._call_gemini_llm(prompt, temperature=0.0, timeout=15.0)
+        except Exception as e:
+            logger.warning("Failed to extract clean URLs/meta via AI: %s", e)
+            
+        default_val = {"urls": [], "is_only_links": False}
+        if not res:
+            return default_val
+            
+        res = self._strip_thinking(res).strip()
+        if res.startswith("```"):
+            res = re.sub(r"^```(?:json)?\n", "", res)
+            res = re.sub(r"\n```$", "", res)
+            res = res.strip()
+            
+        try:
+            data = json.loads(res)
+            if isinstance(data, dict):
+                urls = data.get("urls") or []
+                is_only_links = bool(data.get("is_only_links", False))
+                cleaned = []
+                for u in urls:
+                    if isinstance(u, str) and u.strip():
+                        u_str = u.strip()
+                        if not u_str.lower().startswith("http"):
+                            u_str = "https://" + u_str
+                        cleaned.append(u_str)
+                return {"urls": cleaned, "is_only_links": is_only_links}
+        except Exception as parse_err:
+            logger.warning("Failed to parse AI URL/meta JSON output: %s", parse_err)
+            
+        return default_val
 
     def _strip_thinking(self, text: str) -> str:
         if not text:

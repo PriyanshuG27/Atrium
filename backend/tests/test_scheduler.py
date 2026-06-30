@@ -114,14 +114,14 @@ async def test_reminders_dispatcher_success():
         mock_send.assert_called_once_with("999888", "🔔 Reminder:\n\nTest Message")
         
         # Verify SELECT and UPDATE query execution
-        assert len(cursor.executed) == 2
+        assert len(cursor.executed) == 3
         
-        select_query = cursor.executed[0][0]
+        select_query = cursor.executed[1][0]
         assert "select" in select_query.lower()
         assert "reminders" in select_query.lower()
         assert "pending" in select_query.lower()
         
-        update_query, params = cursor.executed[1]
+        update_query, params = cursor.executed[2]
         assert "update" in update_query.lower()
         assert "reminders" in update_query.lower()
         assert "status" in update_query.lower()
@@ -155,8 +155,8 @@ async def test_reminders_dispatcher_failure():
         mock_send.assert_called_once_with("111222", "🔔 Reminder:\n\nFailed Alert")
         
         # Verify status is marked as 'failed' in database
-        assert len(cursor.executed) == 2
-        update_query, params = cursor.executed[1]
+        assert len(cursor.executed) == 3
+        update_query, params = cursor.executed[2]
         assert params == ("failed", 202)
         
         mock_redis.zrangebyscore.assert_called_once()
@@ -333,4 +333,65 @@ async def test_offpeak_quiz_generator_success():
         insert_queries = [x[0] for x in cursor.executed if "insert into quizzes" in x[0].lower()]
         assert len(insert_queries) == 1
         assert "values" in insert_queries[0].lower()
+
+
+@pytest.mark.asyncio
+async def test_monthly_discrepancy_scanner_json_fallback():
+    """Verify that monthly_discrepancy_scanner processes users, calls LLM, extracts JSON insight fallback, and stores/sends it."""
+    class MultiMockCursor(MockCursor):
+        def __init__(self):
+            super().__init__()
+            self.query_count = 0
+            self.inserted_text = None
+
+        async def execute(self, query, params=None):
+            await super().execute(query, params)
+            self.query_count += 1
+            if "INSERT INTO insight_candidates" in query:
+                self.inserted_text = params[3]
+
+        async def fetchall(self):
+            last_q = self.executed[-1][0]
+            if "SELECT u.id" in last_q:
+                return [(42, "12345", "Focus on side-panel delete verification", None)]
+            elif "SELECT label" in last_q:
+                return [("AI trends", 10)]
+            elif "SELECT title" in last_q:
+                return [("Article", "Summary of promotional AI trends")]
+            elif "SELECT id FROM items" in last_q:
+                return [(101,), (102,)]
+            return []
+
+        async def fetchone(self):
+            return None
+
+    cursor = MultiMockCursor()
+    conn = MockConnection(cursor)
+    mock_pool = mock.MagicMock()
+    mock_pool.connection = mock.MagicMock(return_value=conn)
+
+    mock_cascade = mock.AsyncMock()
+    mock_cascade.call_llm.return_value = (
+        '{\n'
+        '  "divergence_detected": true,\n'
+        '  "insight": "You state a focus on side-panel delete verification, yet you save AI trends."\n'
+        '}'
+    )
+
+    mock_send = mock.AsyncMock()
+
+    with mock.patch("backend.scheduler.scheduler.get_pool", mock.AsyncMock(return_value=mock_pool)), \
+         mock.patch("backend.scheduler.scheduler.AICascade", return_value=mock_cascade), \
+         mock.patch("backend.worker.send_telegram_message", mock_send):
+        from backend.scheduler.scheduler import monthly_discrepancy_scanner
+        await monthly_discrepancy_scanner()
+
+        mock_cascade.call_llm.assert_called_once()
+        assert cursor.inserted_text == "You state a focus on side-panel delete verification, yet you save AI trends."
+
+        mock_send.assert_called_once_with(
+            "12345",
+            "💭 *Graph Reflection*\n\n"
+            "You state a focus on side-panel delete verification, yet you save AI trends."
+        )
 
