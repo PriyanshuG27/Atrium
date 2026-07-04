@@ -34,7 +34,7 @@ Whether it is a voice note recorded on the move, a multi-page PDF document, an i
 ## 🌟 Comprehensive Feature Set
 
 ### 🤖 1. Multi-Task AI Cascade Engine (`backend/services/ai_cascade.py`)
-Recall implements task-specific multi-provider fallback cascades with automatic failover, anti-thinking XML sanitization, and Dead Letter Queue recovery:
+Recall implements multi-provider fallback cascades with automatic failover, anti-thinking XML sanitization, and Dead Letter Queue recovery:
 
 #### A. RAG & Conversational Mind Map Answers (`answer_question` & `answer_graph_question`)
 * **Tier 1 — OpenRouter API (`_call_openrouter_rag`)**: Primary RAG model using `openai/gpt-oss-120b:free`.
@@ -174,7 +174,7 @@ graph TB
         DLQ["Dead Letter Queue<br/>DLQ Admin Retry"]
     end
 
-    subgraph AI_CASCADE["🧠 Multi-Task AI Cascade Engine (ai_cascade.py)"]
+    subgraph AI_CASCADE["🧠 Multi-Tier AI Cascade Engine (ai_cascade.py)"]
         RAG["RAG Answers:<br/>OpenRouter ➔ NVIDIA NIM ➔ Gemini ➔ Modal ➔ Groq"]
         SUM["Summarization:<br/>Modal GPU ➔ Groq Rotation ➔ Gemini"]
         STT["Voice STT:<br/>Modal Whisper ➔ Groq Whisper ➔ Gemini Audio"]
@@ -246,17 +246,24 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-    subgraph RAG_FLOW["💬 RAG & Assistant Flow"]
-        R1["OpenRouter API\ngpt-oss-120b:free"] -->|"Fail"| R2["NVIDIA NIM API\nllama3-70b-instruct"]
-        R2 -->|"Fail"| R3["Gemini API\n3.1-flash-lite"]
-        R3 -->|"Fail"| R4["Modal / Groq"]
-    end
+    A["📥 Ingested Media\nText / Voice / Image / PDF / Vault"] --> B{"Tier 1: Modal GPU\nllama-summary.modal.run"}
+    B -->|"Success"| E["Extract Metadata &\nGenerate Summary"]
+    B -->|"Failure / Timeout"| C{"Tier 2: Groq Rotation\nqwen3.6-27b / gpt-oss-120b"}
+    C -->|"Success"| E
+    C -->|"Failure / 429 Rate Limit"| D{"Tier 3: Gemini\n3.1-flash-lite"}
+    D -->|"Success"| E
+    D -->|"Failure"| OR{"Tier 4: OpenRouter\ngpt-oss-120b:free"}
+    OR -->|"Success"| E
+    OR -->|"Failure"| NV{"Tier 5: NVIDIA NIM\nllama3-70b-instruct"}
+    NV -->|"Success"| E
+    NV -->|"Failure"| F["Dead Letter Queue (DLQ)\n+ Bookmark Fallback"]
+    E --> G["Phonetic Brand Repair\ne.g. Mobbin, Haikei, TestSprite"]
+    G --> H["OpenAI text-embedding-3-small\n1536-dim Vector"]
 
-    subgraph INGEST_FLOW["📥 Summarization Flow"]
-        S1["Modal GPU\nllama-summary.modal.run"] -->|"Fail"| S2["Groq Rotation\nqwen3.6-27b / gpt-oss-120b"]
-        S2 -->|"Fail"| S3["Gemini API\n3.1-flash-lite"]
-        S3 -->|"Fail"| S4["Dead Letter Queue (DLQ)\n+ Bookmark Fallback"]
-    end
+    style A fill:#1a1a2e,color:#e0e0e0
+    style B fill:#16213e,color:#e0e0e0
+    style E fill:#0f3460,color:#e0e0e0
+    style F fill:#581845,color:#e0e0e0
 ```
 
 ---
