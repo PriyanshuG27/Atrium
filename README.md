@@ -6,9 +6,11 @@
 
 ---
 
+![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.111+-009688?style=for-the-badge&logo=fastapi&logoColor=white)
 ![React](https://img.shields.io/badge/React-18.3-61DAFB?style=for-the-badge&logo=react&logoColor=black)
 ![Vite](https://img.shields.io/badge/Vite-6.4-646CFF?style=for-the-badge&logo=vite&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.0-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
 ![Three.js](https://img.shields.io/badge/Three.js-R3F-000000?style=for-the-badge&logo=three.js&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/Neon_PostgreSQL-pgvector-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)
 ![Upstash](https://img.shields.io/badge/Upstash-Redis_Queue-00E599?style=for-the-badge&logo=redis&logoColor=white)
@@ -21,31 +23,31 @@
 
 ## 🧭 What is Recall?
 
-**Recall** is a Telegram-first, AI-powered personal knowledge management system presented as a **3D Observatory Environment**. 
+**Recall** is an AI-powered personal knowledge management system presented as a live **3D Observatory Environment**. 
 
-Whether it is a voice note recorded on the move, a PDF research paper, an image screenshot, or an Instagram reel — Recall ingests, transcribes, categorizes, embeds, and connects every piece of information into a dynamic, interactive knowledge graph.
+Whether it is a voice note recorded on the move, a multi-page PDF document, an image screenshot, or a web link — Recall ingests, transcribes, categorizes, embeds, and connects every piece of information into an interactive 3D constellation mind map.
 
 ---
 
 ## 🌟 Comprehensive Feature Set
 
 ### 🎨 1. 3D Observatory & Visual Mind Map
-* **Starry Sky Mind Map (`NebulaCanvas.jsx` & `MapCanvas.jsx`)**: Real-time 3D and 2D node rendering using Three.js / React Three Fiber at a target 60 FPS, featuring dynamic force-directed layouts, constellation edge lines, node glow flares, and interactive orbital cameras.
-* **3D Glass Archive Cylinder (`ArchiveCylinder.jsx`)**: A 3D interactive glass cylinder visualization for browsing memory items with smooth inertia scroll physics and category filters.
-* **Observatory Performance Monitor**: Real-time FPS monitoring (`useFPSMonitor.js`) with automatic canvas quality scaling to prevent frame drops on lower-spec hardware.
+* **Starry Sky Mind Map (`NebulaCanvas.jsx` & `MapCanvas.jsx`)**: Real-time 3D and 2D node rendering using Three.js / React Three Fiber at 60 FPS, featuring dynamic force-directed layouts, constellation edge lines, node glow flares, hover cards (`NodeHoverCard.jsx`), and interactive orbital camera controls.
+* **3D Glass Archive Cylinder (`ArchiveCylinder.jsx`)**: A 3D glass cylinder visualization in `/archive` with inertia scroll physics, category filters, and node selection.
+* **Observatory Performance Monitor (`useFPSMonitor.js`)**: Real-time FPS monitoring with automatic canvas quality downscaling to maintain 60 FPS on lower-spec GPUs.
 
 ---
 
 ### 🔍 2. Interactive RAG Citations (Camera Auto-Flight)
-* **Smart Citation Badges**: AI Assistant answers render clickable citation badges (`[1]`, `[2]`).
-* **Auto-Flight Camera Transform**: Clicking any citation badge automatically navigates to the 3D Map view (`/map`), smoothly translates and scales the camera matrix to $k = 1.35$ centered on the cited item, selects the node, highlights adjacent connection lines, and triggers a 3-second golden aura flare ring.
+* **Smart Citation Badges**: AI Assistant responses in `ChatDrawer.jsx` render clickable citation badges (`[1]`, `[2]`).
+* **Auto-Flight Camera Transform**: Clicking any citation badge automatically switches to Map view (`/map`), smoothly translates and scales the camera matrix to $k = 1.35$ centered on the cited item, selects the node, highlights adjacent connection lines, and animates a 3-second golden aura flare ring.
 
 ---
 
 ### 📥 3. Multi-Format & Multi-Source Ingestion Engine
 * **Telegram Bot (`@RecallBrainBot`)**: Ingest text, voice notes, audio files, images, PDFs, URLs, and geographical locations.
 * **Voice Note Transcription**: Automated speech-to-text using Whisper for `.ogg`, `.mp3`, `.wav`, and `.m4a` files.
-* **Image OCR Preprocessing**: Image contrast enhancement (Pillow 2.0x, grayscale, sharpening) followed by Tesseract OCR text extraction for screenshots and documents.
+* **Image OCR Preprocessing**: Image contrast enhancement (Pillow 2.0x, grayscale conversion, sharpening) followed by Tesseract OCR text extraction for screenshots and documents.
 * **PDF Document Ingestion**: Automatic PDF text extraction via `pdfplumber` / `PyPDF2` chunking with summary and embedding generation.
 * **Rich Media & Video Scraping**: Extract YouTube and Instagram reel metadata via Cobalt API with OpenGraph HTML fallback scraping.
 * **Chrome Extension & Web Clipper**: Sidepanel popup (`ExtensionPopup.jsx`) and background service worker (`background.js`) for 1-click web clipping and AI tag suggestions.
@@ -64,7 +66,7 @@ Whether it is a voice note recorded on the move, a PDF research paper, an image 
 
 ### ⏰ 5. Spaced Repetition (SuperMemo SM-2) & Active Recall
 * **SuperMemo SM-2 Quiz Engine**: Daily multiple-choice and flashcard quiz generation (`/drill`) using SuperMemo SM-2 scheduling (`interval`, `repetition`, `easiness_factor`).
-* **Streak & Accuracy Tracking**: Real-time streak tracking (`StreakBadge.jsx`), quiz accuracy stats, and review history graphs.
+* **Streak & Accuracy Tracking**: Real-time streak tracking (`StreakBadge.jsx`), quiz accuracy stats (`QuizStatsPanel.jsx`), and review history graphs.
 
 ---
 
@@ -82,9 +84,18 @@ Whether it is a voice note recorded on the move, a PDF research paper, an image 
 
 ---
 
-### ⚡ 8. Search, Retrieval & Security
+### 🎵 8. Cybernetic Audio & Micro-Animations
+* **AudioEngine Synthesizer (`AudioEngine.js`)**: Web Audio API synthesizer triggering room transition sounds, node selection clicks, and completion chimes.
+* **Custom Cyber Cursor (`CustomCursor.jsx`)**: Glowing cursor dot + lag flare ring with smooth velocity physics (`useMouseVelocity.js`).
+* **Glitch Text Effects (`GlitchText.jsx`)**: Cyber-noir typography animations for room headers and status alerts.
+* **Floating PWA Banner (`PWAInstallBanner.jsx`)**: Install prompt banner with gold monogram logo and visit counter tracking.
+
+---
+
+### ⚡ 9. Hybrid Search, Retrieval & Security
 * **Hybrid Vector & Trigram Search**: HNSW cosine similarity vector search (`< 10 ms`) combined with GIN trigram text search (`< 5 ms`) on Neon PostgreSQL.
 * **Command+K Global Finder (`SearchOverlay.jsx`)**: Instant modal search with keyboard shortcuts (`Ctrl+K` / `Cmd+K`), category filtering, and direct node jumping.
+* **GDPR Streaming Export (`GET /api/export`)**: Streaming JSON/Markdown export endpoint for full user data portability.
 * **Security & Encryption**: 100% parameterised SQL queries (zero string interpolation) and Fernet encryption at rest (`gAAAAA...`) for sensitive content and OAuth tokens.
 
 ---
@@ -287,7 +298,6 @@ python backend/scripts/smoke_test.py --api-url http://localhost:8000
 - 🛡️ [Security Scan & Hardening Report](file:///d:/Recall/docs/SECURITY_SCAN_REPORT.md)
 - ⚡ [Performance & Load Benchmark Audit](file:///d:/Recall/docs/PERFORMANCE_BENCHMARKS.md)
 - 📋 [Manual UI Verification Guide](file:///d:/Recall/docs/MANUAL_VERIFICATION_RECALL_EVOLUTION.md)
-- 📖 [Master Prompts Playbook](file:///d:/Recall/docs/PROMPTS_TESTING_DEPLOYMENT_UPDATED.md)
 
 ---
 
