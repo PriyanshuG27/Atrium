@@ -14,8 +14,10 @@
 ![Three.js](https://img.shields.io/badge/Three.js-R3F-000000?style=for-the-badge&logo=three.js&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/Neon_PostgreSQL-pgvector-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)
 ![Upstash](https://img.shields.io/badge/Upstash-Redis_Queue-00E599?style=for-the-badge&logo=redis&logoColor=white)
-![Groq](https://img.shields.io/badge/Groq-Llama_3_70B-FF6C37?style=for-the-badge)
-![Gemini](https://img.shields.io/badge/Google_Gemini-1.5_Pro-8E75B2?style=for-the-badge&logo=google&logoColor=white)
+![Groq](https://img.shields.io/badge/Groq_API-Qwen_/_GPT--OSS-FF6C37?style=for-the-badge)
+![Gemini](https://img.shields.io/badge/Google_Gemini-3.1_Flash_Lite-8E75B2?style=for-the-badge&logo=google&logoColor=white)
+![NVIDIA](https://img.shields.io/badge/NVIDIA-NIM_API-76B900?style=for-the-badge&logo=nvidia&logoColor=white)
+![OpenRouter](https://img.shields.io/badge/OpenRouter-GPT--OSS-6566F1?style=for-the-badge)
 
 </div>
 
@@ -25,26 +27,51 @@
 
 **Recall** is an AI-powered personal knowledge management system presented as a live **3D Observatory Environment**. 
 
-Whether it is a voice note recorded on the move, a multi-page PDF document, an image screenshot, an Instagram reel, or an Obsidian Vault export — Recall ingests, transcribes, categorizes, embeds, and connects every piece of information into a dynamic 3D constellation mind map.
+Whether it is a voice note recorded on the move, a multi-page PDF document, an image screenshot, an Instagram reel, or an Obsidian Vault export — Recall ingests, transcribes, categorizes, embeds, and connects every piece of information into a dynamic mind map.
 
 ---
 
 ## 🌟 Comprehensive Feature Set
 
-### 🎨 1. 3D Observatory & Visual Mind Map
-* **Starry Sky Mind Map (`NebulaCanvas.jsx` & `MapCanvas.jsx`)**: Real-time 3D and 2D node rendering using Three.js / React Three Fiber at 60 FPS, featuring dynamic force-directed layouts, constellation edge lines, node glow flares, hover cards (`NodeHoverCard.jsx`), and interactive orbital camera controls.
-* **3D Glass Archive Cylinder (`ArchiveCylinder.jsx`)**: A 3D glass cylinder visualization in `/archive` with inertia scroll physics, category filters, and node selection.
-* **Observatory Performance Monitor (`useFPSMonitor.js`)**: Real-time FPS monitoring with automatic canvas quality downscaling to maintain 60 FPS on lower-spec hardware.
+### 🤖 1. Multi-Tier AI Cascade Engine (`ai_cascade.py`)
+Recall uses a 5-tier resilient AI processing cascade with automatic fallback, token budgeting, anti-thinking XML cleanup, and Dead Letter Queue recovery:
+* **Tier 1 — Modal GPU Serverless (`pri27--llama-summary.modal.run`)**: Dedicated cloud GPU worker executing Llama 3 70B Instruct for high-speed document summarization.
+* **Tier 2 — Groq API Model Rotation**: Model rotation sequence across `qwen/qwen3.6-27b` ➔ `openai/gpt-oss-120b` ➔ `openai/gpt-oss-20b` with prompt token budget calculation (`min(2048, max(512, 7400 - prompt_tokens))`) and unclosed `<think>` tag truncation recovery.
+* **Tier 3 — Google Gemini API (`gemini-3.1-flash-lite`)**: `v1beta` API execution with `responseMimeType="application/json"` structured output enforcement.
+* **Tier 4 — OpenRouter API (`_call_openrouter_rag`)**: Fallback execution using `openai/gpt-oss-120b:free`.
+* **Tier 5 — NVIDIA NIM API (`_call_nvidia_rag`)**: High-throughput fallback execution using `meta/llama3-70b-instruct` on NVIDIA NIM infrastructure.
+* **Voice Transcription Cascade**: Groq `whisper-large-v3-turbo` with fallback to `whisper-large-v3` for speech-to-text.
+* **Genre-Adaptive Summary Templates (Variants A–F)**:
+  - **Variant A (Academic/Research)**: Abstract, Methodology, Key Findings with LaTeX math (`\(x^2\)` / `\[E=mc^2\]`), Critical Implications.
+  - **Variant B (Business/Financial)**: Executive Overview, Key Metrics, Strategic Insights & SWOT, Actionable Recommendations.
+  - **Variant C (Technical/Dev Docs)**: System Overview, Setup & Installation, Code Snippets (` ```python `), Warnings & Troubleshooting.
+  - **Variant D (Legal/Contracts)**: Document Purpose & Parties, Core Obligations, Key Dates & Deadlines, Liabilities & Risks.
+  - **Variant E (General/Creative/Articles)**: Main Idea, Core Themes & Highlights, Key Takeaways.
+  - **Variant F (Social Media & Video)**: Core Hook, Practical Highlights & Tools, Call to Action.
+* **Phonetic Brand & Entity Sanitization**: LLM-based transcript correction replacing misheard audio terms (e.g. `Mobin` ➔ `Mobbin`, `Heikey` ➔ `Haikei`, `Aceternity` ➔ `Aceternity UI`, `shad cn` ➔ `shadcn/ui`, `tail wind` ➔ `Tailwind CSS`, `framermotion` ➔ `Framer Motion`, and `TestSprite`).
+* **Strict Tension Insight Engine (`generate_insight`)**: Evaluates conceptual tensions between items saved weeks apart. Enforces `NO_GENUINE_TENSION` output to prevent false/forced metaphorical connections.
+* **8 Psychological Mood Angles (`MOODS`)**: Generates targeted follow-up questions across 8 contextual categories (`curiosity`, `timing`, `future`, `friction`, `identity`, `connection`, `stakes`, `surprise`).
+* **Prompt Injection Shield (`check_prompt_injection`)**: Security layer filtering XML breakout tags (`</user_query>`), code block escapes (` ``` `), system role mimicry (`system:`), and prompt override keywords.
 
 ---
 
-### 🔍 2. Interactive RAG Citations (Camera Auto-Flight)
+### 🎨 2. UI Observatory Rooms (`App.jsx`)
+Recall features 5 primary application rooms with Cyber-Noir styling:
+* **Map Room (`/map`)**: Interactive Mind Map Canvas (`MapCanvas.jsx`) with 2D/3D force-directed node layouts, cluster tags, citation flares, and search overlays.
+* **Archive Room (`/archive`)**: 3D Glass Archive Cylinder View (`ArchiveCylinder.jsx` / `ArchiveCard.jsx`) for browsing saved items with smooth inertia scroll physics and category filters.
+* **Drill Room (`/drill`)**: Spaced repetition active recall drill room with flashcards (`TransmissionCard.jsx`), SuperMemo SM-2 quality ratings, `StreakBadge`, `DrillProgress`, and `DrillSummary`.
+* **Profile Room (`/profile`)**: Cognitive profile room with mind portrait pulse score (`/api/pulse`), radar chart distribution, milestone unlocks, and GDPR streaming export.
+* **Settings Room (`/settings`)**: Configuration panel (`SettingsPanel.jsx`) with Telegram bot pairing, Google Drive OAuth connect, timezone management, and account deletion.
+
+---
+
+### 🔍 3. Interactive RAG Citations (Camera Auto-Flight)
 * **Smart Citation Badges**: AI Assistant responses in `ChatDrawer.jsx` render clickable citation badges (`[1]`, `[2]`).
 * **Auto-Flight Camera Transform**: Clicking any citation badge automatically switches to Map view (`/map`), smoothly translates and scales the camera matrix to $k = 1.35$ centered on the cited item, selects the node, highlights adjacent connection lines, and animates a 3-second golden aura flare ring.
 
 ---
 
-### 📥 3. Multi-Format & Multi-Source Ingestion Pipeline
+### 📥 4. Multi-Format & Multi-Source Ingestion Pipeline
 * **Telegram Bot (`@RecallBrainBot`)**: Ingest text, voice notes, audio files, images, PDFs, URLs, and geographical locations.
 * **Voice Note Transcription**: Automated speech-to-text using Whisper for `.ogg`, `.mp3`, `.wav`, and `.m4a` files.
 * **Image OCR Preprocessing**: Image contrast enhancement (Pillow 2.0x, grayscale conversion, sharpening) followed by Tesseract OCR text extraction for screenshots and documents.
@@ -55,25 +82,15 @@ Whether it is a voice note recorded on the move, a multi-page PDF document, an i
 
 ---
 
-### 📦 4. Obsidian Vault Import & Export (OKF Standard)
+### 📦 5. Obsidian Vault Import & Export (OKF Standard)
 * **Obsidian Vault Export (`GET /api/export/zip`)**: Generates and downloads a pre-packaged ZIP containing all user notes formatted as Open Knowledge Format (OKF) Markdown files with YAML frontmatter, tags, and wiki-links (`[[link]]`).
 * **Obsidian Vault Import (`POST /api/import/zip`)**: Upload an Obsidian Vault ZIP archive to automatically parse frontmatter, extract text, generate embeddings, and construct knowledge graph edges.
 
 ---
 
-### 📂 5. Google Drive Sync Integration
+### 📂 6. Google Drive Sync Integration
 * **Google Doc Synchronization (`POST /api/drive/sync`)**: One-click sync exported items directly into Google Drive as structured Google Docs using OAuth `drive.file` scope.
 * **Account Disconnect (`DELETE /api/drive`)**: Secure token revocation and account unbinding.
-
----
-
-### 🧠 6. Multi-Tier AI Cascade & Resilience
-* **Tier 1 — Groq Llama 3 70B**: Primary high-speed LLM processing (< 800 ms latency).
-* **Tier 2 — Gemini 1.5 Pro**: Deep reasoning fallback for multi-modal analysis and complex documents.
-* **Tier 3 — Modal GPU Serverless**: Cloud GPU execution fallback for heavy Whisper models and custom LLMs.
-* **Dynamic Markdown Variants**: Automated selection of prompt templates (Variants A–F) tailored to input types (quotes, articles, code, audio, images).
-* **Entity & Brand Repair**: Post-processing regex repair fixing OCR misspellings and brand names.
-* **Dead Letter Queue (DLQ)**: Admin inspection (`GET /api/admin/queue`) and manual retry endpoints (`POST /api/admin/dlq/{id}/retry`) for task queue resilience.
 
 ---
 
@@ -83,14 +100,7 @@ Whether it is a voice note recorded on the move, a multi-page PDF document, an i
 
 ---
 
-### 📊 8. Cognitive Mind Portrait & Pulse Metrics
-* **Cognitive Pulse Score (`GET /api/pulse`)**: Real-time calculation of cognitive velocity, radar chart distribution, and interest metrics.
-* **Node Milestone Unlocks (`GET /api/user/milestones`)**: Unlocks badges and visual rewards as knowledge node counts grow (10, 50, 100 nodes).
-* **Self-Description Statement (`POST /api/user/self-description`)**: Save personal cognitive focus areas to tailor AI summaries.
-
----
-
-### 📍 9. Passive Context & Day 1–5 Onboarding
+### 📍 8. Passive Context & Day 1–5 Onboarding
 * **Passive Context Ingestion (`compute_passive_context`)**: Passive tracking of user posting frequency, dominant topics, and review habits without manual input.
 * **Location Timezone Auto-Detection**: Telegram location updates auto-calculate timezone offset via `round(lon / 15.0 * 2) / 2` and update user preferences.
 * **Day 1–5 Onboarding State Machine**: Guided onboarding sequence leading users from bot pairing to their first mind map exploration and active recall quiz.
@@ -98,13 +108,13 @@ Whether it is a voice note recorded on the move, a multi-page PDF document, an i
 
 ---
 
-### 🤝 10. Telegram Thought-Compatibility Game (`/match`)
+### 🤝 9. Telegram Thought-Compatibility Game (`/match`)
 * **5-Question Compatibility Quiz**: Interactive Telegram command `/match` presenting 5 thought-provoking questions.
 * **Referral Link & Synergy Scoring**: Generates custom referral link (`https://t.me/RecallBot?start=match_{user_id}`), matches answers with friends, and calculates tag synergy percentage scores.
 
 ---
 
-### 🎵 11. Cybernetic Audio & Micro-Animations
+### 🎵 10. Cybernetic Audio & Micro-Animations
 * **AudioEngine Synthesizer (`AudioEngine.js`)**: Web Audio API synthesizer triggering room transition sounds, node selection clicks, and completion chimes.
 * **Custom Cyber Cursor (`CustomCursor.jsx`)**: Glowing cursor dot + lag flare ring with smooth velocity physics (`useMouseVelocity.js`).
 * **Glitch Text Effects (`GlitchText.jsx`)**: Cyber-noir typography animations for room headers and status alerts.
@@ -112,7 +122,7 @@ Whether it is a voice note recorded on the move, a multi-page PDF document, an i
 
 ---
 
-### ⚡ 12. Hybrid Search, Streaming Export & Security
+### ⚡ 11. Hybrid Search, Streaming Export & Security
 * **Hybrid Vector & Trigram Search**: HNSW cosine similarity vector search (`< 10 ms`) combined with GIN trigram text search (`< 5 ms`) on Neon PostgreSQL.
 * **Command+K Global Finder (`SearchOverlay.jsx`)**: Instant modal search with keyboard shortcuts (`Ctrl+K` / `Cmd+K`), category filtering, and direct node jumping.
 * **GDPR Streaming Data Export (`GET /api/export`)**: Streaming JSON/Markdown export endpoint for complete data portability.
@@ -145,10 +155,12 @@ graph TB
         DLQ["Dead Letter Queue<br/>DLQ Admin Retry"]
     end
 
-    subgraph AI_CASCADE["🧠 Multi-Tier AI Cascade"]
-        GROQ["Tier 1: Groq<br/>Llama 3 70B"]
-        GEMINI["Tier 2: Gemini<br/>1.5 Pro"]
-        MODAL["Tier 3: Modal GPU<br/>Serverless Fallback"]
+    subgraph AI_CASCADE["🧠 Multi-Tier AI Cascade (ai_cascade.py)"]
+        MODAL["Tier 1: Modal GPU<br/>pri27--llama-summary"]
+        GROQ["Tier 2: Groq Rotation<br/>Qwen 3.6 / GPT-OSS"]
+        GEMINI["Tier 3: Gemini<br/>3.1 Flash Lite"]
+        OPENROUTER["Tier 4: OpenRouter<br/>GPT-OSS-120B Free"]
+        NVIDIA["Tier 5: NVIDIA NIM<br/>Llama3-70B Instruct"]
     end
 
     subgraph STORAGE["🗄️ Database & Vector Index"]
@@ -158,11 +170,11 @@ graph TB
     end
 
     subgraph FRONTEND["🎨 3D Observatory SPA  :3000"]
-        NEBULA["🌌 Starry Sky Mind Map<br/>NebulaCanvas.jsx (R3F)"]
-        CYLINDER["🏛️ Glass Archive Cylinder<br/>ArchiveCylinder.jsx (R3F)"]
+        MAP["🗺️ Interactive Map Room<br/>MapCanvas.jsx (/map)"]
+        CYLINDER["🏛️ Glass Archive Cylinder<br/>ArchiveCylinder.jsx (/archive)"]
         ASSISTANT["💬 AI Assistant & Citations<br/>ChatDrawer.jsx"]
-        DRILL["🧠 Active Recall & SM-2<br/>Drill.jsx"]
-        PULSE["📊 Cognitive Pulse<br/>Profile.jsx"]
+        DRILL["🧠 Active Recall & SM-2<br/>Drill.jsx (/drill)"]
+        PULSE["📊 Cognitive Profile & Pulse<br/>Profile.jsx (/profile)"]
     end
 
     TG & EXT & SHARE & ZIP --> API
@@ -170,11 +182,11 @@ graph TB
     API --> WS
     REDIS --> WORKER
     WORKER --> DLQ
-    WORKER --> GROQ --> GEMINI --> MODAL
+    WORKER --> MODAL --> GROQ --> GEMINI --> OPENROUTER --> NVIDIA
     WORKER --> NEON
     NEON --> HNSW & GIN
     API --> FRONTEND
-    NEBULA & CYLINDER & ASSISTANT & DRILL & PULSE --> FRONTEND
+    MAP & CYLINDER & ASSISTANT & DRILL & PULSE --> FRONTEND
 ```
 
 ---
@@ -187,7 +199,7 @@ sequenceDiagram
     participant API as ⚙️ FastAPI Gateway
     participant Queue as 🔄 Upstash Redis Queue
     participant Worker as 🛠️ Background Worker
-    participant AI as 🧠 AI Cascade (Groq/Gemini)
+    participant AI as 🧠 AI Cascade (Modal/Groq/Gemini/OpenRouter/NVIDIA)
     participant DB as 🗄️ Neon PostgreSQL
     participant FE as 🎨 3D Observatory SPA
 
@@ -216,14 +228,18 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-    A["📥 Ingested Media\nText / Voice / Image / PDF / Vault"] --> B{"Primary Tier\nGroq Llama 3 70B"}
-    B -->|"Success (< 800ms)"| E["Extract Metadata &\nGenerate Summary"]
-    B -->|"Failure / Timeout"| C{"Secondary Tier\nGemini 1.5 Pro"}
+    A["📥 Ingested Media\nText / Voice / Image / PDF / Vault"] --> B{"Tier 1: Modal GPU\nllama-summary.modal.run"}
+    B -->|"Success"| E["Extract Metadata &\nGenerate Summary"]
+    B -->|"Failure / Timeout"| C{"Tier 2: Groq Rotation\nqwen3.6-27b / gpt-oss-120b"}
     C -->|"Success"| E
-    C -->|"Failure"| D{"Tertiary Tier\nModal GPU Fallback"}
+    C -->|"Failure / 429 Rate Limit"| D{"Tier 3: Gemini\n3.1-flash-lite"}
     D -->|"Success"| E
-    D -->|"Failure"| F["Dead Letter Queue (DLQ)\n+ Bookmark Fallback"]
-    E --> G["Regex Brand Repair\n& Spelling Normalisation"]
+    D -->|"Failure"| OR{"Tier 4: OpenRouter\ngpt-oss-120b:free"}
+    OR -->|"Success"| E
+    OR -->|"Failure"| NV{"Tier 5: NVIDIA NIM\nllama3-70b-instruct"}
+    NV -->|"Success"| E
+    NV -->|"Failure"| F["Dead Letter Queue (DLQ)\n+ Bookmark Fallback"]
+    E --> G["Phonetic Brand Repair\ne.g. Mobbin, Haikei, TestSprite"]
     G --> H["OpenAI text-embedding-3-small\n1536-dim Vector"]
 
     style A fill:#1a1a2e,color:#e0e0e0
@@ -244,13 +260,13 @@ flowchart LR
 | **Database** | Neon PostgreSQL | Managed Postgres with `pgvector` & `pg_trgm` extensions |
 | **Vector Index** | HNSW Cosine Similarity | Sub-10ms vector similarity retrieval ($m=16, ef=64$) |
 | **Background Queue** | Upstash Redis | Asynchronous ingestion worker queue |
-| **AI Processing** | Groq + Gemini + Modal GPU | Multi-tier LLM cascade, Whisper voice, & OCR |
+| **AI Processing** | Modal GPU + Groq + Gemini + OpenRouter + NVIDIA NIM | 5-tier LLM cascade, Whisper voice, & OCR |
 | **Audio Synthesizer** | Web Audio API (`AudioEngine.js`) | Cybernetic room transition & interaction sound effects |
 | **Testing Frameworks** | Pytest + Vitest + k6 | Backend unit/integration tests & Frontend component tests |
 
 ---
 
-## ⚡ Quick Start
+## 🚀 Getting Started
 
 ### Prerequisites
 
