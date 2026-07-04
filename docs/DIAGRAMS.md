@@ -113,9 +113,11 @@ Extract OpenGraph & Text"]
     E3 --> G
     F2 --> G
 
-    G --> H1["Groq llama-3.3-70b"]
-    H1 -- "Failover" --> H2["Gemini 2.5 Flash"]
-    H2 -- "Failover" --> H3["OpenRouter / Modal"]
+    G --> H1["Modal GPU Endpoint"]
+    H1 -- "Failover" --> H2["Groq 3-Tier Rotation
+(Qwen 27B / GPT-OSS 120B / 20B)"]
+    H2 -- "Failover" --> H3["Gemini 3.1 Flash-Lite"]
+    H3 -- "On Failure" --> H4["Bookmark Fallback / DLQ"]
 
     H1 --> I["Generate Summary & Tags"]
     H2 --> I
