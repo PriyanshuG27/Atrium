@@ -14,10 +14,10 @@
 ![Three.js](https://img.shields.io/badge/Three.js-R3F-000000?style=for-the-badge&logo=three.js&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/Neon_PostgreSQL-pgvector-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)
 ![Upstash](https://img.shields.io/badge/Upstash-Redis_Queue-00E599?style=for-the-badge&logo=redis&logoColor=white)
+![OpenRouter](https://img.shields.io/badge/OpenRouter-GPT--OSS-6566F1?style=for-the-badge)
+![NVIDIA](https://img.shields.io/badge/NVIDIA-NIM_API-76B900?style=for-the-badge&logo=nvidia&logoColor=white)
 ![Groq](https://img.shields.io/badge/Groq_API-Qwen_/_GPT--OSS-FF6C37?style=for-the-badge)
 ![Gemini](https://img.shields.io/badge/Google_Gemini-3.1_Flash_Lite-8E75B2?style=for-the-badge&logo=google&logoColor=white)
-![NVIDIA](https://img.shields.io/badge/NVIDIA-NIM_API-76B900?style=for-the-badge&logo=nvidia&logoColor=white)
-![OpenRouter](https://img.shields.io/badge/OpenRouter-GPT--OSS-6566F1?style=for-the-badge)
 
 </div>
 
@@ -27,20 +27,32 @@
 
 **Recall** is an AI-powered personal knowledge management system presented as a live **3D Observatory Environment**. 
 
-Whether it is a voice note recorded on the move, a multi-page PDF document, an image screenshot, an Instagram reel, or an Obsidian Vault export — Recall ingests, transcribes, categorizes, embeds, and connects every piece of information into a dynamic mind map.
+Whether it is a voice note recorded on the move, a multi-page PDF document, an image screenshot, an Instagram reel, or an Obsidian Vault export — Recall ingests, transcribes, categorizes, embeds, and connects every piece of information into a dynamic 3D mind map.
 
 ---
 
 ## 🌟 Comprehensive Feature Set
 
-### 🤖 1. Multi-Tier AI Cascade Engine (`ai_cascade.py`)
-Recall uses a 5-tier resilient AI processing cascade with automatic fallback, token budgeting, anti-thinking XML cleanup, and Dead Letter Queue recovery:
-* **Tier 1 — Modal GPU Serverless (`pri27--llama-summary.modal.run`)**: Dedicated cloud GPU worker executing Llama 3 70B Instruct for high-speed document summarization.
-* **Tier 2 — Groq API Model Rotation**: Model rotation sequence across `qwen/qwen3.6-27b` ➔ `openai/gpt-oss-120b` ➔ `openai/gpt-oss-20b` with prompt token budget calculation (`min(2048, max(512, 7400 - prompt_tokens))`) and unclosed `<think>` tag truncation recovery.
-* **Tier 3 — Google Gemini API (`gemini-3.1-flash-lite`)**: `v1beta` API execution with `responseMimeType="application/json"` structured output enforcement.
-* **Tier 4 — OpenRouter API (`_call_openrouter_rag`)**: Fallback execution using `openai/gpt-oss-120b:free`.
-* **Tier 5 — NVIDIA NIM API (`_call_nvidia_rag`)**: High-throughput fallback execution using `meta/llama3-70b-instruct` on NVIDIA NIM infrastructure.
-* **Voice Transcription Cascade**: Groq `whisper-large-v3-turbo` with fallback to `whisper-large-v3` for speech-to-text.
+### 🤖 1. Multi-Task AI Cascade Engine (`backend/services/ai_cascade.py`)
+Recall implements task-specific multi-provider fallback cascades with automatic failover, anti-thinking XML sanitization, and Dead Letter Queue recovery:
+
+#### A. RAG & Conversational Mind Map Answers (`answer_question` & `answer_graph_question`)
+* **Tier 1 — OpenRouter API (`_call_openrouter_rag`)**: Primary RAG model using `openai/gpt-oss-120b:free`.
+* **Tier 2 — NVIDIA NIM API (`_call_nvidia_rag`)**: Secondary RAG fallback using `meta/llama3-70b-instruct` on NVIDIA NIM infrastructure.
+* **Tier 3 — Google Gemini API (`_call_gemini_llm`)**: `gemini-3.1-flash-lite` conversational execution.
+* **Tier 4 — Modal GPU & Groq Fallbacks**: `_call_modal_rag` (`pri27--llama-summary.modal.run/rag`) & `_call_groq_llm`.
+
+#### B. Document Ingestion & Summarization (`_run_summary_cascade`)
+* **Tier 1 — Modal Serverless GPU (`_call_modal_summary`)**: `pri27--llama-summary.modal.run/summarize` executing Llama 3 70B Instruct for high-speed document summarization.
+* **Tier 2 — Groq API Model Rotation (`_call_groq_summary`)**: Multi-model rotation (`qwen/qwen3.6-27b` ➔ `openai/gpt-oss-120b` ➔ `openai/gpt-oss-20b`) with prompt token budget calculation (`min(2048, max(512, 7400 - prompt_tokens))`) and unclosed `<think>` tag truncation recovery.
+* **Tier 3 — Google Gemini API (`_call_gemini_summary`)**: `gemini-3.1-flash-lite` `v1beta` endpoint with `responseMimeType="application/json"` structured output.
+
+#### C. Voice Note Speech-to-Text (`transcribe`)
+* **Tier 1 — Modal GPU Whisper (`_call_modal_transcribe`)**: `pri27--llama-summary.modal.run/transcribe`.
+* **Tier 2 — Groq API Whisper (`_call_groq_transcribe`)**: Primary `whisper-large-v3-turbo` with automatic fallback to `whisper-large-v3`.
+* **Tier 3 — Gemini Audio (`_call_gemini_transcribe`)**: Direct multimodal audio processing.
+
+#### D. Specialized Intelligence Modules
 * **Genre-Adaptive Summary Templates (Variants A–F)**:
   - **Variant A (Academic/Research)**: Abstract, Methodology, Key Findings with LaTeX math (`\(x^2\)` / `\[E=mc^2\]`), Critical Implications.
   - **Variant B (Business/Financial)**: Executive Overview, Key Metrics, Strategic Insights & SWOT, Actionable Recommendations.
@@ -48,14 +60,14 @@ Recall uses a 5-tier resilient AI processing cascade with automatic fallback, to
   - **Variant D (Legal/Contracts)**: Document Purpose & Parties, Core Obligations, Key Dates & Deadlines, Liabilities & Risks.
   - **Variant E (General/Creative/Articles)**: Main Idea, Core Themes & Highlights, Key Takeaways.
   - **Variant F (Social Media & Video)**: Core Hook, Practical Highlights & Tools, Call to Action.
-* **Phonetic Brand & Entity Sanitization**: LLM-based transcript correction replacing misheard audio terms (e.g. `Mobin` ➔ `Mobbin`, `Heikey` ➔ `Haikei`, `Aceternity` ➔ `Aceternity UI`, `shad cn` ➔ `shadcn/ui`, `tail wind` ➔ `Tailwind CSS`, `framermotion` ➔ `Framer Motion`, and `TestSprite`).
-* **Strict Tension Insight Engine (`generate_insight`)**: Evaluates conceptual tensions between items saved weeks apart. Enforces `NO_GENUINE_TENSION` output to prevent false/forced metaphorical connections.
+* **Phonetic Brand & Entity Sanitization (`sanitize_transcript`)**: LLM-based transcript correction replacing misheard audio terms (e.g. `Mobin` ➔ `Mobbin`, `Heikey` ➔ `Haikei`, `Aceternity` ➔ `Aceternity UI`, `shad cn` ➔ `shadcn/ui`, `tail wind` ➔ `Tailwind CSS`, `framermotion` ➔ `Framer Motion`, and `TestSprite`).
+* **Strict Tension Insight Engine (`generate_insight`)**: Evaluates conceptual tensions between items saved weeks apart (Groq ➔ Gemini). Enforces `NO_GENUINE_TENSION` output to prevent false/forced metaphorical connections.
 * **8 Psychological Mood Angles (`MOODS`)**: Generates targeted follow-up questions across 8 contextual categories (`curiosity`, `timing`, `future`, `friction`, `identity`, `connection`, `stakes`, `surprise`).
 * **Prompt Injection Shield (`check_prompt_injection`)**: Security layer filtering XML breakout tags (`</user_query>`), code block escapes (` ``` `), system role mimicry (`system:`), and prompt override keywords.
 
 ---
 
-### 🎨 2. UI Observatory Rooms (`App.jsx`)
+### 🎨 2. UI Observatory Rooms (`frontend/src/App.jsx`)
 Recall features 5 primary application rooms with Cyber-Noir styling:
 * **Map Room (`/map`)**: Interactive Mind Map Canvas (`MapCanvas.jsx`) with 2D/3D force-directed node layouts, cluster tags, citation flares, and search overlays.
 * **Archive Room (`/archive`)**: 3D Glass Archive Cylinder View (`ArchiveCylinder.jsx` / `ArchiveCard.jsx`) for browsing saved items with smooth inertia scroll physics and category filters.
@@ -100,7 +112,14 @@ Recall features 5 primary application rooms with Cyber-Noir styling:
 
 ---
 
-### 📍 8. Passive Context & Day 1–5 Onboarding
+### 📊 8. Cognitive Mind Portrait & Pulse Metrics
+* **Cognitive Pulse Score (`GET /api/pulse`)**: Real-time calculation of cognitive velocity, radar chart distribution, and interest metrics.
+* **Node Milestone Unlocks (`GET /api/user/milestones`)**: Unlocks badges and visual rewards as knowledge node counts grow (10, 50, 100 nodes).
+* **Self-Description Statement (`POST /api/user/self-description`)**: Save personal cognitive focus areas to tailor AI summaries.
+
+---
+
+### 📍 9. Passive Context & Day 1–5 Onboarding
 * **Passive Context Ingestion (`compute_passive_context`)**: Passive tracking of user posting frequency, dominant topics, and review habits without manual input.
 * **Location Timezone Auto-Detection**: Telegram location updates auto-calculate timezone offset via `round(lon / 15.0 * 2) / 2` and update user preferences.
 * **Day 1–5 Onboarding State Machine**: Guided onboarding sequence leading users from bot pairing to their first mind map exploration and active recall quiz.
@@ -108,13 +127,13 @@ Recall features 5 primary application rooms with Cyber-Noir styling:
 
 ---
 
-### 🤝 9. Telegram Thought-Compatibility Game (`/match`)
+### 🤝 10. Telegram Thought-Compatibility Game (`/match`)
 * **5-Question Compatibility Quiz**: Interactive Telegram command `/match` presenting 5 thought-provoking questions.
 * **Referral Link & Synergy Scoring**: Generates custom referral link (`https://t.me/RecallBot?start=match_{user_id}`), matches answers with friends, and calculates tag synergy percentage scores.
 
 ---
 
-### 🎵 10. Cybernetic Audio & Micro-Animations
+### 🎵 11. Cybernetic Audio & Micro-Animations
 * **AudioEngine Synthesizer (`AudioEngine.js`)**: Web Audio API synthesizer triggering room transition sounds, node selection clicks, and completion chimes.
 * **Custom Cyber Cursor (`CustomCursor.jsx`)**: Glowing cursor dot + lag flare ring with smooth velocity physics (`useMouseVelocity.js`).
 * **Glitch Text Effects (`GlitchText.jsx`)**: Cyber-noir typography animations for room headers and status alerts.
@@ -122,7 +141,7 @@ Recall features 5 primary application rooms with Cyber-Noir styling:
 
 ---
 
-### ⚡ 11. Hybrid Search, Streaming Export & Security
+### ⚡ 12. Hybrid Search, Streaming Export & Security
 * **Hybrid Vector & Trigram Search**: HNSW cosine similarity vector search (`< 10 ms`) combined with GIN trigram text search (`< 5 ms`) on Neon PostgreSQL.
 * **Command+K Global Finder (`SearchOverlay.jsx`)**: Instant modal search with keyboard shortcuts (`Ctrl+K` / `Cmd+K`), category filtering, and direct node jumping.
 * **GDPR Streaming Data Export (`GET /api/export`)**: Streaming JSON/Markdown export endpoint for complete data portability.
@@ -155,12 +174,11 @@ graph TB
         DLQ["Dead Letter Queue<br/>DLQ Admin Retry"]
     end
 
-    subgraph AI_CASCADE["🧠 Multi-Tier AI Cascade (ai_cascade.py)"]
-        MODAL["Tier 1: Modal GPU<br/>pri27--llama-summary"]
-        GROQ["Tier 2: Groq Rotation<br/>Qwen 3.6 / GPT-OSS"]
-        GEMINI["Tier 3: Gemini<br/>3.1 Flash Lite"]
-        OPENROUTER["Tier 4: OpenRouter<br/>GPT-OSS-120B Free"]
-        NVIDIA["Tier 5: NVIDIA NIM<br/>Llama3-70B Instruct"]
+    subgraph AI_CASCADE["🧠 Multi-Task AI Cascade Engine (ai_cascade.py)"]
+        RAG["RAG Answers:<br/>OpenRouter ➔ NVIDIA NIM ➔ Gemini ➔ Modal ➔ Groq"]
+        SUM["Summarization:<br/>Modal GPU ➔ Groq Rotation ➔ Gemini"]
+        STT["Voice STT:<br/>Modal Whisper ➔ Groq Whisper ➔ Gemini Audio"]
+        VISION["Vision Caption:<br/>Gemini 3.1 Flash Lite"]
     end
 
     subgraph STORAGE["🗄️ Database & Vector Index"]
@@ -182,7 +200,7 @@ graph TB
     API --> WS
     REDIS --> WORKER
     WORKER --> DLQ
-    WORKER --> MODAL --> GROQ --> GEMINI --> OPENROUTER --> NVIDIA
+    WORKER --> RAG & SUM & STT & VISION
     WORKER --> NEON
     NEON --> HNSW & GIN
     API --> FRONTEND
@@ -228,24 +246,17 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-    A["📥 Ingested Media\nText / Voice / Image / PDF / Vault"] --> B{"Tier 1: Modal GPU\nllama-summary.modal.run"}
-    B -->|"Success"| E["Extract Metadata &\nGenerate Summary"]
-    B -->|"Failure / Timeout"| C{"Tier 2: Groq Rotation\nqwen3.6-27b / gpt-oss-120b"}
-    C -->|"Success"| E
-    C -->|"Failure / 429 Rate Limit"| D{"Tier 3: Gemini\n3.1-flash-lite"}
-    D -->|"Success"| E
-    D -->|"Failure"| OR{"Tier 4: OpenRouter\ngpt-oss-120b:free"}
-    OR -->|"Success"| E
-    OR -->|"Failure"| NV{"Tier 5: NVIDIA NIM\nllama3-70b-instruct"}
-    NV -->|"Success"| E
-    NV -->|"Failure"| F["Dead Letter Queue (DLQ)\n+ Bookmark Fallback"]
-    E --> G["Phonetic Brand Repair\ne.g. Mobbin, Haikei, TestSprite"]
-    G --> H["OpenAI text-embedding-3-small\n1536-dim Vector"]
+    subgraph RAG_FLOW["💬 RAG & Assistant Flow"]
+        R1["OpenRouter API\ngpt-oss-120b:free"] -->|"Fail"| R2["NVIDIA NIM API\nllama3-70b-instruct"]
+        R2 -->|"Fail"| R3["Gemini API\n3.1-flash-lite"]
+        R3 -->|"Fail"| R4["Modal / Groq"]
+    end
 
-    style A fill:#1a1a2e,color:#e0e0e0
-    style B fill:#16213e,color:#e0e0e0
-    style E fill:#0f3460,color:#e0e0e0
-    style F fill:#581845,color:#e0e0e0
+    subgraph INGEST_FLOW["📥 Summarization Flow"]
+        S1["Modal GPU\nllama-summary.modal.run"] -->|"Fail"| S2["Groq Rotation\nqwen3.6-27b / gpt-oss-120b"]
+        S2 -->|"Fail"| S3["Gemini API\n3.1-flash-lite"]
+        S3 -->|"Fail"| S4["Dead Letter Queue (DLQ)\n+ Bookmark Fallback"]
+    end
 ```
 
 ---
