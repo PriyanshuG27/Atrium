@@ -139,45 +139,85 @@ When you need an answer weeks later, you don't hunt through folders. You ask Rec
 
 ---
 
-## 🏗️ System Architecture
+## 🏗️ Deep System Architecture
 
 ```mermaid
 flowchart TB
-    subgraph Clients["Ingestion Channels"]
-        TG["Telegram Bot"]
-        EXT["Chrome Extension"]
-        SPA["React SPA"]
+    subgraph INGEST["1. INGESTION & CLIENT GATEWAY"]
+        TG["Telegram Bot\n(< 50ms ACK)"]
+        EXT["Chrome Extension\n(Manifest v3 Sidepanel)"]
+        SPA["React 18 SPA\n(TWA HMAC / JWT Cookie)"]
     end
 
-    subgraph API["FastAPI Application"]
-        HOOK["Webhook Handler"]
-        ITEMS["API Router"]
-        AUTH["Auth Router"]
+    subgraph GATEWAY["2. FASTAPI BACKEND GATEWAY (Koyeb Serverless)"]
+        SEC["SecretMasking Filter\n& Fernet Key Vault"]
+        LIMIT["Sliding Rate Limiter\n(Upstash Redis)"]
+        ROUTERS["FastAPI Routers\n(API, Webhook, WebSockets)"]
     end
 
-    subgraph Async["Background Engine"]
-        REDIS["Upstash Redis Queue"]
-        WORKER["Async Worker Loop"]
-        SCHED["22 Scheduler Jobs"]
+    subgraph ASYNC["3. ASYNCHRONOUS ENGINE & CONCURRENCY CONTROLS"]
+        REDIS[("Upstash Redis Queue\nrecall:tasks")]
+        WORKER["Async Worker Pool\n(asyncio.Semaphore = 3)"]
+        DLQ["Dead Letter Queue\n(DLQ Boot Failover)"]
+        SCHED["APScheduler Engine\n(22 Background Cron Jobs)"]
     end
 
-    subgraph Data["Storage & Intelligence"]
-        DB[("Neon PostgreSQL 16
-(pgvector + pg_trgm)")]
-        AI["AI Multi-Tier Cascade"]
+    subgraph AI_PIPELINE["4. MULTI-PROVIDER AI CASCADE & EXTRACTORS"]
+        STT["Voice Transcription\nModal GPU (Whisper)"]
+        OCR["Image OCR Engine\nHF PaddleOCR"]
+        EMBED["Vector Embeddings\nFastEmbed ONNX (bge-small)"]
+        CASCADE["LLM Failover Cascade\nModal (Qwen) ➔ Groq ➔ Gemini ➔ Bookmark Fallback"]
     end
 
-    TG --> HOOK
-    EXT --> ITEMS
-    SPA --> AUTH
-    HOOK --> REDIS
+    subgraph STORAGE["5. DATABASE & HYBRID RETRIEVAL ENGINE (Neon PostgreSQL)"]
+        DB[("Neon PostgreSQL 16\n(15 Normalized Tables)")]
+        HNSW["384-dim HNSW Index\n(Cosine Vector Search < 10ms)"]
+        GIN["GIN Trigram Index\n(Fuzzy Text Search < 5ms)"]
+        RRF["Hybrid RAG Retrieval Engine\n(Reciprocal Rank Fusion)"]
+        LOUVAIN["Louvain Community Clustering\n(Graph Clustering & Cache)"]
+    end
+
+    subgraph CLIENT_3D["6. 3D OBSERVATORY FRONTEND (Three.js / R3F @ 60 FPS)"]
+        MAP["3D Constellation Map\n(/map)"]
+        CYLINDER["Glass Archive Cylinder\n(/archive)"]
+        FLIGHT["Camera Auto-Flight Engine\n(Citation Badges [1] [2])"]
+        DRILL["Active Recall Drill Room\n(SuperMemo SM-2)"]
+        BRIDGES["Cognitive Bridges\n(Kintsugi Gold Decay)"]
+    end
+
+    TG --> GATEWAY
+    EXT --> GATEWAY
+    SPA --> GATEWAY
+
+    GATEWAY --> SEC
+    SEC --> LIMIT
+    LIMIT --> ROUTERS
+    ROUTERS --> REDIS
+
     REDIS --> WORKER
-    WORKER --> AI
-    WORKER --> DB
-    SCHED --> DB
+    WORKER --> STT
+    WORKER --> OCR
+    WORKER --> EMBED
+    WORKER --> CASCADE
+    WORKER --> DLQ
+
+    EMBED --> HNSW
+    CASCADE --> DB
+    SCHED --> LOUVAIN
+
+    HNSW --> RRF
+    GIN --> RRF
+    RRF --> FLIGHT
+
+    DB --> MAP
+    LOUVAIN --> MAP
+    DB --> CYLINDER
+    FLIGHT --> MAP
+    DB --> DRILL
+    DB --> BRIDGES
 ```
 
-> 📖 *For sequence diagrams, background queue mechanics, and DB schemas, explore the [System Architecture Guide](docs/ARCHITECTURE.md).*
+> 📖 *For exact sequence diagrams, concurrency limits, Fernet AES-128 crypto schemas, and SQL DDL specs, explore the [System Architecture Guide](docs/ARCHITECTURE.md).*
 
 ---
 
