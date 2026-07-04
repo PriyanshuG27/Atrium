@@ -184,10 +184,22 @@ flowchart TB
 ## 🛠️ Technology Stack
 
 <p align="center">
-  <!-- Horizontal SkillIcons Single-Line SVG -->
+  <!-- Core Frameworks & Tools -->
   <a href="https://skillicons.dev">
-    <img src="https://skillicons.dev/icons?i=python,fastapi,react,vite,threejs,postgres,redis,vercel,py,git,github,vscode&perline=15" alt="Recall Tech Stack Icons" />
+    <img src="https://skillicons.dev/icons?i=python,fastapi,react,vite,threejs,postgres,redis,vercel,nodejs,js,docker,git,github,vscode,md&perline=15" alt="Core Stack Icons" />
   </a>
+  <br><br>
+  <!-- AI Cascade, Vector Engines & Cloud Infrastructure -->
+  <img src="https://img.shields.io/badge/Modal_GPU-Whisper_%2B_Qwen-000000?logoColor=white" alt="Modal GPU" />
+  <img src="https://img.shields.io/badge/FastEmbed-ONNX-FF6F00?logoColor=white" alt="FastEmbed" />
+  <img src="https://img.shields.io/badge/Hugging_Face-PaddleOCR-FFD21E?logo=huggingface&logoColor=black" alt="Hugging Face" />
+  <img src="https://img.shields.io/badge/Groq-3--Tier_LLM-F05032?logoColor=white" alt="Groq" />
+  <img src="https://img.shields.io/badge/Google_Gemini-API-8E44AD?logo=google&logoColor=white" alt="Gemini" />
+  <img src="https://img.shields.io/badge/OpenRouter-API-4A90E2?logoColor=white" alt="OpenRouter" />
+  <img src="https://img.shields.io/badge/Koyeb-Serverless-000000?logoColor=white" alt="Koyeb" />
+  <img src="https://img.shields.io/badge/pgvector-HNSW_384d-2EA44F?logo=postgresql&logoColor=white" alt="pgvector" />
+  <img src="https://img.shields.io/badge/Pytest-525_Tests-0A9EDC?logo=pytest&logoColor=white" alt="Pytest" />
+  <img src="https://img.shields.io/badge/Playwright-E2E-2EAD33?logo=playwright&logoColor=white" alt="Playwright" />
 </p>
 
 
