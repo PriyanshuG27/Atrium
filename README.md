@@ -184,33 +184,10 @@ flowchart TB
 ## 🛠️ Technology Stack
 
 <p align="center">
-  <!-- Core Frameworks -->
-  <img src="https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python" />
-  <img src="https://img.shields.io/badge/FastAPI-0.111+-009688?style=for-the-badge&logo=fastapi&logoColor=white" alt="FastAPI" />
-  <img src="https://img.shields.io/badge/React-18.3+-61DAFB?style=for-the-badge&logo=react&logoColor=black" alt="React" />
-  <img src="https://img.shields.io/badge/Vite-6.4+-646CFF?style=for-the-badge&logo=vite&logoColor=white" alt="Vite" />
-  <img src="https://img.shields.io/badge/Three.js-R3F-000000?style=for-the-badge&logo=three.js&logoColor=white" alt="Three.js" />
-  <br><br>
-  <!-- Database, Vector & Cache -->
-  <img src="https://img.shields.io/badge/Neon_PostgreSQL-16-4169E1?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL" />
-  <img src="https://img.shields.io/badge/pgvector-HNSW_384d-2EA44F?style=for-the-badge&logo=postgresql&logoColor=white" alt="pgvector" />
-  <img src="https://img.shields.io/badge/pg__trgm-GIN_Trigram-007ACC?style=for-the-badge" alt="pg_trgm" />
-  <img src="https://img.shields.io/badge/Upstash_Redis-REST_Queue-00E9A3?style=for-the-badge&logo=redis&logoColor=black" alt="Upstash Redis" />
-  <img src="https://img.shields.io/badge/Fernet-AES_128-D9381E?style=for-the-badge" alt="Fernet Cryptography" />
-  <br><br>
-  <!-- AI Cascade & Speech/OCR -->
-  <img src="https://img.shields.io/badge/Modal_GPU-Whisper_%2B_Qwen-000000?style=for-the-badge" alt="Modal GPU" />
-  <img src="https://img.shields.io/badge/FastEmbed-ONNX_bge-FF6F00?style=for-the-badge" alt="FastEmbed" />
-  <img src="https://img.shields.io/badge/Hugging_Face-PaddleOCR-FFD21E?style=for-the-badge&logo=huggingface&logoColor=black" alt="Hugging Face PaddleOCR" />
-  <img src="https://img.shields.io/badge/Groq-3--Tier_LLM-F05032?style=for-the-badge" alt="Groq" />
-  <img src="https://img.shields.io/badge/Google_Gemini-API-8E44AD?style=for-the-badge&logo=google&logoColor=white" alt="Gemini" />
-  <img src="https://img.shields.io/badge/OpenRouter-API-4A90E2?style=for-the-badge" alt="OpenRouter" />
-  <br><br>
-  <!-- Hosting & Testing -->
-  <img src="https://img.shields.io/badge/Koyeb-Serverless_Backend-000000?style=for-the-badge" alt="Koyeb" />
-  <img src="https://img.shields.io/badge/Vercel-Frontend_SPA-000000?style=for-the-badge&logo=vercel&logoColor=white" alt="Vercel" />
-  <img src="https://img.shields.io/badge/Pytest-525_Tests-0A9EDC?style=for-the-badge&logo=pytest&logoColor=white" alt="Pytest" />
-  <img src="https://img.shields.io/badge/Playwright-E2E-2EAD33?style=for-the-badge&logo=playwright&logoColor=white" alt="Playwright" />
+  <!-- Horizontal SkillIcons Single-Line SVG -->
+  <a href="https://skillicons.dev">
+    <img src="https://skillicons.dev/icons?i=python,fastapi,react,vite,threejs,postgres,redis,vercel,py,git,github,vscode&perline=15" alt="Recall Tech Stack Icons" />
+  </a>
 </p>
 
 
