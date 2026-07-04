@@ -25,7 +25,7 @@
 
 **Recall** is an AI-powered personal knowledge management system presented as a live **3D Observatory Environment**. 
 
-Whether it is a voice note recorded on the move, a multi-page PDF document, an image screenshot, or a web link — Recall ingests, transcribes, categorizes, embeds, and connects every piece of information into an interactive 3D constellation mind map.
+Whether it is a voice note recorded on the move, a multi-page PDF document, an image screenshot, an Instagram reel, or an Obsidian Vault export — Recall ingests, transcribes, categorizes, embeds, and connects every piece of information into a dynamic 3D constellation mind map.
 
 ---
 
@@ -34,7 +34,7 @@ Whether it is a voice note recorded on the move, a multi-page PDF document, an i
 ### 🎨 1. 3D Observatory & Visual Mind Map
 * **Starry Sky Mind Map (`NebulaCanvas.jsx` & `MapCanvas.jsx`)**: Real-time 3D and 2D node rendering using Three.js / React Three Fiber at 60 FPS, featuring dynamic force-directed layouts, constellation edge lines, node glow flares, hover cards (`NodeHoverCard.jsx`), and interactive orbital camera controls.
 * **3D Glass Archive Cylinder (`ArchiveCylinder.jsx`)**: A 3D glass cylinder visualization in `/archive` with inertia scroll physics, category filters, and node selection.
-* **Observatory Performance Monitor (`useFPSMonitor.js`)**: Real-time FPS monitoring with automatic canvas quality downscaling to maintain 60 FPS on lower-spec GPUs.
+* **Observatory Performance Monitor (`useFPSMonitor.js`)**: Real-time FPS monitoring with automatic canvas quality downscaling to maintain 60 FPS on lower-spec hardware.
 
 ---
 
@@ -44,33 +44,53 @@ Whether it is a voice note recorded on the move, a multi-page PDF document, an i
 
 ---
 
-### 📥 3. Multi-Format & Multi-Source Ingestion Engine
+### 📥 3. Multi-Format & Multi-Source Ingestion Pipeline
 * **Telegram Bot (`@RecallBrainBot`)**: Ingest text, voice notes, audio files, images, PDFs, URLs, and geographical locations.
 * **Voice Note Transcription**: Automated speech-to-text using Whisper for `.ogg`, `.mp3`, `.wav`, and `.m4a` files.
 * **Image OCR Preprocessing**: Image contrast enhancement (Pillow 2.0x, grayscale conversion, sharpening) followed by Tesseract OCR text extraction for screenshots and documents.
 * **PDF Document Ingestion**: Automatic PDF text extraction via `pdfplumber` / `PyPDF2` chunking with summary and embedding generation.
 * **Rich Media & Video Scraping**: Extract YouTube and Instagram reel metadata via Cobalt API with OpenGraph HTML fallback scraping.
-* **Chrome Extension & Web Clipper**: Sidepanel popup (`ExtensionPopup.jsx`) and background service worker (`background.js`) for 1-click web clipping and AI tag suggestions.
+* **Chrome Extension & Web Clipper**: Sidepanel popup (`ExtensionPopup.jsx`) and background service worker (`background.js`) for 1-click web clipping, URL check (`/api/extension/check`), and AI tag suggestions (`/api/extension/suggest_tags`).
+* **Mobile PWA Web Share Target (`/api/share-target`)**: Native share sheet integration allowing users to tap "Share via Recall" directly from iOS / Android apps.
 
 ---
 
-### 🧠 4. Multi-Tier AI Cascade & Resilience
+### 📦 4. Obsidian Vault Import & Export (OKF Standard)
+* **Obsidian Vault Export (`GET /api/export/zip`)**: Generates and downloads a pre-packaged ZIP containing all user notes formatted as Open Knowledge Format (OKF) Markdown files with YAML frontmatter, tags, and wiki-links (`[[link]]`).
+* **Obsidian Vault Import (`POST /api/import/zip`)**: Upload an Obsidian Vault ZIP archive to automatically parse frontmatter, extract text, generate embeddings, and construct knowledge graph edges.
+
+---
+
+### 📂 5. Google Drive Sync Integration
+* **Google Doc Synchronization (`POST /api/drive/sync`)**: One-click sync exported items directly into Google Drive as structured Google Docs using OAuth `drive.file` scope.
+* **Account Disconnect (`DELETE /api/drive`)**: Secure token revocation and account unbinding.
+
+---
+
+### 🧠 6. Multi-Tier AI Cascade & Resilience
 * **Tier 1 — Groq Llama 3 70B**: Primary high-speed LLM processing (< 800 ms latency).
 * **Tier 2 — Gemini 1.5 Pro**: Deep reasoning fallback for multi-modal analysis and complex documents.
 * **Tier 3 — Modal GPU Serverless**: Cloud GPU execution fallback for heavy Whisper models and custom LLMs.
 * **Dynamic Markdown Variants**: Automated selection of prompt templates (Variants A–F) tailored to input types (quotes, articles, code, audio, images).
 * **Entity & Brand Repair**: Post-processing regex repair fixing OCR misspellings and brand names.
-* **Dead Letter Queue (DLQ)**: Failed processing tasks are safely backed up to a DLQ before fallback bookmarks are saved.
+* **Dead Letter Queue (DLQ)**: Admin inspection (`GET /api/admin/queue`) and manual retry endpoints (`POST /api/admin/dlq/{id}/retry`) for task queue resilience.
 
 ---
 
-### ⏰ 5. Spaced Repetition (SuperMemo SM-2) & Active Recall
-* **SuperMemo SM-2 Quiz Engine**: Daily multiple-choice and flashcard quiz generation (`/drill`) using SuperMemo SM-2 scheduling (`interval`, `repetition`, `easiness_factor`).
+### ⏰ 7. Spaced Repetition (SuperMemo SM-2) & Active Recall
+* **SuperMemo SM-2 Quiz Engine (`/quizzes`)**: Daily multiple-choice and flashcard quiz generation (`/drill`) using SuperMemo SM-2 scheduling (`interval`, `repetition`, `easiness_factor`).
 * **Streak & Accuracy Tracking**: Real-time streak tracking (`StreakBadge.jsx`), quiz accuracy stats (`QuizStatsPanel.jsx`), and review history graphs.
 
 ---
 
-### 📍 6. Passive Context & Day 1–5 Onboarding
+### 📊 8. Cognitive Mind Portrait & Pulse Metrics
+* **Cognitive Pulse Score (`GET /api/pulse`)**: Real-time calculation of cognitive velocity, radar chart distribution, and interest metrics.
+* **Node Milestone Unlocks (`GET /api/user/milestones`)**: Unlocks badges and visual rewards as knowledge node counts grow (10, 50, 100 nodes).
+* **Self-Description Statement (`POST /api/user/self-description`)**: Save personal cognitive focus areas to tailor AI summaries.
+
+---
+
+### 📍 9. Passive Context & Day 1–5 Onboarding
 * **Passive Context Ingestion (`compute_passive_context`)**: Passive tracking of user posting frequency, dominant topics, and review habits without manual input.
 * **Location Timezone Auto-Detection**: Telegram location updates auto-calculate timezone offset via `round(lon / 15.0 * 2) / 2` and update user preferences.
 * **Day 1–5 Onboarding State Machine**: Guided onboarding sequence leading users from bot pairing to their first mind map exploration and active recall quiz.
@@ -78,13 +98,13 @@ Whether it is a voice note recorded on the move, a multi-page PDF document, an i
 
 ---
 
-### 🤝 7. Telegram Thought-Compatibility Game (`/match`)
+### 🤝 10. Telegram Thought-Compatibility Game (`/match`)
 * **5-Question Compatibility Quiz**: Interactive Telegram command `/match` presenting 5 thought-provoking questions.
 * **Referral Link & Synergy Scoring**: Generates custom referral link (`https://t.me/RecallBot?start=match_{user_id}`), matches answers with friends, and calculates tag synergy percentage scores.
 
 ---
 
-### 🎵 8. Cybernetic Audio & Micro-Animations
+### 🎵 11. Cybernetic Audio & Micro-Animations
 * **AudioEngine Synthesizer (`AudioEngine.js`)**: Web Audio API synthesizer triggering room transition sounds, node selection clicks, and completion chimes.
 * **Custom Cyber Cursor (`CustomCursor.jsx`)**: Glowing cursor dot + lag flare ring with smooth velocity physics (`useMouseVelocity.js`).
 * **Glitch Text Effects (`GlitchText.jsx`)**: Cyber-noir typography animations for room headers and status alerts.
@@ -92,10 +112,11 @@ Whether it is a voice note recorded on the move, a multi-page PDF document, an i
 
 ---
 
-### ⚡ 9. Hybrid Search, Retrieval & Security
+### ⚡ 12. Hybrid Search, Streaming Export & Security
 * **Hybrid Vector & Trigram Search**: HNSW cosine similarity vector search (`< 10 ms`) combined with GIN trigram text search (`< 5 ms`) on Neon PostgreSQL.
 * **Command+K Global Finder (`SearchOverlay.jsx`)**: Instant modal search with keyboard shortcuts (`Ctrl+K` / `Cmd+K`), category filtering, and direct node jumping.
-* **GDPR Streaming Export (`GET /api/export`)**: Streaming JSON/Markdown export endpoint for full user data portability.
+* **GDPR Streaming Data Export (`GET /api/export`)**: Streaming JSON/Markdown export endpoint for complete data portability.
+* **Live WebSocket Channel (`WebSocket /api/ws`)**: Authenticated real-time WebSocket connection for live mind map updates and status notifications.
 * **Security & Encryption**: 100% parameterised SQL queries (zero string interpolation) and Fernet encryption at rest (`gAAAAA...`) for sensitive content and OAuth tokens.
 
 ---
@@ -107,18 +128,21 @@ graph TB
     subgraph INGESTION["📡 Ingestion Channels"]
         TG["🤖 Telegram Bot<br/>@RecallBrainBot"]
         EXT["🔌 Chrome Extension<br/>Web Clipper"]
-        SPA["💻 React SPA<br/>Direct Input"]
+        SHARE["📱 Mobile PWA<br/>Web Share Target"]
+        ZIP["📦 Obsidian Vault<br/>ZIP Import"]
     end
 
     subgraph BACKEND["⚙️ FastAPI Backend  :8000"]
         API["API Gateway<br/>JWT / HMAC Auth"]
         TRACER["X-Request-ID<br/>Tracing Middleware"]
         LIMITER["Upstash Redis<br/>Sliding Rate Limiter"]
+        WS["WebSocket Server<br/>/api/ws"]
     end
 
     subgraph QUEUE["🔄 Background Worker Pipeline"]
         REDIS["Upstash Redis Queue"]
         WORKER["Worker Process<br/>worker.py"]
+        DLQ["Dead Letter Queue<br/>DLQ Admin Retry"]
     end
 
     subgraph AI_CASCADE["🧠 Multi-Tier AI Cascade"]
@@ -138,16 +162,19 @@ graph TB
         CYLINDER["🏛️ Glass Archive Cylinder<br/>ArchiveCylinder.jsx (R3F)"]
         ASSISTANT["💬 AI Assistant & Citations<br/>ChatDrawer.jsx"]
         DRILL["🧠 Active Recall & SM-2<br/>Drill.jsx"]
+        PULSE["📊 Cognitive Pulse<br/>Profile.jsx"]
     end
 
-    TG & EXT & SPA --> API
+    TG & EXT & SHARE & ZIP --> API
     API --> TRACER --> LIMITER --> REDIS
+    API --> WS
     REDIS --> WORKER
+    WORKER --> DLQ
     WORKER --> GROQ --> GEMINI --> MODAL
     WORKER --> NEON
     NEON --> HNSW & GIN
     API --> FRONTEND
-    NEBULA & CYLINDER & ASSISTANT & DRILL --> FRONTEND
+    NEBULA & CYLINDER & ASSISTANT & DRILL & PULSE --> FRONTEND
 ```
 
 ---
@@ -156,7 +183,7 @@ graph TB
 
 ```mermaid
 sequenceDiagram
-    participant User as 👤 User / Telegram
+    participant User as 👤 User / Telegram / PWA
     participant API as ⚙️ FastAPI Gateway
     participant Queue as 🔄 Upstash Redis Queue
     participant Worker as 🛠️ Background Worker
@@ -164,13 +191,13 @@ sequenceDiagram
     participant DB as 🗄️ Neon PostgreSQL
     participant FE as 🎨 3D Observatory SPA
 
-    User->>API: Sends Voice Note / Link / Text via Telegram
+    User->>API: Sends Voice Note / Link / Text / Obsidian ZIP
     API->>API: Validate TWA HMAC / JWT Cookie (< 50 ms)
     API->>Queue: Enqueue ingestion task (X-Request-ID)
     API-->>User: HTTP 200 OK ACK (< 50 ms)
 
     Queue->>Worker: Dequeue task
-    Worker->>Worker: OCR / Whisper / Web Scraping
+    Worker->>Worker: OCR / Whisper / Web Scraping / ZIP Parsing
     Worker->>AI: Execute AI Cascade (Summary + Key Themes)
     AI-->>Worker: Structured Markdown & Embeddings (1536-dim)
     Worker->>DB: Encrypt raw text (Fernet) & Store Item + HNSW Vector
@@ -189,7 +216,7 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-    A["📥 Ingested Media\nText / Voice / Image / PDF"] --> B{"Primary Tier\nGroq Llama 3 70B"}
+    A["📥 Ingested Media\nText / Voice / Image / PDF / Vault"] --> B{"Primary Tier\nGroq Llama 3 70B"}
     B -->|"Success (< 800ms)"| E["Extract Metadata &\nGenerate Summary"]
     B -->|"Failure / Timeout"| C{"Secondary Tier\nGemini 1.5 Pro"}
     C -->|"Success"| E
@@ -223,7 +250,7 @@ flowchart LR
 
 ---
 
-## 🚀 Getting Started
+## ⚡ Quick Start
 
 ### Prerequisites
 
