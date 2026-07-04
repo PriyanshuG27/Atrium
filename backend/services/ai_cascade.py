@@ -746,7 +746,7 @@ class AICascade:
         return await self._call_gemini_llm(prompt, temperature=0.2, timeout=15.0)
 
     async def _call_modal_summary(self, text: str) -> Optional[str]:
-        url = "https://pri27--llama-summary.modal.run/summarize"
+        url = settings.MODAL_SUMMARY_URL or "https://modal.run/summarize"
         headers = {"Authorization": f"Bearer {settings.MODAL_API_TOKEN}"}
         from backend.services.http_client import get_http_client
         client = get_http_client()
@@ -758,7 +758,7 @@ class AICascade:
     async def _call_groq_llm(self, messages: List[Dict[str, str]], temperature: float, timeout: float = 15.0) -> Optional[str]:
         url = "https://api.groq.com/openai/v1/chat/completions"
         headers = {"Authorization": f"Bearer {settings.GROQ_API_KEY}"}
-        models = ["qwen/qwen3.6-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"]
+        models = ["qwen/qwen-2.5-32b-instruct", "qwen/qwen3.6-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"]
         
         total_chars = sum(len(m.get("content", "")) for m in messages)
         est_prompt_tokens = int(total_chars / 3.0)
@@ -897,7 +897,7 @@ class AICascade:
 
         response_text = ""
         if provider == "modal" and settings.MODAL_API_TOKEN:
-            url = "https://pri27--llama-summary.modal.run/generate-tags"
+            url = settings.MODAL_TAGS_URL or "https://modal.run/generate-tags"
             headers = {"Authorization": f"Bearer {settings.MODAL_API_TOKEN}"}
             from backend.services.http_client import get_http_client
             client = get_http_client()
@@ -1021,7 +1021,7 @@ class AICascade:
         return mapping.get(ext, "audio/ogg")
 
     async def _call_modal_transcribe(self, audio_bytes: bytes, file_extension: str) -> Optional[str]:
-        url = "https://pri27--modal-whisper-transcribe.modal.run/transcribe"
+        url = settings.MODAL_TRANSCRIBE_URL or "https://modal.run/transcribe"
         headers = {"Authorization": f"Bearer {settings.MODAL_API_TOKEN}"}
         from backend.services.http_client import get_http_client
         client = get_http_client()
@@ -1343,7 +1343,7 @@ class AICascade:
         return None
 
     async def _call_modal_rag(self, prompt: str) -> Optional[str]:
-        url = "https://pri27--llama-summary.modal.run/rag"
+        url = settings.MODAL_RAG_URL or "https://modal.run/rag"
         headers = {"Authorization": f"Bearer {settings.MODAL_API_TOKEN}"}
         from backend.services.http_client import get_http_client
         client = get_http_client()

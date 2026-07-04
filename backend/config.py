@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     # OPTIONAL VARIABLES (Defaults to None)
     # ==========================================================================
     MODAL_API_TOKEN: str | None = None
+    MODAL_SUMMARY_URL: str | None = None
+    MODAL_TRANSCRIBE_URL: str | None = None
+    MODAL_RAG_URL: str | None = None
+    MODAL_TAGS_URL: str | None = None
+    MODAL_EMBED_URL: str | None = None
     GROQ_API_KEY: str | None = None
     GEMINI_API_KEY: str | None = None
     OPENROUTER_API_KEY: str | None = None

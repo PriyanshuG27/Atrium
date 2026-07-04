@@ -59,7 +59,7 @@ async def _generate_embedding_uncached(text: str) -> List[float]:
         try:
             logger.info("Attempting embedding generation via Modal...")
             # Call the Modal MiniLM endpoint
-            url = "https://pri27--minilm-embed.modal.run/embed"
+            url = settings.MODAL_EMBED_URL or "https://modal.run/embed"
             headers = {"Authorization": f"Bearer {settings.MODAL_API_TOKEN}"}
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.post(url, json={"text": text}, headers=headers)

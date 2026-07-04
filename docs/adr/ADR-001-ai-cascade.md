@@ -12,8 +12,8 @@ We implement dedicated multi-provider failover cascades in `backend/services/ai_
 
 ### 1. Content Ingestion & Summarization Cascade (`_run_summary_cascade`)
 Attempts cycle dynamically through:
-1. **Modal GPU**: `pri27--llama-summary.modal.run/summarize`
-2. **Groq (3-Tier Model Rotation)**: `qwen/qwen3.6-27b` -> `openai/gpt-oss-120b` -> `openai/gpt-oss-20b`
+1. **Modal GPU**: `modal.run/summarize`
+2. **Groq (3-Tier Model Rotation)**: `qwen/qwen-2.5-32b-instruct` -> `openai/gpt-oss-120b` -> `openai/gpt-oss-20b`
 3. **Google Gemini**: `gemini-3.1-flash-lite`
 4. **Bookmark Fallback / DLQ**: On failure, task payload writes to `dead_letter_queue` table and bookmark item is saved.
 
