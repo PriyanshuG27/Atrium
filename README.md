@@ -1,157 +1,199 @@
-# Recall — Your Knowledge Belongs in 3D
+# Recall — Your Thoughts Deserve More Than a Graveyard of Bookmarks
 
-> **Stop letting great articles, voice thoughts, and research die in unread tabs and static bookmark folders.**
+<p align="center">
+  <strong>Recall turns scattered voice notes, articles, PDFs, and screenshots into an interactive 3D spatial knowledge graph you can explore, talk to, and actually remember.</strong>
+</p>
 
-Recall is a personal knowledge OS that captures anything you find—voice notes, PDFs, web links, screenshots—and turns it into an interactive, 3D spatial mind map you can explore, query with conversational RAG, and remember through active recall.
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python: 3.11+](https://img.shields.io/badge/Python-3.11+-3776AB.svg?logo=python&logoColor=white)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.111+-009688.svg?logo=fastapi&logoColor=white)](backend/main.py)
-[![React](https://img.shields.io/badge/React-18.3+-61DAFB.svg?logo=react&logoColor=black)](frontend/src/App.jsx)
-[![PostgreSQL](https://img.shields.io/badge/Neon_PostgreSQL-pgvector-4169E1.svg?logo=postgresql&logoColor=white)](backend/db/schema.sql)
-[![Documentation](https://img.shields.io/badge/Docs-Technical_Suite-purple.svg)](docs/INDEX.md)
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License"></a>
+  <a href="https://python.org"><img src="https://img.shields.io/badge/Python-3.11+-3776AB.svg?logo=python&logoColor=white" alt="Python"></a>
+  <a href="backend/main.py"><img src="https://img.shields.io/badge/FastAPI-0.111+-009688.svg?logo=fastapi&logoColor=white" alt="FastAPI"></a>
+  <a href="frontend/src/App.jsx"><img src="https://img.shields.io/badge/React-18.3+-61DAFB.svg?logo=react&logoColor=black" alt="React"></a>
+  <a href="backend/db/schema.sql"><img src="https://img.shields.io/badge/PostgreSQL-pgvector-4169E1.svg?logo=postgresql&logoColor=white" alt="PostgreSQL"></a>
+  <a href="docs/INDEX.md"><img src="https://img.shields.io/badge/Docs-Engineering_Manual-purple.svg" alt="Docs"></a>
+</p>
 
 ---
 
-## 🖼️ Primary Interface Showcase
+## 🎬 Primary Demo
 
-| Room / Interface | Experience | Visual Placeholder Specs |
+> *Imagine dropping a voice note while walking, bookmarking an article on your phone, and clipping a technical diagram from your browser—then exploring all three inside a living, spatial constellation.*
+
+```
+┌───────────────────────────────────────────────────────────────────────────────────────────┐
+│                                   [ DEMO SHOWCASE GIF ]                                   │
+│                                                                                           │
+│  Recommended Spec: 1200x675 GIF / MP4 Video Loop                                         │
+│  Showcases: Telegram voice drop -> 3D Constellation rendering -> RAG camera auto-flight   │
+└───────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 💭 The Problem: The Bookmark Graveyard
+
+Every week, we discover incredible ideas:
+
+* A 30-minute podcast episode listened to during a morning commute
+* A complex 20-page research PDF saved to a downloads folder
+* A code snippet clipped from Twitter late at night
+* A spontaneous voice thought recorded on a walk
+
+**What happens to them?**
+
+They end up buried in static bookmark folders, forgotten phone screenshots, and unopened tabs. 80% of what we save is never seen again. Traditional note-taking tools demand manual tagging, strict folder hierarchies, and tedious copy-pasting—turning personal learning into administrative chores.
+
+---
+
+## 💡 Why Recall Exists
+
+Recall was built on a simple premise: **Capturing knowledge should be effortless, and retrieving it should feel magic.**
+
+Instead of forcing you to organize your notes, Recall processes your raw inputs in the background, extracts core concepts, and maps them mathematically into a **60 FPS 3D spatial constellation**.
+
+When you need an answer weeks later, you don't hunt through folders. You ask Recall in plain English. Your second brain answers with precise sources and **auto-pilots the 3D camera straight to the exact node where that thought lives**.
+
+---
+
+## 🔄 The Recall Journey
+
+```
+    ┌─────────────┐
+    │ 1. CAPTURE  │ ──► Send voice notes, links, or PDFs via Telegram or Chrome Clipper
+    └──────┬──────┘
+           │
+    ┌──────▼──────┐
+    │2. UNDERSTAND│ ──► Automated AI summarization, OCR image parsing, and Whisper transcription
+    └──────┬──────┘
+           │
+    ┌──────▼──────┐
+    │ 3. CONNECT  │ ──► 384-dimensional vector embeddings cluster related thoughts in 3D space
+    └──────┬──────┘
+           │
+    ┌──────▼──────┐
+    │   4. ASK    │ ──► Conversational RAG with interactive camera auto-flight citation badges
+    └──────┬──────┘
+           │
+    ┌──────▼──────┐
+    │ 5. REMEMBER │ ──► Active recall flashcards scheduled automatically via SuperMemo SM-2
+    └─────────────┘
+```
+
+---
+
+## ☀️ A Day with Recall
+
+> **8:15 AM — Morning Walk**  
+> You record a 45-second voice note on Telegram: *"Research how pgvector HNSW index construction parameters impact search latency under concurrency."*  
+> *Recall transcribes the audio via Whisper, extracts key technical entities, and embeds the thought in vector space.*
+
+> **1:30 PM — Lunch Research**  
+> You find an insightful technical paper on vector indexing while browsing on your laptop. You click the Recall Chrome extension button once.  
+> *Recall extracts the page text, generates a concise summary, and connects it to your morning voice note in the 3D graph.*
+
+> **9:00 PM — Evening Reflection**  
+> You open Recall (`/map`) and type into the RAG drawer: *"What did I learn today about vector search optimization?"*  
+> Recall responds with a synthesis and a citation badge `[1]`. You click `[1]`.  
+> *The 3D camera smoothly flies across your constellation, zooming directly onto the node created from your morning voice note.*
+
+> **9:05 PM — Active Retention**  
+> You open `/drill`. Recall has automatically generated a flashcard testing your retention of HNSW `ef_construction` parameters. You rate your recall confidence, and SuperMemo SM-2 schedules the next review interval.
+
+---
+
+## 🖼️ Visual Gallery
+
+All visual assets and interaction demos for Recall are detailed below:
+
+| Feature / Interface | Recommended Asset Specs | Interaction Purpose |
 |---|---|---|
-| **3D Constellation Map** | 60 FPS force-directed spatial node graph with semantic community clustering | `[ Asset Placeholder: 3D Constellation Map ]`<br>*Aspect Ratio: 16:9 | Suggested Caption: Flying through semantic clusters in the 3D Observatory (`/map`)* |
-| **Glass Archive Cylinder** | Spatial cylinder browsing with smooth inertia scroll and tag filtering | `[ Asset Placeholder: Archive Cylinder ]`<br>*Aspect Ratio: 16:9 | Suggested Caption: Scrolling through the glass archive cylinder (`/archive`)* |
-| **Conversational RAG Chat** | Conversational Q&A drawer with interactive camera auto-flight badges | `[ Asset Placeholder: RAG Chat Drawer ]`<br>*Aspect Ratio: 16:9 | Suggested Caption: Clicking citation [1] triggers 3D camera flight directly to the source node* |
-| **Active Recall Drill** | Spaced repetition flashcard testing room powered by SuperMemo SM-2 | `[ Asset Placeholder: Flashcard Drill ]`<br>*Aspect Ratio: 16:9 | Suggested Caption: Testing active recall retention with interval ratings (`/drill`)* |
+| **3D Constellation Map** | 1920x1080 Screenshot (`/map`) | 60 FPS spatial node graph with Louvain community color clusters |
+| **Glass Archive Cylinder** | 1920x1080 Screenshot (`/archive`) | 3D glass cylinder browsing with inertia scroll and tag filters |
+| **Conversational RAG Drawer** | 800x450 GIF | Clicking citation `[1]` triggers smooth 3D camera flight to cited node |
+| **SuperMemo SM-2 Flashcard Room** | 1920x1080 Screenshot (`/drill`) | Active recall testing room with SM-2 interval confidence ratings |
+| **Telegram & Chrome Capture** | 800x450 GIF | 1-click web clipping and instant Telegram voice note processing |
+| **Cognitive Bridges** | 1920x1080 Screenshot (`/bridges`) | Mind-pairing synergy score visualization and Kintsugi gold decay lines |
 
 ---
 
-## 💭 The Problem
+## ⚡ Feature Highlights
 
-We consume dozens of valuable ideas every day:
-
-* A 45-minute technical podcast listened to while walking
-* A deep-dive PDF paper saved on a laptop
-* A code snippet or tweet bookmarked late at night
-* A quick voice thought recorded on a phone
-
-Within 48 hours, **80% of what we saved is forgotten or lost in unorganized tabs**. Traditional note apps force you to manually tag, sort into folder hierarchies, and write manual summaries. The result? Capture friction, tagging burnout, and static notes that are never read again.
-
----
-
-## 💡 The Solution: Knowledge as a Journey
-
-Recall turns passive saving into an active, visual, and memorable workflow.
-
-```
-┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
-│   1. CAPTURE    │ ───► │   2. PROCESS    │ ───► │   3. CONNECT    │ ───► │    4. SEARCH    │ ───► │   5. REMEMBER   │
-│ Telegram / Web  │      │ AI Summarization│      │ 384-dim Embed   │      │ Hybrid RAG Q&A  │      │ SM-2 Flashcards │
-└─────────────────┘      └─────────────────┘      └─────────────────┘      └─────────────────┘      └─────────────────┘
-```
-
-### Step 1: Capture Instantly
-Send a voice note, screenshot, PDF, or article link to `@<YourBotUsername>` on Telegram, or click 1-button save in the Chrome extension. No manual forms, no mandatory fields.
-
-`[ GIF Placeholder: Telegram & Chrome Web Clipping ]`<br>*Recommended Spec: 800x450 GIF showing 1-click web save and Telegram voice note drop*
-
-### Step 2: Automatic Processing
-The background worker extracts raw text, executes OCR on images, transcribes voice notes with Whisper, sanitizes entities, and generates structured summaries.
-
-### Step 3: Spatial Connections
-Content is converted into 384-dimensional vector embeddings and indexed in Neon PostgreSQL using `pgvector` HNSW. Related thoughts automatically pull together into visual 3D clusters.
-
-`[ GIF Placeholder: 3D Constellation Navigation ]`<br>*Recommended Spec: 800x450 GIF showing smooth camera rotation and node hover cards in Three.js*
-
-### Step 4: Conversational Search
-Query your knowledge base in plain English. Recall retrieves relevant chunks using Reciprocal Rank Fusion (RRF) and generates an answer with interactive citation badges `[1]`, `[2]`.
-
-`[ GIF Placeholder: RAG Camera Auto-Flight ]`<br>*Recommended Spec: 800x450 GIF showing citation click triggering 3D camera auto-flight*
-
-### Step 5: Active Recall Mastery
-Saved items automatically transform into flashcard drills. Rate your memory retention (Again, Shaky, Locked) to let the SuperMemo SM-2 algorithm schedule your next review interval.
-
----
-
-## 🌟 Feature Showcase
-
+::: callout
 ### 📱 Capture Anywhere
-> *Save thoughts in seconds without interrupting your flow.*
+Save ideas in seconds without context-switching.  
+* **How it feels**: Send voice notes, photos of book pages, PDFs, or article links to your Telegram bot or click the Chrome sidepanel.  
+* **Under the hood**: Powered by Whisper audio transcription, Hugging Face PaddleOCR, and asynchronous Upstash Redis worker queues.
+:::
 
-`[ Asset Placeholder: Multi-Source Capture ]`<br>*Recommended Spec: 16:9 Image | Caption: Saving voice, text, PDFs, and web clips via Telegram and Chrome extension*
+::: callout
+### 🌌 3D Observatory
+Watch your personal universe of thoughts grow.  
+* **How it feels**: Walk through a spatial 3D graph of your mind (`/map`) or scroll through a glass archive cylinder (`/archive`).  
+* **Under the hood**: Rendered with Three.js and React Three Fiber at 60 FPS using force-directed graph positioning and vector cosine similarity.
+:::
 
-* **Telegram Bot**: Send voice notes, screenshots, PDFs, or links to `@<YourBotUsername>`.
-* **Chrome Extension**: Manifest v3 sidepanel for 1-click web clipping (`/api/extension/save`).
-* **Audio & OCR**: Whisper audio transcription and Hugging Face PaddleOCR image text extraction.
-
----
-
-### 🌌 3D Observatory Map
-> *Explore your second brain as a living, spatial constellation.*
-
-`[ Asset Placeholder: 3D Constellation Cluster ]`<br>*Recommended Spec: 16:9 Image | Caption: 60 FPS Three.js force-directed graph with semantic community hubs*
-
-* **60 FPS Rendering**: Built with Three.js / React Three Fiber.
-* **Semantic Clustering**: Nodes cluster based on mathematical cosine vector similarity.
-* **Archive Cylinder**: Spatial glass cylinder for chronological and filter-based archive browsing (`/archive`).
-
----
-
+::: callout
 ### 💬 Conversational RAG & Camera Flight
-> *Ask questions and fly directly to the source of your thoughts.*
+Ask your second brain questions and see where the answers came from.  
+* **How it feels**: Type a question in plain English. Click a citation badge `[1]` in the answer, and the 3D camera pilots straight to the source item.  
+* **Under the hood**: Reciprocal Rank Fusion (RRF) combining `pgvector` HNSW cosine vector search and `pg_trgm` GIN trigram text search with multi-tier LLM failover.
+:::
 
-`[ Asset Placeholder: Conversational RAG ]`<br>*Recommended Spec: 16:9 Image | Caption: Interactive citation badges trigger 3D camera auto-flight to source nodes*
+::: callout
+### 🎴 Spaced Repetition (SuperMemo SM-2)
+Never forget what you save.  
+* **How it feels**: Review auto-generated flashcards (`/drill`) tailored to your saved content. Rate your recall (Again, Shaky, Locked) to space out future reviews.  
+* **Under the hood**: SuperMemo SM-2 interval algorithm dynamically computing ease factors and review schedules in PostgreSQL.
+:::
 
-* **Hybrid Search (RRF)**: Combines `pgvector` 384-dim HNSW cosine vector search and `pg_trgm` GIN trigram text search.
-* **Multi-Tier RAG**: OpenRouter -> NVIDIA NIM -> Gemini failover pipeline.
-* **Camera Auto-Flight**: Clicking answer citations smoothly navigates the 3D canvas to the exact source node.
-
----
-
-### 🎴 Spaced Repetition (SM-2)
-> *Turn static bookmarks into memories you actually keep.*
-
-`[ Asset Placeholder: Flashcard Drill Room ]`<br>*Recommended Spec: 16:9 Image | Caption: Active recall flashcards with SuperMemo SM-2 interval calculations (`/drill`)*
-
-* **SuperMemo SM-2**: Automated interval scheduling based on user memory confidence ratings.
-* **Dynamic Quiz Generation**: Questions automatically extracted from your saved content.
-
----
-
-### 📝 Obsidian OKF Sync
-> *Own your data with transparent two-way vault synchronization.*
-
-`[ Asset Placeholder: Obsidian Vault Sync ]`<br>*Recommended Spec: 16:9 Image | Caption: Open Knowledge Format (OKF) Markdown zip import and export*
-
-* **Open Knowledge Format (OKF)**: Markdown files with standard YAML metadata.
-* **Import & Export**: ZIP import (`POST /api/import/zip`) and export (`GET /api/export/zip`).
+::: callout
+### 📝 Obsidian Vault Sync
+Maintain total ownership over your data.  
+* **How it feels**: Two-way sync your Recall knowledge base with your local Obsidian vault using standard Markdown files.  
+* **Under the hood**: Open Knowledge Format (OKF) specification with YAML frontmatter metadata, supporting full ZIP import and export.
+:::
 
 ---
 
-## ⚡ How It Works (High-Level Architecture)
+## 🔄 Workflow Comparison
+
+| Everyday Knowledge Capture | The Recall Experience |
+|---|---|
+| ❌ Bookmarks buried in unread browser tabs | ✅ 1-click capture via Telegram & Chrome extension |
+| ❌ Manual tagging, categorization, and folder fatigue | ✅ Automatic AI summarization, entity extraction, and tagging |
+| ❌ Keyword search fails when exact terms are forgotten | ✅ Hybrid Vector (HNSW) + Trigram (GIN) semantic search |
+| ❌ Static notes that sit unread forever | ✅ Automated flashcard drills scheduled via SuperMemo SM-2 |
+| ❌ Text-only answer outputs | ✅ Interactive RAG citations with 3D camera auto-flight |
+| ❌ Plaintext database storage | ✅ Fernet AES-128 cryptographic encryption at rest |
+
+---
+
+## 🏗️ High-Level System Architecture
 
 ```mermaid
 flowchart TB
-    subgraph Ingestion["Clients"]
+    subgraph Clients["Ingestion Channels"]
         TG["Telegram Bot"]
         EXT["Chrome Extension"]
         SPA["React SPA"]
     end
 
-    subgraph API["FastAPI Layer"]
+    subgraph API["FastAPI Application"]
         HOOK["Webhook Handler"]
         ITEMS["API Router"]
         AUTH["Auth Router"]
     end
 
-    subgraph Async["Background Workers"]
+    subgraph Async["Background Engine"]
         REDIS["Upstash Redis Queue"]
         WORKER["Async Worker Loop"]
         SCHED["22 Scheduler Jobs"]
     end
 
-    subgraph Data["Database & AI"]
+    subgraph Data["Storage & Intelligence"]
         DB[("Neon PostgreSQL 16
 (pgvector + pg_trgm)")]
-        AI["AI Failover Engine"]
+        AI["AI Multi-Tier Cascade"]
     end
 
     TG --> HOOK
@@ -164,28 +206,15 @@ flowchart TB
     SCHED --> DB
 ```
 
-> 📖 *For complete sequence diagrams, background queue mechanics, and lifecycles, visit the [System Architecture Guide](docs/ARCHITECTURE.md).*
-
----
-
-## 📊 Traditional Notes vs. Recall
-
-| Capability | Traditional Note Apps | Recall |
-|---|---|---|
-| **Friction** | Manual titles, tags, and folder organization | Zero-friction capture via Telegram & Chrome extension |
-| **Search** | Exact keyword matching only | Hybrid Vector (HNSW) + Trigram (GIN) with Reciprocal Rank Fusion |
-| **Navigation** | Static lists and nested folders | Interactive 60 FPS 3D spatial constellation map |
-| **RAG Answers** | Text-only output | Interactive answer citations with 3D camera auto-flight |
-| **Retention** | Saved and forgotten forever | Active recall flashcards scheduled via SuperMemo SM-2 |
-| **Security** | Plaintext database storage | Fernet AES-128 cryptographic encryption at rest |
+> 📖 *For deep architectural specs, sequence diagrams, and DB schemas, explore the [System Architecture Guide](docs/ARCHITECTURE.md).*
 
 ---
 
 ## ⚡ Quick Start
 
-Get Recall running locally in under 3 minutes.
+Launch Recall locally in under 3 minutes.
 
-### 1. Clone & Backend Setup
+### 1. Clone & Setup Backend
 
 ```bash
 git clone https://github.com/PriyanshuG27/Recall.git
@@ -197,15 +226,15 @@ python -m venv .venv
 # Activate environment (Windows: .venv\Scripts\activate | Linux/macOS: source .venv/bin/activate)
 source .venv/bin/activate
 
-# Install requirements and configure environment
+# Install requirements & configure env
 pip install -r requirements.txt
 cp .env.example .env.local
 
-# Run FastAPI server
+# Start FastAPI server
 uvicorn backend.main:app --reload --port 8000
 ```
 
-### 2. Frontend Setup (Separate Terminal)
+### 2. Launch Frontend (Separate Terminal)
 
 ```bash
 cd Recall/frontend
@@ -215,53 +244,31 @@ npm run dev
 
 Open `http://localhost:5173` in your browser.
 
-> 🛠️ *For full Makefile commands, database schema scripts, and environment variable references, visit the [Development Guide](docs/DEVELOPMENT.md).*
+> 🛠️ *For Makefile targets, testing suites, and environment details, read the [Development Guide](docs/DEVELOPMENT.md).*
 
 ---
 
-## 🛠️ Technology Stack
+## 📚 Technical Documentation Suite
 
-| Component | Technology | Source Link |
-|---|---|---|
-| **Backend API** | FastAPI 0.111+ (Python 3.11+) | [main.py](backend/main.py) |
-| **Frontend SPA** | React 18.3 + Vite 6.4 (Vanilla CSS) | [App.jsx](frontend/src/App.jsx) |
-| **3D Rendering** | Three.js / React Three Fiber | [MapCanvas.jsx](frontend/src/canvas/MapCanvas.jsx) |
-| **Database** | Neon PostgreSQL 16 (15 tables) | [schema.sql](backend/db/schema.sql) |
-| **Vector Search** | `pgvector` (384-dim HNSW cosine) | [search_service.py](backend/services/search_service.py) |
-| **Text Search** | `pg_trgm` (GIN trigram index) | [schema.sql](backend/db/schema.sql) |
-| **Task Queue** | Upstash Redis (`recall:tasks`) | [worker.py](backend/worker.py) |
-| **Backend Hosting** | Koyeb Serverless (FastAPI + FastEmbed ONNX) | [DEPLOYMENT.md](docs/DEPLOYMENT.md) |
-| **GPU Serverless** | Modal GPU (Whisper + Qwen LLM) | [ai_cascade.py](backend/services/ai_cascade.py) |
-
----
-
-## 📖 Technical Documentation Library
-
-Recall features a comprehensive, repository-backed documentation suite:
+Recall is backed by a comprehensive engineering manual inside `docs/`:
 
 * 🚀 [System Architecture Guide](docs/ARCHITECTURE.md) — System design, sequence diagrams, and lifecycles.
-* 🗄️ [Database Reference](docs/DATABASE.md) — DDL schemas, `pgvector` HNSW indexes, and production SQL queries.
-* 🔌 [API Endpoint Reference](docs/API.md) — Complete specification for all 50 FastAPI REST & WebSocket endpoints.
-* 🌟 [Feature Specifications Matrix](docs/FEATURES.md) — Feature status breakdown across production, dev, and legacy.
-* 🛠️ [Development & Contributor Guide](docs/DEVELOPMENT.md) — Environment setup, `Makefile` targets, and contributor workflows.
+* 🗄️ [Database Reference](docs/DATABASE.md) — DDL schemas, `pgvector` HNSW indexes, and production queries.
+* 🔌 [API Reference](docs/API.md) — Complete specification for all 50 FastAPI REST & WebSocket endpoints.
+* 🌟 [Feature Status Matrix](docs/FEATURES.md) — Feature status breakdown across production, dev, and legacy code.
+* 🛠️ [Development Guide](docs/DEVELOPMENT.md) — Environment setup, `Makefile` targets, and contributor workflows.
 * ☁️ [Deployment Guide](docs/DEPLOYMENT.md) — Hosting setup (Koyeb, Vercel, Modal) and 27 environment variables.
 * 🛡️ [Security Architecture](docs/SECURITY.md) — Cryptography, Fernet AES-128, HMAC verification, and PII masking.
 * 🧪 [Testing Strategy](docs/TESTING.md) — Test pyramid breakdown across 151 test files.
 * 🤝 [Contributing Guidelines](docs/CONTRIBUTING.md) — Coding standards, workspace rules, and PR checklist.
-* 📊 [Visual Diagrams Matrix](docs/DIAGRAMS.md) — 10 code-derived Mermaid diagrams.
+* 📊 [Visual Diagrams Collection](docs/DIAGRAMS.md) — 10 code-derived Mermaid diagrams.
 * 📋 [Architecture Decision Records (ADRs)](docs/adr/README.md) — Formal records (`ADR-001` through `ADR-006`).
 
 ---
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please read the [Contributing Guidelines](docs/CONTRIBUTING.md) before submitting pull requests.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'feat: add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+Contributions are welcome! Please review the [Contributing Guidelines](docs/CONTRIBUTING.md) before submitting pull requests.
 
 ---
 
