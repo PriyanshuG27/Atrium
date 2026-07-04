@@ -229,3 +229,8 @@ Advanced_Async_Programming_in_Python_*.md
 Image__This_image_is_a_screenshot_of_a_LinkedIn_po_*.md
 docs_summary.txt
 
+# Internal Documentation & Historical Artifacts
+docs/archive/
+docs/prompts/
+docs/internal/
+
