@@ -34,18 +34,19 @@ Whether it is a voice note recorded on the move, a multi-page PDF document, an i
 ## 🌟 Comprehensive Feature Set
 
 ### 🤖 1. Multi-Task AI Cascade Engine (`backend/services/ai_cascade.py`)
-Recall implements multi-provider fallback cascades with automatic failover, anti-thinking XML sanitization, and Dead Letter Queue recovery:
+Recall implements task-specific provider fallback cascades with automatic failover, anti-thinking XML sanitization, and Dead Letter Queue recovery:
 
-#### A. RAG & Conversational Mind Map Answers (`answer_question` & `answer_graph_question`)
+#### A. Document Ingestion & Summarization Cascade (`_run_summary_cascade`)
+* **Tier 1 — Modal Serverless GPU (`_call_modal_summary`)**: Self-hosted GPU endpoint (`pri27--llama-summary.modal.run/summarize`) executing Llama 3 70B Instruct for high-speed document summarization.
+* **Tier 2 — Groq API Model Rotation (`_call_groq_summary`)**: Multi-model rotation across `qwen/qwen3.6-27b` ➔ `openai/gpt-oss-120b` ➔ `openai/gpt-oss-20b` with prompt token budget calculation (`min(2048, max(512, 7400 - prompt_tokens))`) and unclosed `<think>` tag truncation recovery.
+* **Tier 3 — Google Gemini API (`_call_gemini_summary`)**: `gemini-3.1-flash-lite` `v1beta` endpoint execution with `responseMimeType="application/json"` structured output.
+* **Tier 4 — Bookmark & Dead Letter Queue (DLQ)**: If all summary tiers fail, item is saved as a bookmark item and task payload is written to `dead_letter_queue` for admin retry.
+
+#### B. Conversational RAG & Assistant Cascade (`answer_question` & `answer_graph_question`)
 * **Tier 1 — OpenRouter API (`_call_openrouter_rag`)**: Primary RAG model using `openai/gpt-oss-120b:free`.
 * **Tier 2 — NVIDIA NIM API (`_call_nvidia_rag`)**: Secondary RAG fallback using `meta/llama3-70b-instruct` on NVIDIA NIM infrastructure.
 * **Tier 3 — Google Gemini API (`_call_gemini_llm`)**: `gemini-3.1-flash-lite` conversational execution.
 * **Tier 4 — Modal GPU & Groq Fallbacks**: `_call_modal_rag` (`pri27--llama-summary.modal.run/rag`) & `_call_groq_llm`.
-
-#### B. Document Ingestion & Summarization (`_run_summary_cascade`)
-* **Tier 1 — Modal Serverless GPU (`_call_modal_summary`)**: `pri27--llama-summary.modal.run/summarize` executing Llama 3 70B Instruct for high-speed document summarization.
-* **Tier 2 — Groq API Model Rotation (`_call_groq_summary`)**: Multi-model rotation (`qwen/qwen3.6-27b` ➔ `openai/gpt-oss-120b` ➔ `openai/gpt-oss-20b`) with prompt token budget calculation (`min(2048, max(512, 7400 - prompt_tokens))`) and unclosed `<think>` tag truncation recovery.
-* **Tier 3 — Google Gemini API (`_call_gemini_summary`)**: `gemini-3.1-flash-lite` `v1beta` endpoint with `responseMimeType="application/json"` structured output.
 
 #### C. Voice Note Speech-to-Text (`transcribe`)
 * **Tier 1 — Modal GPU Whisper (`_call_modal_transcribe`)**: `pri27--llama-summary.modal.run/transcribe`.
@@ -174,7 +175,7 @@ graph TB
         DLQ["Dead Letter Queue<br/>DLQ Admin Retry"]
     end
 
-    subgraph AI_CASCADE["🧠 Multi-Tier AI Cascade Engine (ai_cascade.py)"]
+    subgraph AI_CASCADE["🧠 Multi-Task AI Cascade Engine (ai_cascade.py)"]
         RAG["RAG Answers:<br/>OpenRouter ➔ NVIDIA NIM ➔ Gemini ➔ Modal ➔ Groq"]
         SUM["Summarization:<br/>Modal GPU ➔ Groq Rotation ➔ Gemini"]
         STT["Voice STT:<br/>Modal Whisper ➔ Groq Whisper ➔ Gemini Audio"]
@@ -242,8 +243,9 @@ sequenceDiagram
 
 ---
 
-## 🧠 AI Cascade Flowchart
+## 🧠 AI Cascade Flowcharts
 
+### 1. Ingestion Summarization Flowchart (`_run_summary_cascade`)
 ```mermaid
 flowchart LR
     A["📥 Ingested Media\nText / Voice / Image / PDF / Vault"] --> B{"Tier 1: Modal GPU\nllama-summary.modal.run"}
@@ -252,11 +254,7 @@ flowchart LR
     C -->|"Success"| E
     C -->|"Failure / 429 Rate Limit"| D{"Tier 3: Gemini\n3.1-flash-lite"}
     D -->|"Success"| E
-    D -->|"Failure"| OR{"Tier 4: OpenRouter\ngpt-oss-120b:free"}
-    OR -->|"Success"| E
-    OR -->|"Failure"| NV{"Tier 5: NVIDIA NIM\nllama3-70b-instruct"}
-    NV -->|"Success"| E
-    NV -->|"Failure"| F["Dead Letter Queue (DLQ)\n+ Bookmark Fallback"]
+    D -->|"Failure"| F["Tier 4: Bookmark & DLQ\nTask saved for retry"]
     E --> G["Phonetic Brand Repair\ne.g. Mobbin, Haikei, TestSprite"]
     G --> H["OpenAI text-embedding-3-small\n1536-dim Vector"]
 
@@ -264,6 +262,25 @@ flowchart LR
     style B fill:#16213e,color:#e0e0e0
     style E fill:#0f3460,color:#e0e0e0
     style F fill:#581845,color:#e0e0e0
+```
+
+---
+
+### 2. Conversational RAG & Assistant Flowchart (`answer_question`)
+```mermaid
+flowchart LR
+    Q["💬 User RAG Query\nvia ChatDrawer"] --> R1{"Tier 1: OpenRouter\ngpt-oss-120b:free"}
+    R1 -->|"Success"| ANS["Synthesized Answer\n+ Citation Badges"]
+    R1 -->|"Failure"| R2{"Tier 2: NVIDIA NIM\nllama3-70b-instruct"}
+    R2 -->|"Success"| ANS
+    R2 -->|"Failure"| R3{"Tier 3: Gemini\n3.1-flash-lite"}
+    R3 -->|"Success"| ANS
+    R3 -->|"Failure"| R4{"Tier 4: Modal / Groq\nFallback"}
+    R4 -->|"Success"| ANS
+
+    style Q fill:#1a1a2e,color:#e0e0e0
+    style R1 fill:#16213e,color:#e0e0e0
+    style ANS fill:#0f3460,color:#e0e0e0
 ```
 
 ---
@@ -278,7 +295,7 @@ flowchart LR
 | **Database** | Neon PostgreSQL | Managed Postgres with `pgvector` & `pg_trgm` extensions |
 | **Vector Index** | HNSW Cosine Similarity | Sub-10ms vector similarity retrieval ($m=16, ef=64$) |
 | **Background Queue** | Upstash Redis | Asynchronous ingestion worker queue |
-| **AI Processing** | Modal GPU + Groq + Gemini + OpenRouter + NVIDIA NIM | 5-tier LLM cascade, Whisper voice, & OCR |
+| **AI Processing** | Modal GPU + Groq + Gemini + OpenRouter + NVIDIA NIM | Task-specific multi-tier LLM cascade, Whisper voice, & OCR |
 | **Audio Synthesizer** | Web Audio API (`AudioEngine.js`) | Cybernetic room transition & interaction sound effects |
 | **Testing Frameworks** | Pytest + Vitest + k6 | Backend unit/integration tests & Frontend component tests |
 
