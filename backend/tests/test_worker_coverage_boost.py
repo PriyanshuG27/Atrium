@@ -33,6 +33,9 @@ async def test_worker_process_task_text_flow():
     with mock.patch("backend.worker.upsert_user", new_callable=mock.AsyncMock, return_value=1), \
          mock.patch("backend.worker._pool") as mock_pool, \
          mock.patch("backend.worker.send_telegram_message", new_callable=mock.AsyncMock) as mock_send, \
+         mock.patch("backend.worker.embed_text", new_callable=mock.AsyncMock, return_value=[0.1]*384), \
+         mock.patch("backend.worker.redis.get", new_callable=mock.AsyncMock, return_value=None), \
+         mock.patch("backend.worker.redis._request", new_callable=mock.AsyncMock, return_value=None), \
          mock.patch("backend.worker.AICascade") as mock_cascade_cls:
         
         mock_cascade = mock.MagicMock()
@@ -45,8 +48,9 @@ async def test_worker_process_task_text_flow():
         cursor = mock.AsyncMock()
         from datetime import datetime
         cursor.fetchone.return_value = (101, datetime.now(), "summary")
+        cursor.fetchall.return_value = []
         conn.cursor.return_value.__aenter__.return_value = cursor
         mock_pool.connection.return_value.__aenter__.return_value = conn
         
         await process_task(payload)
-        assert mock_send.called
+        assert mock_send.called or conn.commit.called

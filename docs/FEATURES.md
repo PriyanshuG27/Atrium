@@ -30,8 +30,8 @@ Capabilities in **Recall** are classified across 5 status levels:
 | **APScheduler Jobs** | ✅ Production | `scheduler/scheduler.py` | 22 background cron jobs with `misfire_grace_time=60` (reminders, Louvain clustering, daily digests). |
 | **Fernet Encryption** | ✅ Production | `services/encryption.py` | Cryptographic encryption at rest for `items.raw_text` and `users.google_refresh_token`. |
 | **Dead Letter Queue** | ✅ Production | `services/dlq.py` | Failover table (`dead_letter_queue`) logging failed task payloads with boot auto-retry. |
-| **Google Drive Sync** | ⚠ Partial | `services/drive_sync.py` | One-click Google Docs backup (`POST /api/drive/sync`); requires Google OAuth app credentials. |
-| **PWA Share Target** | ⚠ Partial | `routes/api.py` | `POST /api/share-target` handler implemented for mobile native share sheet integration. |
+| **Google Drive Sync** | ✅ Production | `services/drive_sync.py` | One-click Google Docs backup (`POST /api/drive/sync`) with OAuth2 token refresh & Fernet encryption. |
+| **PWA Share Target** | ✅ Production | `routes/api.py` | Web Share Target API handler (`POST /api/share-target`) for mobile native share sheet integration. |
 | **Cognitive Bridges (`/bridges`)** | 🧪 Active Development | `routes/bridges.py`<br>`pages/Bridges.jsx` | Mind-pairing, synergy score calculation, and Kintsugi gold crack decay simulation. |
 | **Branching POC (`/poc/branching`)** | 🧪 Active Development | `pages/BranchingPOC.jsx` | Isolated proof-of-concept for visual node branching on top of the mind graph. |
 | **Nebula Route (`/nebula`)** | ❌ Legacy | `App.jsx:L29` | Hard redirects to `/map`. `Nebula.jsx` component is unrendered legacy code. |
