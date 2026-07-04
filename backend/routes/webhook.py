@@ -1620,6 +1620,7 @@ async def telegram_webhook(
                 h_abs = abs(offset_minutes) // 60
                 m_abs = abs(offset_minutes) % 60
                 tz_str = f"GMT{sign}{h_abs:02d}:{m_abs:02d}"
+                status_banner = f"📍 Timezone set to {tz_str} from your location."
                 background_tasks.add_task(send_onboarding_settings_card, chat_id, user_id, status_banner, base_url)
                 return {"status": "ok", "detail": "timezone_location_detected"}
             except Exception as loc_err:

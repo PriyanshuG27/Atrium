@@ -8,7 +8,7 @@
 Users require friction-free knowledge capture across mobile and desktop devices without opening a complex web application.
 
 ## Decision
-We adopt Telegram (`@RecallBrainBot`) as the primary mobile ingestion interface. Webhook `POST /webhook` acknowledges requests in **< 50 ms** after queuing task JSON to Upstash Redis queue (`recall:tasks`). Media ingestion pipelines handle voice notes, screenshots, PDFs, and links.
+We adopt Telegram (`@<YourBotUsername>`) as the primary mobile ingestion interface. Webhook `POST /webhook` acknowledges requests in **< 50 ms** after queuing task JSON to Upstash Redis queue (`recall:tasks`). Media ingestion pipelines handle voice notes, screenshots, PDFs, and links.
 
 ## Alternatives Considered
 * **Native Mobile Apps (iOS/Android)**: Rejected for high initial development and maintenance overhead.

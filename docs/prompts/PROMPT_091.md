@@ -256,7 +256,7 @@ Registration Steps:
 1. BotFather Command Configuration:
    - Open conversation with `@BotFather`.
    - Execute `/newapp` or `/setappurl`.
-   - Select targeted bot (`@RecallBrainBot`).
+   - Select targeted bot (`@<YourBotUsername>`).
    - Set Web App URL: `https://recall.vercel.app` (or production frontend URL).
    - Set Web App short name: `recall`.
 2. Menu Button Binding:

@@ -17,7 +17,7 @@ Capabilities in **Recall** are classified across 5 status levels:
 
 | Feature | Status | Implementation Files | Value & Description |
 |---|---|---|---|
-| **Telegram Ingestion** | ✅ Production | `routes/webhook.py`<br>`worker.py` | Ingest voice notes, screenshots, PDFs, URLs, text via Telegram (`@RecallBrainBot`). |
+| **Telegram Ingestion** | ✅ Production | `routes/webhook.py`<br>`worker.py` | Ingest voice notes, screenshots, PDFs, URLs, text via Telegram (`@<YourBotUsername>`). |
 | **Multi-Format Parsing** | ✅ Production | `services/*_ingester.py` | Media scrapers for URLs, YouTube/Instagram reels via Cobalt API, PyMuPDF PDF chunking, OpenCV OCR. |
 | **Hybrid Search & RAG** | ✅ Production | `services/search_service.py` | Combined 384-dim `pgvector` HNSW cosine search (< 10ms) and `pg_trgm` GIN trigram search (< 5ms) via RRF. |
 | **AI Cascade** | ✅ Production | `services/ai_cascade.py` | Multi-provider LLM failover. Summarization: Modal -> Groq (3-tier: Qwen 27B / GPT-OSS 120B / 20B) -> Gemini -> Bookmark Fallback. RAG: OpenRouter -> NVIDIA -> Gemini.

@@ -13,7 +13,7 @@ Recall is a multi-tier personal knowledge OS & 3D Observatory. This document det
 flowchart TB
     subgraph Clients["Ingestion & Client Layer"]
         TG["Telegram Bot App
-(@RecallBrainBot)"]
+(@<YourBotUsername>)"]
         WEB["React SPA
 (Vite 6 / Port 5173)"]
         EXT["Chrome Web Clipper

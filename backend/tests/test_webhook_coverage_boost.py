@@ -70,7 +70,9 @@ def test_webhook_location_message(client):
         }
     }
     with mock.patch("backend.routes.webhook.redis.setex", new_callable=mock.AsyncMock, return_value=True), \
-         mock.patch("backend.routes.webhook.redis.lpush", new_callable=mock.AsyncMock, return_value=1):
+         mock.patch("backend.routes.webhook.redis.lpush", new_callable=mock.AsyncMock, return_value=1), \
+         mock.patch("backend.routes.webhook.http_client.post", new_callable=mock.AsyncMock), \
+         mock.patch("backend.routes.webhook.send_onboarding_settings_card", new_callable=mock.AsyncMock):
         res = client.post("/webhook", json=payload)
         assert res.status_code == 200
 

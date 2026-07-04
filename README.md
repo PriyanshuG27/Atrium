@@ -27,7 +27,7 @@ flowchart LR
 
 ## 🌟 What Recall Lets You Do
 
-* **Capture Anything Instantly**: Send voice notes, screenshots, PDFs, or article links to `@RecallBrainBot` on Telegram or clip web pages with 1-click via the Chrome extension.
+* **Capture Anything Instantly**: Send voice notes, screenshots, PDFs, or article links to `@<YourBotUsername>` on Telegram or clip web pages with 1-click via the Chrome extension.
 * **Never Lose Context**: Automatic AI summarization, entity extraction, and tag clustering keep your personal knowledge structured without manual effort.
 * **Explore Your Mind in 3D**: Walk through a force-directed 3D constellation map of your thoughts (`/map`) or scroll through a spatial glass archive (`/archive`).
 * **Ask Your Second Brain**: Query your knowledge using conversational RAG. Clicking answer citation badges (`[1]`, `[2]`) triggers smooth 3D camera auto-flight directly to cited nodes.

@@ -14,7 +14,7 @@ This document serves as the visual reference repository containing all **10 veri
 flowchart TB
     subgraph Clients["Ingestion & Client Layer"]
         TG["Telegram Bot App
-(@RecallBrainBot)"]
+(@<YourBotUsername>)"]
         WEB["React SPA
 (Vite 6 / Port 5173)"]
         EXT["Chrome Web Clipper
