@@ -41,7 +41,7 @@ Managed in `backend/config.py` using Pydantic `BaseSettings`.
 
 ## 2. Infrastructure Hosting Targets
 
-1. **Backend Web Service (Render / Railway)**: Uvicorn server: `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`. Health probe: `GET /health` (< 5ms).
+1. **Backend Web Service (Koyeb Serverless)**: Uvicorn server: `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`. Health probe: `GET /health` (< 5ms).
 2. **Frontend SPA (Vercel / Netlify)**: Vite build output: `frontend/dist/`. Rewrite: `/* -> /index.html`.
 3. **Database (Neon PostgreSQL 16)**: PostgreSQL 16 serverless instance with `vector` and `pg_trgm` extensions enabled.
 4. **Queue & Cache (Upstash Redis)**: Serverless Redis REST endpoint for task queue and WebSocket pub/sub.

@@ -59,7 +59,7 @@ flowchart LR
 | **Styling** | Vanilla CSS | Custom Cyber-Noir / Glassmorphism design system |
 | **Database** | Neon PostgreSQL 16 | Serverless pooled connection (`asyncpg`), 384-dim HNSW & GIN trigram indexes |
 | **Queue** | Upstash Redis | REST client (`UpstashRedis`), async queue (`recall:tasks`), sliding rate limits |
-| **3D Rendering** | Three.js / R3F | 60 FPS 3D constellation map (`/map`) and archive cylinder (`/archive`) |
+| **3D Koyebing** | Three.js / R3F | 60 FPS 3D constellation map (`/map`) and archive cylinder (`/archive`) |
 
 ---
 

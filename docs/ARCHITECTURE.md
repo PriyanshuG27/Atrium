@@ -100,7 +100,7 @@ sequenceDiagram
     Worker->>DB: Fernet encrypt raw_text & INSERT item
     Worker->>Redis: Publish event to ws:connections:user:{id}
     Redis->>WS: Push new_node event
-    WS-->>SPA: Stream WebSocket event -> Render node & trigger toast
+    WS-->>SPA: Stream WebSocket event -> Koyeb node & trigger toast
 ```
 
 ---
