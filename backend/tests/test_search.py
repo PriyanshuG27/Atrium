@@ -331,7 +331,7 @@ async def test_embed_text_cascades():
             res = await embed_text("hello")
             assert len(res) == 384
             assert res == [0.8] * 384
-            mock_transformer_cls.assert_called_once_with("all-MiniLM-L6-v2")
+            mock_transformer_cls.assert_called_once_with("BAAI/bge-small-en-v1.5")
             mock_transformer_inst.encode.assert_called_once_with("hello")
 
         # Scenario 2c: Modal starts with ak-mock, local FastEmbed is installed and succeeds

@@ -96,8 +96,8 @@ async def _generate_embedding_uncached(text: str) -> List[float]:
     try:
         from sentence_transformers import SentenceTransformer
         if _local_model is None or not hasattr(_local_model, "encode"):
-            logger.info("Initializing local SentenceTransformer('all-MiniLM-L6-v2')...")
-            _local_model = SentenceTransformer("all-MiniLM-L6-v2")
+            logger.info("Initializing local SentenceTransformer('BAAI/bge-small-en-v1.5')...")
+            _local_model = SentenceTransformer("BAAI/bge-small-en-v1.5")
         
         logger.info("Attempting local embedding generation via SentenceTransformer...")
         import asyncio
@@ -115,7 +115,7 @@ async def _generate_embedding_uncached(text: str) -> List[float]:
     if settings.HF_TOKEN and not settings.HF_TOKEN.startswith("mock") and settings.HF_TOKEN != "":
         try:
             logger.info("Attempting embedding generation via Hugging Face Inference API...")
-            url = "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2"
+            url = "https://api-inference.huggingface.co/pipeline/feature-extraction/BAAI/bge-small-en-v1.5"
             headers = {"Authorization": f"Bearer {settings.HF_TOKEN}"}
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.post(url, json={"inputs": text}, headers=headers)
