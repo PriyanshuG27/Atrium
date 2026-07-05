@@ -14,7 +14,8 @@ const sr = (s) => { const x = Math.sin(s * 1.618 + 2.718) * 10000; return x - Ma
 
 /* ═══ STAGES ═════════════════════════════════════════════════════════════ */
 const STAGE_NAMES  = ['Hut', 'Cottage', 'House', 'Manor', 'Villa', 'Castle'];
-const STAGE_SCORES = [0, 22, 46, 72, 90, 97];
+// Score thresholds: each stage gets ~19-23 pts; Villa now 73→96 (24 pts) for 15 slots ≈ 1.6 pts/slot
+const STAGE_SCORES = [0, 16, 33, 52, 73, 97];
 const STAGE_SUBS   = [
   'First shelter. First warmth.',
   'Walls that hold the rain out.',
@@ -37,87 +38,99 @@ const getStage = (score) => STAGE_SCORES.reduce((a, t, i) => score >= t ? i : a,
   BRICK 2nd floor:   sit on plaster top 0.88, h=0.52 → center y = 0.88+0.26 = 1.14, top=1.40
   CHIMNEY:           sits on brick top 1.40, h=0.80 → center y = 1.40+0.40 = 1.80
   TOWER blocks:      cumulative from ground
+
+  SCORE DISTRIBUTION (target ~1.5–2.5 pts/slot):
+  HUT     0–15   8 slots  → sc: 1,2,4,6,8,10,12,15        ≈ 2.0 pts/slot
+  COTTAGE 16–31  8 slots  → sc: 16,18,20,22,24,26,28,31   ≈ 2.1 pts/slot
+  HOUSE   32–51  9 slots  → sc: 32,34,36,38,41,44,47,50,53  but clamp at 51; use 32-51
+  MANOR   52–72 13 slots  → sc: 52,53,54,55,56,57,58,60,62,64,66,68,70
+  VILLA   73–96 15 slots  → sc: 73,74,75,77,79,81,83,85,87,89,91,92,93,94,95
+  CASTLE  97+  (locked)
 */
 const SLOTS = [
-  // HUT — bamboo posts + wicker panels (si=0, sc 2–20)  retirable=true: fully replaced by cottage
-  { id:0,  comp:'post',    si:0, retirable:true,  pos:[-1.02,0.92,-0.80], sz:[0.14,1.84,0.14], sc:2  },
-  { id:1,  comp:'post',    si:0, retirable:true,  pos:[ 1.02,0.92,-0.80], sz:[0.14,1.84,0.14], sc:4  },
-  { id:2,  comp:'post',    si:0, retirable:true,  pos:[-1.02,0.92, 0.80], sz:[0.14,1.84,0.14], sc:6  },
-  { id:3,  comp:'post',    si:0, retirable:true,  pos:[ 1.02,0.92, 0.80], sz:[0.14,1.84,0.14], sc:8  },
-  { id:4,  comp:'wicker',  si:0, retirable:true,  pos:[-1.03,0.82, 0.00], sz:[0.09,1.28,1.54], sc:10 },
-  { id:5,  comp:'wicker',  si:0, retirable:true,  pos:[ 1.03,0.82, 0.00], sz:[0.09,1.28,1.54], sc:12 },
-  { id:6,  comp:'wicker',  si:0, retirable:true,  pos:[ 0.00,0.82,-0.81], sz:[1.92,1.28,0.09], sc:15 },
-  { id:7,  comp:'wicker',  si:0, retirable:true,  pos:[ 0.00,0.82, 0.81], sz:[1.92,1.28,0.09], sc:20, hasDoor:true },
+  // HUT — bamboo posts + wicker panels (si=0, sc 1–15)  retirable=true
+  { id:0,  comp:'post',    si:0, retirable:true,  pos:[-1.02,0.92,-0.80], sz:[0.14,1.84,0.14], sc:1  },
+  { id:1,  comp:'post',    si:0, retirable:true,  pos:[ 1.02,0.92,-0.80], sz:[0.14,1.84,0.14], sc:2  },
+  { id:2,  comp:'post',    si:0, retirable:true,  pos:[-1.02,0.92, 0.80], sz:[0.14,1.84,0.14], sc:4  },
+  { id:3,  comp:'post',    si:0, retirable:true,  pos:[ 1.02,0.92, 0.80], sz:[0.14,1.84,0.14], sc:6  },
+  { id:4,  comp:'wicker',  si:0, retirable:true,  pos:[-1.03,0.82, 0.00], sz:[0.09,1.28,1.54], sc:8  },
+  { id:5,  comp:'wicker',  si:0, retirable:true,  pos:[ 1.03,0.82, 0.00], sz:[0.09,1.28,1.54], sc:10 },
+  { id:6,  comp:'wicker',  si:0, retirable:true,  pos:[ 0.00,0.82,-0.81], sz:[1.92,1.28,0.09], sc:12 },
+  { id:7,  comp:'wicker',  si:0, retirable:true,  pos:[ 0.00,0.82, 0.81], sz:[1.92,1.28,0.09], sc:15, hasDoor:true },
 
-  // COTTAGE — stone corners: FULL-HEIGHT piers (permanent) + plaster walls (si=1, sc 22–46)
-  // Stone piers: sz[2]=0.76 = exact bridge between side wall front-face (z=0.99) and front/back wall (z=1.41)
-  { id:8,  comp:'stone',   si:1, permanent:true,  pos:[-1.57,0.44,-1.37], sz:[0.54,0.88,0.76], sc:22 },
-  { id:9,  comp:'stone',   si:1, permanent:true,  pos:[ 1.57,0.44,-1.37], sz:[0.54,0.88,0.76], sc:24 },
-  { id:10, comp:'stone',   si:1, permanent:true,  pos:[-1.57,0.44, 1.37], sz:[0.54,0.88,0.76], sc:26 },
-  { id:11, comp:'stone',   si:1, permanent:true,  pos:[ 1.57,0.44, 1.37], sz:[0.54,0.88,0.76], sc:28 },
-  // Plaster: h=0.88 from ground → center y=0.44, top=0.88; front wall widens to match back
-  { id:12, comp:'plaster', si:1, retirable:true,  pos:[-1.58,0.44, 0.00], sz:[0.34,0.88,1.98], sc:31 },
-  { id:13, comp:'plaster', si:1, retirable:true,  pos:[ 1.58,0.44, 0.00], sz:[0.34,0.88,1.98], sc:34, hasWindow:true },
-  { id:14, comp:'plaster', si:1, retirable:true,  pos:[ 0.00,0.44,-1.58], sz:[2.90,0.88,0.34], sc:37, hasWindow:true },
-  { id:15, comp:'plaster', si:1, retirable:true,  pos:[ 0.00,0.44, 1.58], sz:[2.90,0.88,0.34], sc:42, hasDoor:true  },
+  // COTTAGE — stone corners: FULL-HEIGHT piers (permanent) + plaster walls (si=1, sc 16–31)
+  // Piers are si:2 (House) so retireStage(1) does NOT touch them — they persist through House.
+  // retireStage(2) (Manor start) retires them together with bricks/chimney.
+  { id:8,  comp:'stone',   si:2, retirable:true,  pos:[-1.57,0.44,-1.37], sz:[0.54,0.88,0.76], sc:16 },
+  { id:9,  comp:'stone',   si:2, retirable:true,  pos:[ 1.57,0.44,-1.37], sz:[0.54,0.88,0.76], sc:18 },
+  { id:10, comp:'stone',   si:2, retirable:true,  pos:[-1.57,0.44, 1.37], sz:[0.54,0.88,0.76], sc:20 },
+  { id:11, comp:'stone',   si:2, retirable:true,  pos:[ 1.57,0.44, 1.37], sz:[0.54,0.88,0.76], sc:22 },
+  { id:12, comp:'plaster', si:1, retirable:true,  pos:[-1.58,0.44, 0.00], sz:[0.34,0.88,1.98], sc:24 },
+  { id:13, comp:'plaster', si:1, retirable:true,  pos:[ 1.58,0.44, 0.00], sz:[0.34,0.88,1.98], sc:26, hasWindow:true },
+  { id:14, comp:'plaster', si:1, retirable:true,  pos:[ 0.00,0.44,-1.58], sz:[2.90,0.88,0.34], sc:28, hasWindow:true },
+  { id:15, comp:'plaster', si:1, retirable:true,  pos:[ 0.00,0.44, 1.58], sz:[2.90,0.88,0.34], sc:31, hasDoor:true  },
 
-  // HOUSE — full-height fired brick from ground (si=2, sc 48–65)
-  // Brick: bottom=0, h=1.40 → center y=0.70, top=1.40  (covers entire wall face from ground)
-  { id:16, comp:'brick',   si:2, retirable:true, pos:[-1.58,0.70, 0.00], sz:[0.34,1.40,1.98], sc:48, hasWindow:true },
-  { id:17, comp:'brick',   si:2, retirable:true, pos:[ 1.58,0.70, 0.00], sz:[0.34,1.40,1.98], sc:52, hasWindow:true },
-  { id:18, comp:'brick',   si:2, retirable:true, pos:[ 0.00,0.70,-1.58], sz:[2.50,1.40,0.34], sc:56 },
-  { id:19, comp:'brick',   si:2, retirable:true, pos:[ 0.00,0.70, 1.58], sz:[2.50,1.40,0.34], sc:60, hasDoor:true },
-  // Chimney: center y=1.80, h=0.80 → bottom=1.40 (flush on brick top), top=2.20
-  { id:20, comp:'chimney', si:2, retirable:true, pos:[ 1.02,1.80, 0.00], sz:[0.28,0.80,0.28], sc:65 },
+  // HOUSE — full-height fired brick from ground (si=2, sc 32–51)
+  { id:16, comp:'brick',   si:2, retirable:true, pos:[-1.58,0.70, 0.00], sz:[0.34,1.40,1.98], sc:36, hasWindow:true },
+  { id:17, comp:'brick',   si:2, retirable:true, pos:[ 1.58,0.70, 0.00], sz:[0.34,1.40,1.98], sc:40, hasWindow:true },
+  { id:18, comp:'brick',   si:2, retirable:true, pos:[ 0.00,0.70,-1.58], sz:[2.50,1.40,0.34], sc:44 },
+  { id:19, comp:'brick',   si:2, retirable:true, pos:[ 0.00,0.70, 1.58], sz:[2.50,1.40,0.34], sc:48, hasDoor:true },
+  { id:20, comp:'chimney', si:2, retirable:true, pos:[ 1.02,1.80, 0.00], sz:[0.28,0.80,0.28], sc:51 },
 
-  // HOUSE CORNER EXTENSIONS — fill y=0.88→1.40 gap between stone quoins and brick wall tops
-  // Drop at sc=47 (just before first brick at sc=48) — this also triggers retireStage(1)
-  { id:29, comp:'stone',   si:2, retirable:true, pos:[-1.57,1.14,-1.37], sz:[0.54,0.52,0.76], sc:47 },
-  { id:30, comp:'stone',   si:2, retirable:true, pos:[ 1.57,1.14,-1.37], sz:[0.54,0.52,0.76], sc:47 },
-  { id:31, comp:'stone',   si:2, retirable:true, pos:[-1.57,1.14, 1.37], sz:[0.54,0.52,0.76], sc:47 },
-  { id:32, comp:'stone',   si:2, retirable:true, pos:[ 1.57,1.14, 1.37], sz:[0.54,0.52,0.76], sc:47 },
+  // HOUSE CORNER EXTENSIONS — fire at sc=33 (exactly when House stage begins, AFTER cottage roof at sc=31)
+  { id:29, comp:'stone',   si:2, retirable:true, pos:[-1.57,1.14,-1.37], sz:[0.54,0.52,0.76], sc:33 },
+  { id:30, comp:'stone',   si:2, retirable:true, pos:[ 1.57,1.14,-1.37], sz:[0.54,0.52,0.76], sc:33 },
+  { id:31, comp:'stone',   si:2, retirable:true, pos:[-1.57,1.14, 1.37], sz:[0.54,0.52,0.76], sc:33 },
+  { id:32, comp:'stone',   si:2, retirable:true, pos:[ 1.57,1.14, 1.37], sz:[0.54,0.52,0.76], sc:33 },
 
-  // MANOR — cream rendered plaster + mansard roof (si=3, sc:72–89)  [retirable → replaced by Villa]
-  // Footprint: side walls x=±2.20, front/back z=±2.05
-  // GF:  h=1.32, center y=0.66, top=1.32
-  // 2F:  h=1.10, bottom=1.44, center y=1.99, top=2.54
-  // Cornice belt: y=1.32→1.44 (h=0.12) | Parapet: h=0.26 at y=2.61
-  { id:21, comp:'manor_wall',    si:3, retirable:true, pos:[-2.20,0.66, 0.00], sz:[0.28,1.32,4.10], sc:72, hasWindow:true },
-  { id:22, comp:'manor_wall',    si:3, retirable:true, pos:[ 2.20,0.66, 0.00], sz:[0.28,1.32,4.10], sc:73, hasWindow:true },
-  { id:23, comp:'manor_wall',    si:3, retirable:true, pos:[ 0.00,0.66,-2.05], sz:[4.12,1.32,0.28], sc:74 },
-  { id:24, comp:'manor_wall',    si:3, retirable:true, pos:[ 0.00,0.66, 2.05], sz:[4.12,1.32,0.28], sc:75, hasDoor:true  },
-  { id:25, comp:'manor_cornice', si:3, retirable:true, pos:[ 0.00,1.38, 0.00], sz:[4.68,0.12,4.68], sc:76 },
-  { id:26, comp:'manor_porch',   si:3, retirable:true, pos:[ 0.00,0.66, 2.52], sz:[2.80,1.32,0.90], sc:77 },
-  { id:27, comp:'manor_wall',    si:3, retirable:true, pos:[-2.20,1.99, 0.00], sz:[0.28,1.10,4.10], sc:78, hasWindow:true },
-  { id:28, comp:'manor_wall',    si:3, retirable:true, pos:[ 2.20,1.99, 0.00], sz:[0.28,1.10,4.10], sc:79, hasWindow:true },
-  { id:33, comp:'manor_wall',    si:3, retirable:true, pos:[ 0.00,1.99,-2.05], sz:[4.12,1.10,0.28], sc:80 },
-  { id:34, comp:'manor_wall',    si:3, retirable:true, pos:[ 0.00,1.99, 2.05], sz:[4.12,1.10,0.28], sc:82, hasWindow:true },
-  { id:35, comp:'manor_balcony', si:3, retirable:true, pos:[ 0.00,1.44, 2.74], sz:[3.40,0.08,1.00], sc:84 },
-  { id:36, comp:'manor_parapet', si:3, retirable:true, pos:[ 0.00,2.61, 0.00], sz:[4.68,0.26,4.68], sc:86 },
-  { id:37, comp:'manor_cornice', si:3, retirable:true, pos:[ 0.00,2.52, 0.00], sz:[4.78,0.08,4.78], sc:88 },
-  // VILLA — modern white concrete, floor slabs, full-height glazing (si=4, sc:90–96)
-  // Footprint: side walls x=±2.60, front/back z=±2.30
-  // GF: h=1.20, center y=0.60, top=1.20 | Slab: h=0.12, center y=1.26
-  // 2F: h=1.10, bottom=1.32, center y=1.87, top=2.42
-  { id:42, comp:'modern_wall',    si:4, pos:[-2.60,0.60, 0.00], sz:[0.24,1.20,4.60], sc:90, hasWindow:true },
-  { id:43, comp:'modern_wall',    si:4, pos:[ 2.60,0.60, 0.00], sz:[0.24,1.20,4.60], sc:91, hasWindow:true },
-  { id:51, comp:'villa_grounds',  si:4, pos:[0,0.01,0],          sz:[0.01,0.01,0.01], sc:91 },
-  { id:44, comp:'modern_wall', si:4, pos:[ 0.00,0.60,-2.30], sz:[4.96,1.20,0.24], sc:92 },
-  { id:45, comp:'modern_wall', si:4, pos:[ 0.00,0.60, 2.30], sz:[4.96,1.20,0.24], sc:93, hasDoor:true },
-  { id:46, comp:'modern_slab', si:4, pos:[ 0.00,1.26, 0.00], sz:[5.44,0.12,4.88], sc:94 },
-  { id:47, comp:'modern_wall', si:4, pos:[-2.60,1.87, 0.00], sz:[0.24,1.10,4.60], sc:95, hasWindow:true },
-  { id:48, comp:'modern_wall', si:4, pos:[ 2.60,1.87, 0.00], sz:[0.24,1.10,4.60], sc:95, hasWindow:true },
-  { id:49, comp:'modern_wall', si:4, pos:[ 0.00,1.87,-2.30], sz:[4.96,1.10,0.24], sc:95 },
-  { id:50, comp:'modern_wall', si:4, pos:[ 0.00,1.87, 2.30], sz:[4.96,1.10,0.24], sc:96, hasWindow:true },
-  // CASTLE — stone towers flanking the Villa (si=5, sc:97–100)
+  // MANOR — cream rendered plaster + mansard roof (si=3, sc 52–72)
+  { id:21, comp:'manor_wall',    si:3, retirable:true, pos:[-2.20,0.66, 0.00], sz:[0.28,1.32,4.10], sc:52, hasWindow:true },
+  { id:22, comp:'manor_wall',    si:3, retirable:true, pos:[ 2.20,0.66, 0.00], sz:[0.28,1.32,4.10], sc:53, hasWindow:true },
+  { id:23, comp:'manor_wall',    si:3, retirable:true, pos:[ 0.00,0.66,-2.05], sz:[4.12,1.32,0.28], sc:54 },
+  { id:24, comp:'manor_wall',    si:3, retirable:true, pos:[ 0.00,0.66, 2.05], sz:[4.12,1.32,0.28], sc:55, hasDoor:true  },
+  { id:25, comp:'manor_cornice', si:3, retirable:true, pos:[ 0.00,1.38, 0.00], sz:[4.68,0.12,4.68], sc:56 },
+  { id:26, comp:'manor_porch',   si:3, retirable:true, pos:[ 0.00,0.66, 2.52], sz:[2.80,1.32,0.90], sc:57 },
+  { id:27, comp:'manor_wall',    si:3, retirable:true, pos:[-2.20,1.99, 0.00], sz:[0.28,1.10,4.10], sc:58, hasWindow:true },
+  { id:28, comp:'manor_wall',    si:3, retirable:true, pos:[ 2.20,1.99, 0.00], sz:[0.28,1.10,4.10], sc:60, hasWindow:true },
+  { id:33, comp:'manor_wall',    si:3, retirable:true, pos:[ 0.00,1.99,-2.05], sz:[4.12,1.10,0.28], sc:62 },
+  { id:34, comp:'manor_wall',    si:3, retirable:true, pos:[ 0.00,1.99, 2.05], sz:[4.12,1.10,0.28], sc:64, hasWindow:true },
+  { id:35, comp:'manor_balcony', si:3, retirable:true, pos:[ 0.00,1.44, 2.74], sz:[3.40,0.08,1.00], sc:66 },
+  { id:36, comp:'manor_parapet', si:3, retirable:true, pos:[ 0.00,2.61, 0.00], sz:[4.68,0.26,4.68], sc:69 },
+  { id:37, comp:'manor_cornice', si:3, retirable:true, pos:[ 0.00,2.52, 0.00], sz:[4.78,0.08,4.78], sc:72 },
+
+  // VILLA — Dubai/Malibu hybrid: tall glass tower (left) + wide cantilevered wing (right)
+  // Score range 73–96 = 24 pts for 15 slots ≈ 1.6 pts/slot
+
+  // --- TOWER walls (si=4) — builds floor by floor ---
+  { id:42, comp:'villa_tower_wall', si:4, retirable:true, pos:[-3.00,0.40, 0.00], sz:[1.60,0.80,5.20], sc:73, hasWindow:true },
+  { id:43, comp:'villa_tower_wall', si:4, retirable:true, pos:[-3.00,0.40,-2.60], sz:[1.60,0.80,0.10], sc:74 },
+  { id:44, comp:'villa_tower_wall', si:4, retirable:true, pos:[-3.00,0.40, 2.60], sz:[1.60,0.80,0.10], sc:75, hasDoor:true },
+  { id:51, comp:'villa_grounds',    si:4, retirable:true, pos:[0,0.01,0],          sz:[0.01,0.01,0.01], sc:75 },
+  { id:45, comp:'villa_slab',       si:4, retirable:true, pos:[-3.00,0.84, 0.00], sz:[1.80,0.10,5.40], sc:77 },
+  { id:46, comp:'villa_tower_wall', si:4, retirable:true, pos:[-3.00,1.29, 0.00], sz:[1.60,0.80,5.20], sc:79, hasWindow:true },
+  { id:47, comp:'villa_slab',       si:4, retirable:true, pos:[-3.00,1.78, 0.00], sz:[1.80,0.10,5.40], sc:81 },
+  { id:48, comp:'villa_tower_wall', si:4, retirable:true, pos:[-3.00,2.23, 0.00], sz:[1.60,0.80,5.20], sc:83, hasWindow:true },
+  { id:49, comp:'villa_slab',       si:4, retirable:true, pos:[-3.00,2.72, 0.00], sz:[1.80,0.10,5.40], sc:85 },
+  { id:52, comp:'villa_tower_wall', si:4, retirable:true, pos:[-3.00,3.17, 0.00], sz:[1.60,0.80,5.20], sc:87, hasWindow:true },
+  { id:53, comp:'villa_slab',       si:4, retirable:true, pos:[-3.00,3.66, 0.00], sz:[1.80,0.10,5.40], sc:89 }, // tower roof
+
+  // --- WING walls (si=4) — unlocks after tower is complete ---
+  { id:54, comp:'villa_wing_wall',  si:4, retirable:true, pos:[ 0.60,0.45, 0.00], sz:[5.20,0.90,5.20], sc:91, hasWindow:true },
+  { id:55, comp:'villa_slab',       si:4, retirable:true, pos:[ 0.60,0.95, 0.00], sz:[5.40,0.10,5.40], sc:93 },
+  { id:56, comp:'villa_wing_wall',  si:4, retirable:true, pos:[ 0.60,1.45, 0.00], sz:[5.20,0.90,5.20], sc:95, hasWindow:true },
+  { id:57, comp:'villa_slab',       si:4, retirable:true, pos:[ 0.60,1.95, 0.00], sz:[5.60,0.14,5.60], sc:96 }, // wing roof
+
+  // CASTLE — stone towers (si=5, sc:97–100) — LOCKED in v1
   { id:38, comp:'tower',       si:5, pos:[-3.10,0.60,-2.60], sz:[1.20,1.20,0.82], sc:97 },
   { id:39, comp:'tower',       si:5, pos:[-3.10,1.90,-2.60], sz:[1.18,1.40,0.80], sc:98 },
   { id:40, comp:'tower',       si:5, pos:[ 3.10,0.60,-2.60], sz:[1.20,1.20,0.82], sc:99 },
   { id:41, comp:'tower',       si:5, pos:[ 3.10,1.90,-2.60], sz:[1.18,1.40,0.80], sc:100 },
 ];
 
-const POC_SCORE   = 96; // 68=House · 89=Manor · 96=Villa · 100=Castle
-const CRACKED_IDS = new Set([7, 14]);
+const POC_SCORE   = 96; // 15=Hut · 31=Cottage · 51=House · 72=Manor · 96=Villa · Castle locked
+
+const CRACKED_IDS = new Set([]); // kintsugi removed in v1
+
 
 /* ═══ ANIMATED BLOCK WRAPPER ════════════════════════════════════════════
    Handles ghost/fall/settle/crack/repair states. Children = placed visuals.
@@ -146,12 +159,9 @@ function AnimatedBlock({ slot, state, goldMatRef, children }) {
     if (prevState.current !== state) {
       prevState.current = state;
       enterT.current = clock.elapsedTime;
-      if (['placed','cracked','repaired'].includes(state)) {
+      if (['placed','dormant'].includes(state) || state === 'settling') {
         groupRef.current.position.set(...slot.pos);
-        groupRef.current.rotation.set(
-          state === 'cracked' ? crackTiltX : 0, 0,
-          state === 'cracked' ? crackTiltZ : 0
-        );
+        groupRef.current.rotation.set(0, 0, 0);
       }
     }
     const t = clock.elapsedTime - enterT.current;
@@ -172,17 +182,14 @@ function AnimatedBlock({ slot, state, goldMatRef, children }) {
 
   if (state === 'pending') return null;
 
-  const isGhost     = state === 'ghost';
-  const isFalling   = state === 'falling';
-  const isCracked   = ['cracked','repairing','repaired'].includes(state);
-  const isRepairing = state === 'repairing';
-  const isRepaired  = state === 'repaired';
+  const isGhost   = state === 'ghost';
+  const isFalling = state === 'falling';
 
   return (
     <group
       ref={groupRef}
       position={[slot.pos[0], isFalling ? slot.pos[1] + FALL_H : slot.pos[1], slot.pos[2]]}
-      rotation={[isCracked ? crackTiltX : 0, 0, isCracked ? crackTiltZ : 0]}
+      rotation={[0, 0, 0]}
     >
       {isGhost ? (
         <mesh>
@@ -190,25 +197,7 @@ function AnimatedBlock({ slot, state, goldMatRef, children }) {
           <meshBasicMaterial wireframe color="#88C8E8" opacity={0.28} transparent />
         </mesh>
       ) : (
-        <>
-          {children}
-          {isCracked && (
-            <mesh geometry={crackGeo}>
-              <meshBasicMaterial color="#060402" />
-            </mesh>
-          )}
-          {(isRepairing || isRepaired) && (
-            <mesh geometry={crackGeo}>
-              <meshStandardMaterial
-                ref={goldMatRef}
-                color="#D4AF37" emissive="#FFD700"
-                emissiveIntensity={isRepaired ? 0.78 : 0}
-                roughness={0.06} metalness={0.95}
-                transparent opacity={isRepaired ? 0.95 : 0}
-              />
-            </mesh>
-          )}
-        </>
+        <>{children}</>
       )}
     </group>
   );
@@ -1156,124 +1145,100 @@ function ManorParapetVisual({ slot }) {
 /* ═══ VILLA (MODERN) VISUAL COMPONENTS ═══════════════════════════════════ */
 
 /* Modern white concrete wall — wide tinted-glass panels, dark charcoal frames */
-function ModernWallVisual({ slot }) {
+/* ═══ VILLA COMPONENTS — Dubai/Malibu glass tower + cantilevered wing ═══════════════ */
+
+/* Tower wall: dark charcoal curtain glass with amber LED floor strips */
+function VillaTowerWallVisual({ slot }) {
   const [W, H, D] = slot.sz;
-  const isX = W < D;
-  const CONC  = '#ECEAE4';  // off-white concrete
-  const BASE  = '#DDDBD5';  // slightly darker base strip
-  const DARK  = '#1E1E1E';  // charcoal frames
-  const GLASS = '#1E3A5C';  // blue-tinted glass
-  const GLOW  = '#D8F0FF';  // cool daylight white
-  const WOOD  = '#8B5E3C';  // timber accent
+  const DARK  = '#12151A'; // near-black charcoal body
+  const GLASS = '#1B3A5C'; // deep blue-tinted glass
+  const GLOW  = '#4AACFF'; // cool blue glass emissive
+  const LED   = '#FF9A2E'; // amber LED strip colour
+  const LEDG  = '#FFB84A'; // amber glow emissive
+  const FRAME = '#0A0C10'; // black mullion
 
-  const wallGeo = useMemo(() => {
-    const g = new THREE.BoxGeometry(W,H,D,1,1,1);
-    const p = g.attributes.position;
-    for (let i=0;i<p.count;i++) {
-      const n=(sr(i*11+slot.id*7)-0.5)*0.002;
-      p.setXYZ(i,p.getX(i)+n,p.getY(i)+n,p.getZ(i)+n);
-    }
-    g.computeVertexNormals(); return g;
-  }, [W,H,D,slot.id]);
-
+  // Determine dominant face direction
+  const isX = W < D; // side wall (x-axis thin)
   const longDim = isX ? D : W;
   const extSign = isX ? Math.sign(slot.pos[0]) : Math.sign(slot.pos[2]);
-  const faceOffset = isX
-    ? [extSign*(W/2+0.014), 0, 0]
-    : [0, 0, extSign*(D/2+0.014)];
-  const faceRot = isX
-    ? [0, extSign>0 ? Math.PI/2 : -Math.PI/2, 0]
-    : [0, extSign>0 ? 0 : Math.PI, 0];
+  const faceOffset = isX ? [extSign*(W/2+0.014), 0, 0] : [0, 0, extSign*(D/2+0.014)];
+  const faceRot    = isX
+    ? [0, extSign > 0 ? Math.PI/2 : -Math.PI/2, 0]
+    : [0, extSign > 0 ? 0 : Math.PI, 0];
 
-  const WIN_W = longDim * 0.72;
-  const WIN_H = H * 0.60;
-  const FW = 0.030;
+  const PANEL_W = longDim * 0.88;
+  const PANEL_H = H * 0.82;
+  const MUL = 0.022; // mullion thickness
 
   return (
     <>
-      <mesh geometry={wallGeo} castShadow receiveShadow>
-        <meshStandardMaterial color={CONC} roughness={0.88} metalness={0.02}/>
+      {/* Charcoal body */}
+      <mesh castShadow receiveShadow>
+        <boxGeometry args={[W, H, D]} />
+        <meshStandardMaterial color={DARK} roughness={0.30} metalness={0.60} />
       </mesh>
+      {/* Amber LED strip at floor level */}
+      <mesh position={[0, -H/2 + 0.022, 0]}>
+        <boxGeometry args={[W + 0.02, 0.044, D + 0.02]} />
+        <meshStandardMaterial color={LED} emissive={LEDG} emissiveIntensity={1.8} roughness={0.40} />
+      </mesh>
+      {/* Curtain glass + mullions on primary face */}
       <group position={faceOffset} rotation={faceRot}>
-        {/* Darker base strip */}
-        <mesh position={[0,-H/2+0.040,0]}>
-          <boxGeometry args={[longDim+0.02,0.080,0.016]}/>
-          <meshStandardMaterial color={BASE} roughness={0.90}/>
-        </mesh>
-        {/* Wide panoramic window */}
-        {slot.hasWindow && !slot.hasDoor && (
-          <group position={[0,H*0.04,0]}>
-            <mesh position={[0,0,0.014]}>
-              <planeGeometry args={[WIN_W,WIN_H]}/>
-              <meshStandardMaterial color={GLASS} emissive={GLOW} emissiveIntensity={0.06}
-                roughness={0.06} metalness={0.68} transparent opacity={0.88}/>
+        {/* Full-height panoramic glass panel */}
+        {slot.hasWindow && (
+          <group position={[0, H*0.04, 0]}>
+            <mesh position={[0, 0, 0.016]}>
+              <planeGeometry args={[PANEL_W, PANEL_H]} />
+              <meshStandardMaterial color={GLASS} emissive={GLOW} emissiveIntensity={0.18}
+                roughness={0.04} metalness={0.72} transparent opacity={0.88} />
             </mesh>
-            {/* Frame top/bottom */}
-            {[[0,WIN_H/2+FW/2],[0,-(WIN_H/2+FW/2)]].map(([fx,fy],i)=>(
-              <mesh key={`ft${i}`} position={[fx,fy,0.022]}>
-                <boxGeometry args={[WIN_W+FW*2,FW,0.026]}/>
-                <meshStandardMaterial color={DARK} roughness={0.55} metalness={0.45}/>
+            {/* Top/bottom frames */}
+            {[[0, PANEL_H/2 + MUL/2], [0, -(PANEL_H/2 + MUL/2)]].map(([fx,fy],i) => (
+              <mesh key={`tf${i}`} position={[fx, fy, 0.022]}>
+                <boxGeometry args={[PANEL_W + MUL*2, MUL, 0.026]} />
+                <meshStandardMaterial color={FRAME} roughness={0.45} metalness={0.62} />
               </mesh>
             ))}
-            {/* Frame left/right */}
-            {[[-(WIN_W/2+FW/2),0],[WIN_W/2+FW/2,0]].map(([fx,fy],i)=>(
-              <mesh key={`fs${i}`} position={[fx,fy,0.022]}>
-                <boxGeometry args={[FW,WIN_H+FW*2,0.026]}/>
-                <meshStandardMaterial color={DARK} roughness={0.55} metalness={0.45}/>
+            {/* Side frames */}
+            {[[-(PANEL_W/2+MUL/2),0],[PANEL_W/2+MUL/2,0]].map(([fx,fy],i) => (
+              <mesh key={`sf${i}`} position={[fx, fy, 0.022]}>
+                <boxGeometry args={[MUL, PANEL_H + MUL*2, 0.026]} />
+                <meshStandardMaterial color={FRAME} roughness={0.45} metalness={0.62} />
               </mesh>
             ))}
-            {/* 3-panel vertical dividers */}
-            {[-WIN_W/3,0,WIN_W/3].map((x,i)=>(
-              <mesh key={`vd${i}`} position={[x,0,0.020]}>
-                <boxGeometry args={[0.016,WIN_H,0.018]}/>
-                <meshStandardMaterial color={DARK} roughness={0.55} metalness={0.45}/>
+            {/* Vertical mullion dividers */}
+            {[-PANEL_W/3, 0, PANEL_W/3].map((x,i) => (
+              <mesh key={`vd${i}`} position={[x, 0, 0.020]}>
+                <boxGeometry args={[0.014, PANEL_H, 0.016]} />
+                <meshStandardMaterial color={FRAME} roughness={0.45} metalness={0.62} />
               </mesh>
             ))}
+            {/* Interior blue glow light */}
+            <pointLight position={[0, 0, -1.0]} color="#2A6AB0" intensity={2.2} distance={6.0} decay={2} />
           </group>
         )}
-        {/* Glass entrance with timber accent panels */}
+        {/* Ground floor entrance door */}
         {slot.hasDoor && (
-          <group position={[0,-H*0.02,0]}>
-            {/* Central sliding glass door */}
-            <mesh position={[0,0,0.014]}>
-              <planeGeometry args={[1.20,H*0.84]}/>
-              <meshStandardMaterial color={GLASS} emissive={GLOW} emissiveIntensity={0.24}
-                roughness={0.04} metalness={0.62} transparent opacity={0.92}/>
+          <group position={[0, -H*0.05, 0]}>
+            <mesh position={[0, 0, 0.016]}>
+              <planeGeometry args={[longDim * 0.60, H * 0.84]} />
+              <meshStandardMaterial color={GLASS} emissive={GLOW} emissiveIntensity={0.30}
+                roughness={0.03} metalness={0.68} transparent opacity={0.92} />
             </mesh>
-            {/* Door centre mullion */}
-            <mesh position={[0,0,0.024]}>
-              <boxGeometry args={[0.018,H*0.82,0.026]}/>
-              <meshStandardMaterial color={DARK} roughness={0.55} metalness={0.50}/>
+            {/* Centre mullion */}
+            <mesh position={[0, 0, 0.024]}>
+              <boxGeometry args={[0.016, H*0.82, 0.020]} />
+              <meshStandardMaterial color={FRAME} roughness={0.45} metalness={0.62} />
             </mesh>
-            {/* Door frame */}
-            {[[0,H*0.42],[0,-H*0.42]].map(([fx,fy],i)=>(
-              <mesh key={`df${i}`} position={[fx,fy,0.022]}>
-                <boxGeometry args={[1.24,0.020,0.026]}/>
-                <meshStandardMaterial color={DARK} roughness={0.55} metalness={0.50}/>
+            {/* Door frame top/bot */}
+            {[[0, H*0.42],[0,-H*0.42]].map(([fx,fy],i) => (
+              <mesh key={i} position={[fx,fy,0.022]}>
+                <boxGeometry args={[longDim*0.62, 0.018, 0.022]} />
+                <meshStandardMaterial color={FRAME} roughness={0.45} metalness={0.62} />
               </mesh>
             ))}
-            {/* Timber accent panels */}
-            {[-1.62,1.62].map((px,i)=>(
-              <mesh key={`wp${i}`} position={[px,H*0.01,0.020]} castShadow>
-                <boxGeometry args={[0.58,H*0.78,0.024]}/>
-                <meshStandardMaterial color={WOOD} roughness={0.66}/>
-              </mesh>
-            ))}
-            {/* Side glass */}
-            {[-1.02,1.02].map((px,i)=>(
-              <mesh key={`sg${i}`} position={[px,H*0.01,0.014]}>
-                <planeGeometry args={[0.56,H*0.74]}/>
-                <meshStandardMaterial color={GLASS} emissive={GLOW} emissiveIntensity={0.18}
-                  roughness={0.04} metalness={0.62} transparent opacity={0.86}/>
-              </mesh>
-            ))}
-            {/* Door step */}
-            <mesh position={[0,-H/2-0.018,0.055]} castShadow>
-              <boxGeometry args={[2.20,0.036,0.26]}/>
-              <meshStandardMaterial color={BASE} roughness={0.90}/>
-            </mesh>
-            {/* Interior light */}
-            <pointLight position={[0,0,-1.0]} color="#FFB070" intensity={3.0} distance={7.0} decay={2}/>
+            {/* Warm lobby glow */}
+            <pointLight position={[0, 0, -1.2]} color="#FFB070" intensity={3.0} distance={7.0} decay={2} />
           </group>
         )}
       </group>
@@ -1281,21 +1246,78 @@ function ModernWallVisual({ slot }) {
   );
 }
 
-/* Cantilevered floor slab */
-function ModernSlabVisual({ slot }) {
+/* Wing wall: wide low-profile glass + concrete facade */
+function VillaWingWallVisual({ slot }) {
+  const [W, H, D] = slot.sz;
+  const CONC  = '#1C2128'; // very dark concrete
+  const GLASS = '#1A3850'; // dark blue glass
+  const GLOW  = '#3A9AE0'; // glass emissive
+  const LED   = '#FF9A2E';
+  const LEDG  = '#FFB84A';
+  const FRAME = '#080A0E';
+
+  // Four curtain-glass faces for the wing box
+  const faces = [
+    { pos:[0,    0, D/2+0.016], rot:[0,0,0],          wid:W, ht:H, window:true  },
+    { pos:[0,    0,-(D/2+0.016)], rot:[0,Math.PI,0],  wid:W, ht:H, window:true  },
+    { pos:[W/2+0.016, 0, 0], rot:[0,-Math.PI/2,0],    wid:D, ht:H, window:false },
+    { pos:[-(W/2+0.016), 0, 0], rot:[0,Math.PI/2,0],  wid:D, ht:H, window:false },
+  ];
+
+  return (
+    <>
+      {/* Dark concrete body */}
+      <mesh castShadow receiveShadow>
+        <boxGeometry args={[W, H, D]} />
+        <meshStandardMaterial color={CONC} roughness={0.28} metalness={0.55} />
+      </mesh>
+      {/* Amber LED strip at floor */}
+      <mesh position={[0, -H/2 + 0.022, 0]}>
+        <boxGeometry args={[W+0.02, 0.044, D+0.02]} />
+        <meshStandardMaterial color={LED} emissive={LEDG} emissiveIntensity={1.6} roughness={0.40} />
+      </mesh>
+      {/* Glass panels on front/back faces */}
+      {faces.filter(f => f.window || slot.hasWindow).map((f, fi) => (
+        <group key={fi} position={f.pos} rotation={f.rot}>
+          <mesh position={[0, 0, 0]}>
+            <planeGeometry args={[f.wid * 0.90, f.ht * 0.82]} />
+            <meshStandardMaterial color={GLASS} emissive={GLOW} emissiveIntensity={0.14}
+              roughness={0.04} metalness={0.70} transparent opacity={0.88} />
+          </mesh>
+          {/* Horizontal band mullions */}
+          {[-f.ht*0.25, f.ht*0.25].map((y,i) => (
+            <mesh key={i} position={[0, y, 0.010]}>
+              <boxGeometry args={[f.wid*0.90, 0.018, 0.018]} />
+              <meshStandardMaterial color={FRAME} roughness={0.45} metalness={0.65} />
+            </mesh>
+          ))}
+        </group>
+      ))}
+      {/* Interior glow */}
+      {slot.hasWindow && (
+        <pointLight position={[0, 0, 0]} color="#2A7AB0" intensity={1.8} distance={8.0} decay={2} />
+      )}
+    </>
+  );
+}
+
+/* Floor slab with amber LED shadow-line edge */
+function VillaSlabVisual({ slot }) {
   const [W,,D] = slot.sz;
   const H = slot.sz[1];
-  const SLAB = '#D4D2CC', EDGE = '#1A1A1A';
+  const SLAB = '#14181E'; // very dark charcoal slab
+  const LED  = '#FF9A2E';
+  const LEDG = '#FFB84A';
   return (
     <>
       <mesh castShadow receiveShadow>
-        <boxGeometry args={[W,H,D]}/>
-        <meshStandardMaterial color={SLAB} roughness={0.86} metalness={0.04}/>
+        <boxGeometry args={[W, H, D]} />
+        <meshStandardMaterial color={SLAB} roughness={0.22} metalness={0.55} />
       </mesh>
-      {/* Dark shadow-line edge at bottom */}
-      <mesh position={[0,-H/2-0.009,0]}>
-        <boxGeometry args={[W+0.02,0.018,D+0.02]}/>
-        <meshStandardMaterial color={EDGE} roughness={0.65} metalness={0.35}/>
+      {/* Amber LED edge strip on underside */}
+      <mesh position={[0, -H/2 - 0.010, 0]}>
+        <boxGeometry args={[W+0.04, 0.020, D+0.04]} />
+        <meshStandardMaterial color={LED} emissive={LEDG} emissiveIntensity={2.0} roughness={0.35} />
       </mesh>
     </>
   );
@@ -1303,16 +1325,16 @@ function ModernSlabVisual({ slot }) {
 
 /* ═══ VILLA GROUNDS — pool, car, loungers, palms, planters ═══════════════════════════════ */
 
+
 function PalmTree({ px, pz }) {
   const h = 1.80 + ((Math.abs(px*1.3+pz*0.7)%1.0))*0.50;
-  const TRUNK = '#8B6914', LEAF = '#2A7A3A', LEAF2 = '#1E5E2A';
+  const TRUNK = '#6B4E1A', LEAF = '#2A7A3A', LEAF2 = '#1E5E2A';
   return (
     <group position={[px, 0, pz]}>
       <mesh position={[0,h/2,0]} castShadow>
         <cylinderGeometry args={[0.055,0.085,h,7]}/>
         <meshStandardMaterial color={TRUNK} roughness={0.88}/>
       </mesh>
-      {/* Fronds */}
       {[0,52,104,156,208,260,312].map((deg,i)=>{
         const rad=deg*Math.PI/180;
         return (
@@ -1324,7 +1346,6 @@ function PalmTree({ px, pz }) {
           </mesh>
         );
       })}
-      {/* Crown bush */}
       <mesh position={[0,h+0.10,0]}>
         <sphereGeometry args={[0.22,6,5]}/>
         <meshStandardMaterial color={LEAF} roughness={0.82}/>
@@ -1333,195 +1354,391 @@ function PalmTree({ px, pz }) {
   );
 }
 
+function HedgeCube({ px, py, pz, w=0.55, h=0.55, d=0.55 }) {
+  return (
+    <mesh position={[px,py,pz]} castShadow>
+      <boxGeometry args={[w,h,d]}/>
+      <meshStandardMaterial color="#1E4A22" roughness={0.92}/>
+    </mesh>
+  );
+}
+
+function Fountain({ px, pz }) {
+  const STONE='#8A8478', WATER='#00D4CC', WATERG='#00FFEE';
+  return (
+    <group position={[px, 0, pz]}>
+      {/* Basin */}
+      <mesh position={[0, 0.12, 0]} castShadow>
+        <cylinderGeometry args={[0.80, 0.90, 0.24, 16]}/>
+        <meshStandardMaterial color={STONE} roughness={0.88}/>
+      </mesh>
+      {/* Water surface */}
+      <mesh position={[0, 0.24, 0]}>
+        <cylinderGeometry args={[0.72, 0.72, 0.02, 16]}/>
+        <meshStandardMaterial color={WATER} emissive={WATERG} emissiveIntensity={0.35}
+          roughness={0.04} transparent opacity={0.90}/>
+      </mesh>
+      {/* Central column */}
+      <mesh position={[0, 0.44, 0]} castShadow>
+        <cylinderGeometry args={[0.075, 0.095, 0.44, 10]}/>
+        <meshStandardMaterial color={STONE} roughness={0.84}/>
+      </mesh>
+      {/* Top bowl */}
+      <mesh position={[0, 0.70, 0]} castShadow>
+        <cylinderGeometry args={[0.30, 0.34, 0.12, 12]}/>
+        <meshStandardMaterial color={STONE} roughness={0.86}/>
+      </mesh>
+      {/* Water jet top */}
+      <mesh position={[0, 0.82, 0]}>
+        <cylinderGeometry args={[0.025, 0.014, 0.22, 8]}/>
+        <meshStandardMaterial color={WATER} emissive={WATERG} emissiveIntensity={0.50}
+          roughness={0.04} transparent opacity={0.80}/>
+      </mesh>
+      <pointLight position={[0, 0.30, 0]} color="#00EFFF" intensity={2.4} distance={4.0} decay={2}/>
+    </group>
+  );
+}
+
 function VillaGroundsVisual() {
-  const DECK  = '#C8C6BA'; // limestone deck
-  const POOL  = '#0EA8D0'; // pool water
-  const POOL_E= '#00E8FF';
-  const DRIV  = '#B8B6B0'; // driveway concrete
-  const EDGE  = '#A0A090';
-  const CAR   = '#1C1C2A'; // dark luxury car
-  const CARG  = '#1E3A58'; // car glass
-  const LOUNGE= '#E0D8CC'; // lounger frame
-  const CUSH  = '#F4EDE0'; // cushion
-  const PLNT  = '#B8B49E'; // planter stone
-  const FLWR_R= '#E03030';
-  const FLWR_W= '#F0F0E8';
-  const GRN   = '#2A7A3A';
+  /* ── Palette ── */
+  const TRAVERT = '#C8C4B8'; // travertine stone tile
+  const DARK    = '#0E1218'; // charcoal metal (canopy/car)
+  const POOL    = '#0AB8E0'; // pool water
+  const POOL_E  = '#00EEFF';
+  const POOL_SH = '#6AAABE'; // pool shell tile
+  const CAR     = '#10131A'; // supercar body
+  const CARG    = '#1A3558'; // car glass
+  const LOUNGE  = '#D8D2C8'; // sun-lounger frame
+  const CUSH    = '#F2EAD8'; // cushion
+  const LED     = '#FF9A2E'; // amber LED strip
+  const LEDG    = '#FFBA4A';
+  const GRASS   = '#1A3A18'; // dark lawn
+  const COURT   = '#1C2A1C'; // tennis court surface
+  const BBQ     = '#2A2A2A'; // BBQ unit
 
   return (
     <group>
-      {/* ─── POOL DECK ─── to the left of villa (villa x=-2.72 outer) */}
-      <mesh position={[-6.0,0.015,0]} receiveShadow>
-        <boxGeometry args={[5.20,0.030,4.40]}/>
-        <meshStandardMaterial color={DECK} roughness={0.90}/>
+
+      {/* ══════════════════════════════════════════════════
+           LARGE LAWN / BASE GROUND PLANE
+      ══════════════════════════════════════════════════ */}
+      <mesh position={[0, 0.004, 0]} receiveShadow>
+        <boxGeometry args={[22, 0.008, 18]}/>
+        <meshStandardMaterial color={GRASS} roughness={0.95}/>
+      </mesh>
+
+      {/* ══════════════════════════════════════════════════
+           SINGLE INFINITY POOL — left of tower, clean rectangle
+           Pool: x=-8.2 to -5.0, z=-2.2 to +2.2
+      ══════════════════════════════════════════════════ */}
+      {/* Travertine pool deck */}
+      <mesh position={[-7.0, 0.016, 0.0]} receiveShadow>
+        <boxGeometry args={[6.0, 0.032, 7.0]}/>
+        <meshStandardMaterial color={TRAVERT} roughness={0.86}/>
       </mesh>
       {/* Pool shell */}
-      <mesh position={[-6.0,0.34,0]}>
-        <boxGeometry args={[3.40,0.70,2.80]}/>
-        <meshStandardMaterial color={'#A8C4D0'} roughness={0.82}/>
+      <mesh position={[-7.0, 0.36, 0.0]}>
+        <boxGeometry args={[3.60, 0.74, 4.80]}/>
+        <meshStandardMaterial color={POOL_SH} roughness={0.82}/>
       </mesh>
-      {/* Pool water */}
-      <mesh position={[-6.0,0.54,0]}>
-        <boxGeometry args={[3.20,0.14,2.60]}/>
-        <meshStandardMaterial color={POOL} emissive={POOL_E} emissiveIntensity={0.22}
-          roughness={0.04} metalness={0.28} transparent opacity={0.88}/>
+      {/* Pool water surface */}
+      <mesh position={[-7.0, 0.64, 0.0]}>
+        <boxGeometry args={[3.32, 0.14, 4.52]}/>
+        <meshStandardMaterial color={POOL} emissive={POOL_E} emissiveIntensity={0.32}
+          roughness={0.03} metalness={0.20} transparent opacity={0.92}/>
       </mesh>
-      {/* Pool rim (light stone cap) */}
+      {/* Pool rim (travertine coping) */}
       {[
-        [0, 0.72, 1.40+0.05],
-        [0, 0.72,-(1.40+0.05)],
-        [-(1.70+0.05), 0.72, 0],
-        [ (1.70+0.05), 0.72, 0],
-      ].map(([rx,ry,rz],i)=>(
-        <mesh key={i} position={[-6.0+rx, ry, rz]}>
-          <boxGeometry args={[i<2?3.60:0.12, 0.08, i<2?0.12:2.92]}/>
-          <meshStandardMaterial color={DECK} roughness={0.88}/>
+        [-7.0, 0.76,  2.48, 3.80, 0.08, 0.12],
+        [-7.0, 0.76, -2.48, 3.80, 0.08, 0.12],
+        [-5.14,0.76,  0.0,  0.12, 0.08, 4.96],
+        [-8.86,0.76,  0.0,  0.12, 0.08, 4.96],
+      ].map(([x,y,z,w,h,d],i)=>(
+        <mesh key={i} position={[x,y,z]}>
+          <boxGeometry args={[w,h,d]}/>
+          <meshStandardMaterial color={TRAVERT} roughness={0.84}/>
         </mesh>
       ))}
-      {/* Pool glow light */}
-      <pointLight position={[-6.0,0.56,0]} color="#00CFFF" intensity={2.0} distance={5.0} decay={2}/>
+      {/* Infinity edge — back face drops off (just a darker thin strip) */}
+      <mesh position={[-8.90, 0.40, 0.0]}>
+        <boxGeometry args={[0.04, 0.82, 4.80]}/>
+        <meshStandardMaterial color="#0A8ABF" roughness={0.05} metalness={0.30}
+          emissive="#0AAFFF" emissiveIntensity={0.18}/>
+      </mesh>
+      {/* Pool underwater lights ×4 */}
+      {[[-7.0,0.50,-1.60],[-7.0,0.50,1.60],[-5.60,0.50,0],[-8.40,0.50,0]].map(([x,y,z],i)=>(
+        <pointLight key={i} position={[x,y,z]} color="#00DEFF" intensity={2.2} distance={4.5} decay={2}/>
+      ))}
 
-      {/* ─── POOL LOUNGERS ─── */}
-      {[-0.90, 0.90].map((oz,li)=>(
-        <group key={li} position={[-6.0, 0.06, oz]}>
-          <mesh position={[2.50,0.12,0]} rotation={[0,0,0]} castShadow>
-            <boxGeometry args={[0.48,0.055,1.62]}/>
-            <meshStandardMaterial color={LOUNGE} roughness={0.68} metalness={0.22}/>
+      {/* ══════════════════════════════════════════════════
+           OUTDOOR LOUNGE (poolside) — 3 sun-beds + coffee table
+      ══════════════════════════════════════════════════ */}
+      {[-1.60, 0, 1.60].map((oz,li)=>(
+        <group key={li} position={[-4.40, 0.0, oz]}>
+          {/* Bed frame */}
+          <mesh position={[0,0.14,0]} castShadow>
+            <boxGeometry args={[0.52,0.06,1.80]}/>
+            <meshStandardMaterial color={LOUNGE} roughness={0.68} metalness={0.20}/>
           </mesh>
-          <mesh position={[2.50,0.18,0]}>
-            <boxGeometry args={[0.42,0.048,1.54]}/>
-            <meshStandardMaterial color={CUSH} roughness={0.92}/>
+          {/* Cushion */}
+          <mesh position={[0,0.20,0]}>
+            <boxGeometry args={[0.44,0.054,1.72]}/>
+            <meshStandardMaterial color={CUSH} roughness={0.90}/>
           </mesh>
-          {[[-0.18,-0.72],[-0.18,0.72],[0.18,-0.72],[0.18,0.72]].map(([lx,lz],i)=>(
-            <mesh key={i} position={[2.50+lx,0.055,lz]}>
-              <boxGeometry args={[0.035,0.11,0.035]}/>
-              <meshStandardMaterial color={LOUNGE} roughness={0.60} metalness={0.30}/>
+          {/* Back rest (reclined at 15°) */}
+          <mesh position={[0.68,0.28,0]} rotation={[0,0,-0.26]} castShadow>
+            <boxGeometry args={[0.08,0.52,1.72]}/>
+            <meshStandardMaterial color={LOUNGE} roughness={0.68} metalness={0.20}/>
+          </mesh>
+          {/* Legs ×4 */}
+          {[[-0.20,-0.76],[-0.20,0.76],[0.20,-0.76],[0.20,0.76]].map(([lx,lz],i)=>(
+            <mesh key={i} position={[lx,0.07,lz]}>
+              <boxGeometry args={[0.036,0.14,0.036]}/>
+              <meshStandardMaterial color={LOUNGE} roughness={0.55} metalness={0.38}/>
             </mesh>
           ))}
-          {/* Side table */}
-          <mesh position={[3.18,0.16,0]}>
-            <cylinderGeometry args={[0.14,0.14,0.04,8]}/>
-            <meshStandardMaterial color={DECK} roughness={0.88}/>
+        </group>
+      ))}
+      {/* Side table between beds */}
+      {[-0.80, 0.80].map((oz,i)=>(
+        <group key={i} position={[-4.40,0,oz]}>
+          <mesh position={[0,0.28,0]}>
+            <cylinderGeometry args={[0.22,0.22,0.044,10]}/>
+            <meshStandardMaterial color={TRAVERT} roughness={0.82}/>
           </mesh>
-          <mesh position={[3.18,0.05,0]}>
-            <cylinderGeometry args={[0.022,0.022,0.10,6]}/>
-            <meshStandardMaterial color={LOUNGE} roughness={0.60} metalness={0.30}/>
+          <mesh position={[0,0.11,0]}>
+            <cylinderGeometry args={[0.028,0.028,0.22,6]}/>
+            <meshStandardMaterial color={LOUNGE} roughness={0.55} metalness={0.38}/>
           </mesh>
         </group>
       ))}
 
-      {/* ─── PALM TREES ─── */}
-      <PalmTree px={-4.0}  pz={ 2.6}/>
-      <PalmTree px={-4.0}  pz={-2.6}/>
-      <PalmTree px={-8.2}  pz={ 1.8}/>
-      <PalmTree px={-8.0}  pz={-1.6}/>
-      <PalmTree px={ 4.0}  pz={ 3.2}/>
-      <PalmTree px={-3.5}  pz={-3.4}/>
-
-      {/* ─── DRIVEWAY (right-front) ─── */}
-      <mesh position={[1.80,0.01,5.10]} receiveShadow>
-        <boxGeometry args={[3.60,0.020,3.20]}/>
-        <meshStandardMaterial color={DRIV} roughness={0.90}/>
+      {/* ══════════════════════════════════════════════════
+           PORTE-COCHÈRE — entrance canopy + driveway
+      ══════════════════════════════════════════════════ */}
+      {/* Stone-tile driveway */}
+      <mesh position={[3.60, 0.014, 5.40]} receiveShadow>
+        <boxGeometry args={[5.40, 0.028, 4.80]}/>
+        <meshStandardMaterial color={TRAVERT} roughness={0.82}/>
       </mesh>
-      {/* Driveway lane markings */}
-      {[-1.50,1.50].map((x,i)=>(
-        <mesh key={i} position={[1.80+x,0.018,5.10]}>
-          <boxGeometry args={[0.050,0.022,3.20]}/>
-          <meshStandardMaterial color={EDGE} roughness={0.90}/>
+      {/* Tile grout lines */}
+      {[-1.8,-0.6,0.6,1.8].map((x,i)=>(
+        <mesh key={`gx${i}`} position={[3.60+x, 0.028, 5.40]}>
+          <boxGeometry args={[0.036, 0.030, 4.80]}/>
+          <meshStandardMaterial color="#9A9890" roughness={0.94}/>
+        </mesh>
+      ))}
+      {[-1.6,-0.0,1.6].map((z,i)=>(
+        <mesh key={`gz${i}`} position={[3.60, 0.028, 5.40+z]}>
+          <boxGeometry args={[5.40, 0.030, 0.036]}/>
+          <meshStandardMaterial color="#9A9890" roughness={0.94}/>
+        </mesh>
+      ))}
+      {/* Canopy roof — dark aluminium */}
+      <mesh position={[3.60, 2.40, 5.60]} castShadow>
+        <boxGeometry args={[5.20, 0.10, 3.20]}/>
+        <meshStandardMaterial color={DARK} roughness={0.18} metalness={0.76}/>
+      </mesh>
+      {/* LED underside strip */}
+      <mesh position={[3.60, 2.28, 5.60]}>
+        <boxGeometry args={[5.20, 0.028, 3.20]}/>
+        <meshStandardMaterial color={LED} emissive={LEDG} emissiveIntensity={1.8} roughness={0.38}/>
+      </mesh>
+      <pointLight position={[3.60, 2.10, 5.60]} color="#FFB460" intensity={4.0} distance={6.0} decay={2}/>
+      {/* Slim columns ×4 */}
+      {[[1.8,4.20],[1.8,7.00],[-1.8,4.20],[-1.8,7.00]].map(([cx,cz],i)=>(
+        <mesh key={`col${i}`} position={[3.60+cx-1.8, 1.20, cz]} castShadow>
+          <boxGeometry args={[0.10, 2.40, 0.10]}/>
+          <meshStandardMaterial color={DARK} roughness={0.18} metalness={0.76}/>
         </mesh>
       ))}
 
-      {/* ─── PARKED CAR ─── — sleek dark sedan */}
-      <group position={[1.80,0.255,5.20]}>
-        {/* Lower body */}
+      {/* ══════════════════════════════════════════════════
+           SUPERCAR — parked under canopy
+      ══════════════════════════════════════════════════ */}
+      <group position={[3.60, 0.275, 5.50]}>
         <mesh castShadow>
-          <boxGeometry args={[2.10,0.30,0.96]}/>
-          <meshStandardMaterial color={CAR} roughness={0.14} metalness={0.88}/>
+          <boxGeometry args={[2.30,0.28,1.02]}/>
+          <meshStandardMaterial color={CAR} roughness={0.06} metalness={0.96}/>
         </mesh>
-        {/* Upper cabin */}
-        <mesh position={[0,0.25,0]} castShadow>
-          <boxGeometry args={[1.40,0.24,0.88]}/>
-          <meshStandardMaterial color={CAR} roughness={0.14} metalness={0.88}/>
+        <mesh position={[0,0.24,0]} castShadow>
+          <boxGeometry args={[1.40,0.22,0.86]}/>
+          <meshStandardMaterial color={CAR} roughness={0.06} metalness={0.96}/>
         </mesh>
-        {/* Windshields */}
-        {[[0.54,0.25,0],[-0.54,0.25,0]].map(([gx,gy,gz],i)=>(
+        {[[0.54,0.22,0],[-0.54,0.22,0]].map(([gx,gy,gz],i)=>(
           <mesh key={i} position={[gx,gy,gz]}>
-            <boxGeometry args={[0.040,0.22,0.82]}/>
-            <meshStandardMaterial color={CARG} roughness={0.04} metalness={0.60} transparent opacity={0.72}/>
+            <boxGeometry args={[0.038,0.20,0.80]}/>
+            <meshStandardMaterial color={CARG} roughness={0.02} metalness={0.68} transparent opacity={0.72}/>
           </mesh>
         ))}
-        {/* Side windows */}
-        {[0.45,-0.45].map((z,i)=>(
-          <mesh key={i} position={[0,0.25,z]}>
-            <boxGeometry args={[1.30,0.18,0.038]}/>
-            <meshStandardMaterial color={CARG} roughness={0.04} metalness={0.60} transparent opacity={0.72}/>
+        {[0.46,-0.46].map((z,i)=>(
+          <mesh key={i} position={[0,0.23,z]}>
+            <boxGeometry args={[1.30,0.18,0.034]}/>
+            <meshStandardMaterial color={CARG} roughness={0.02} metalness={0.68} transparent opacity={0.72}/>
           </mesh>
         ))}
-        {/* Wheels ×4 */}
-        {[[-0.76,-0.14,-0.49],[0.76,-0.14,-0.49],[-0.76,-0.14,0.49],[0.76,-0.14,0.49]].map(([wx,wy,wz],i)=>(
+        {[[-0.82,-0.13,-0.50],[0.82,-0.13,-0.50],[-0.82,-0.13,0.50],[0.82,-0.13,0.50]].map(([wx,wy,wz],i)=>(
           <group key={i}>
             <mesh position={[wx,wy,wz]} rotation={[Math.PI/2,0,0]} castShadow>
-              <cylinderGeometry args={[0.215,0.215,0.15,14]}/>
-              <meshStandardMaterial color="#1A1A1A" roughness={0.92}/>
+              <cylinderGeometry args={[0.215,0.215,0.15,16]}/>
+              <meshStandardMaterial color="#181818" roughness={0.94}/>
             </mesh>
             <mesh position={[wx,wy,wz+(wz>0?0.076:-0.076)]} rotation={[Math.PI/2,0,0]}>
-              <cylinderGeometry args={[0.10,0.10,0.020,8]}/>
-              <meshStandardMaterial color="#C8C8C8" metalness={0.92} roughness={0.08}/>
+              <cylinderGeometry args={[0.098,0.098,0.018,12]}/>
+              <meshStandardMaterial color="#D4D4D4" metalness={0.96} roughness={0.04}/>
             </mesh>
           </group>
         ))}
-        {/* Headlights */}
-        {[[1.06,0,-0.34],[1.06,0,0.34]].map(([hx,hy,hz],i)=>(
+        {[[1.16,0,-0.36],[1.16,0,0.36]].map(([hx,hy,hz],i)=>(
           <mesh key={i} position={[hx,hy,hz]}>
-            <boxGeometry args={[0.038,0.10,0.22]}/>
-            <meshStandardMaterial color="#FFFFFF" emissive="#FFFFFF" emissiveIntensity={0.80}/>
+            <boxGeometry args={[0.034,0.08,0.26]}/>
+            <meshStandardMaterial color="#FFFFFF" emissive="#FFFFFF" emissiveIntensity={1.4}/>
           </mesh>
         ))}
-        {/* Taillights */}
-        {[[-1.06,0,-0.36],[-1.06,0,0.36]].map(([hx,hy,hz],i)=>(
+        {[[-1.16,0,-0.38],[-1.16,0,0.38]].map(([hx,hy,hz],i)=>(
           <mesh key={i} position={[hx,hy,hz]}>
-            <boxGeometry args={[0.030,0.08,0.18]}/>
-            <meshStandardMaterial color="#FF2020" emissive="#FF0000" emissiveIntensity={0.60}/>
+            <boxGeometry args={[0.030,0.06,0.24]}/>
+            <meshStandardMaterial color="#FF1A1A" emissive="#FF0000" emissiveIntensity={0.90}/>
           </mesh>
         ))}
-        {/* Number plate */}
-        <mesh position={[1.07,0,0]}>
-          <boxGeometry args={[0.030,0.08,0.40]}/>
-          <meshStandardMaterial color="#FFFFF8" roughness={0.90}/>
-        </mesh>
+        <pointLight position={[1.30,0.10,0]} color="#FFFFFF" intensity={2.5} distance={4.5} decay={2}/>
       </group>
 
-      {/* ─── FLOWER PLANTERS along villa front ─── */}
-      {[[-2.00,2.92],[-0.70,2.92],[0.70,2.92],[2.00,2.92]].map(([px,pz],i)=>(
-        <group key={i} position={[px,0,pz]}>
-          <mesh position={[0,0.14,0]} castShadow>
-            <boxGeometry args={[0.38,0.28,0.38]}/>
-            <meshStandardMaterial color={PLNT} roughness={0.88}/>
+      {/* ══════════════════════════════════════════════════
+           CIRCULAR FOUNTAIN — front of entrance
+      ══════════════════════════════════════════════════ */}
+      <Fountain px={3.60} pz={3.10}/>
+
+      {/* ══════════════════════════════════════════════════
+           BBQ / OUTDOOR KITCHEN — right side
+      ══════════════════════════════════════════════════ */}
+      <group position={[5.80, 0.0, 0.80]}>
+        {/* Counter */}
+        <mesh position={[0, 0.46, 0]} castShadow>
+          <boxGeometry args={[1.80, 0.92, 0.70]}/>
+          <meshStandardMaterial color={TRAVERT} roughness={0.82}/>
+        </mesh>
+        {/* Worktop */}
+        <mesh position={[0, 0.95, 0]}>
+          <boxGeometry args={[1.82, 0.060, 0.72]}/>
+          <meshStandardMaterial color="#888880" roughness={0.28} metalness={0.72}/>
+        </mesh>
+        {/* Grill grate */}
+        {[-0.32,0,0.32].map((x,i)=>(
+          <mesh key={i} position={[x, 1.02, 0]}>
+            <boxGeometry args={[0.42, 0.012, 0.60]}/>
+            <meshStandardMaterial color={BBQ} roughness={0.60} metalness={0.50}/>
           </mesh>
-          {[[0,0.36,0],[0.09,0.38,0.09],[-0.08,0.36,-0.07]].map(([fx,fy,fz],fi)=>(
-            <mesh key={fi} position={[fx,fy,fz]}>
-              <sphereGeometry args={[0.075,6,5]}/>
-              <meshStandardMaterial color={fi===0?(i%2===0?FLWR_R:FLWR_W):GRN}
-                roughness={0.80} emissive={fi===0?(i%2===0?FLWR_R:FLWR_W):'#000000'}
-                emissiveIntensity={fi===0?0.12:0}/>
+        ))}
+        {/* Glow of hot coals */}
+        <pointLight position={[0, 1.10, 0]} color="#FF5020" intensity={1.0} distance={2.5} decay={2}/>
+      </group>
+      {/* Outdoor dining table */}
+      <group position={[5.80, 0.0, -1.20]}>
+        <mesh position={[0, 0.40, 0]} castShadow>
+          <boxGeometry args={[2.20, 0.060, 1.10]}/>
+          <meshStandardMaterial color={TRAVERT} roughness={0.78}/>
+        </mesh>
+        <mesh position={[0, 0.20, 0]}>
+          <boxGeometry args={[0.10, 0.40, 0.10]}/>
+          <meshStandardMaterial color={DARK} roughness={0.30} metalness={0.60}/>
+        </mesh>
+        {/* 4 chairs */}
+        {[[-0.80,0,-0.66],[0.80,0,-0.66],[-0.80,0,0.66],[0.80,0,0.66]].map(([cx,cy,cz],i)=>(
+          <group key={i} position={[cx,cy,cz]}>
+            <mesh position={[0,0.22,0]} castShadow>
+              <boxGeometry args={[0.44,0.044,0.44]}/>
+              <meshStandardMaterial color={LOUNGE} roughness={0.68} metalness={0.22}/>
             </mesh>
-          ))}
-          <mesh position={[0,0.28,0]}>
-            <boxGeometry args={[0.018,0.14,0.018]}/>
-            <meshStandardMaterial color={GRN} roughness={0.85}/>
+            <mesh position={[0,0.10,0]}>
+              <boxGeometry args={[0.36,0.20,0.036]}/>
+              <meshStandardMaterial color={LOUNGE} roughness={0.68} metalness={0.22}/>
+            </mesh>
+          </group>
+        ))}
+      </group>
+
+      {/* ══════════════════════════════════════════════════
+           TENNIS / PADDLE COURT — rear garden
+      ══════════════════════════════════════════════════ */}
+      {/* Court surface */}
+      <mesh position={[0, 0.010, -6.0]} receiveShadow>
+        <boxGeometry args={[6.40, 0.020, 3.60]}/>
+        <meshStandardMaterial color={COURT} roughness={0.94}/>
+      </mesh>
+      {/* Court lines */}
+      {[
+        [0,    0,    6.42,0.008,0.04],
+        [0,   -1.6,  6.42,0.008,0.04],
+        [0,    1.6,  6.42,0.008,0.04],
+        [-3.17,0,    0.04,0.008,3.68],
+        [ 3.17,0,    0.04,0.008,3.68],
+        [0,    0,    0.04,0.008,3.68],
+      ].map(([dx,dz,w,h,d],i)=>(
+        <mesh key={`cl${i}`} position={[dx, 0.024, -6.0+dz]}>
+          <boxGeometry args={[w,h,d]}/>
+          <meshStandardMaterial color="#E8E8D8" roughness={0.92}/>
+        </mesh>
+      ))}
+      {/* Net post + net */}
+      {[-3.24,3.24].map((x,i)=>(
+        <mesh key={i} position={[x, 0.50, -6.0]}>
+          <boxGeometry args={[0.06,1.0,0.06]}/>
+          <meshStandardMaterial color="#888880" roughness={0.62} metalness={0.50}/>
+        </mesh>
+      ))}
+      <mesh position={[0, 0.62, -6.0]}>
+        <boxGeometry args={[6.54, 0.18, 0.028]}/>
+        <meshStandardMaterial color="#C8C8C0" roughness={0.70} metalness={0.30} transparent opacity={0.55}/>
+      </mesh>
+
+      {/* ══════════════════════════════════════════════════
+           LED PATH LIGHTING — along driveway & pool edge
+      ══════════════════════════════════════════════════ */}
+      {[
+        [1.50,3.60],[1.50,4.60],[1.50,5.60],[1.50,6.40],
+        [5.70,3.60],[5.70,4.60],[5.70,5.60],[5.70,6.40],
+      ].map(([x,z],i)=>(
+        <group key={i} position={[x, 0, z]}>
+          <mesh position={[0,0.26,0]}>
+            <cylinderGeometry args={[0.038,0.044,0.52,8]}/>
+            <meshStandardMaterial color={DARK} roughness={0.28} metalness={0.70}/>
           </mesh>
+          <mesh position={[0,0.54,0]}>
+            <sphereGeometry args={[0.060,8,6]}/>
+            <meshStandardMaterial color="#FFF8E0" emissive="#FFE880" emissiveIntensity={2.4} roughness={0.3}/>
+          </mesh>
+          <pointLight position={[0,0.60,0]} color="#FFE060" intensity={0.6} distance={2.5} decay={2}/>
         </group>
       ))}
 
-      {/* ─── LOW PERIMETER WALL (right side of villa) ─── */}
-      <mesh position={[3.80,0.20,0.50]} castShadow>
-        <boxGeometry args={[0.18,0.40,4.60]}/>
-        <meshStandardMaterial color={DECK} roughness={0.88}/>
-      </mesh>
-      <mesh position={[3.80,0.42,0.50]}>
-        <boxGeometry args={[0.22,0.040,4.64]}/>
-        <meshStandardMaterial color='#A8A49C' roughness={0.80}/>
-      </mesh>
+      {/* ══════════════════════════════════════════════════
+           TOPIARY HEDGES (geometric cubes)
+      ══════════════════════════════════════════════════ */}
+      {/* Flanking entrance pillars */}
+      <HedgeCube px={ 1.20} py={0.36} pz={3.60} w={0.60} h={0.72} d={0.60}/>
+      <HedgeCube px={ 5.98} py={0.36} pz={3.60} w={0.60} h={0.72} d={0.60}/>
+      {/* Rear perimeter row */}
+      {[-4.0,-2.6,-1.2,0,1.2,2.6,4.0].map((x,i)=>(
+        <HedgeCube key={i} px={x} py={0.32} pz={-7.90} w={1.20} h={0.64} d={0.60}/>
+      ))}
+      {/* Right-side row */}
+      {[-2.0,-0.6,0.8,2.2].map((z,i)=>(
+        <HedgeCube key={i} px={7.40} py={0.32} pz={z} w={0.60} h={0.64} d={1.20}/>
+      ))}
+
+      {/* ══════════════════════════════════════════════════
+           PALM TREES — tall statement palms
+      ══════════════════════════════════════════════════ */}
+      <PalmTree px={-5.50} pz={ 2.80}/>
+      <PalmTree px={-5.50} pz={-2.60}/>
+      <PalmTree px={-9.20} pz={ 0.60}/>
+      <PalmTree px={ 1.20} pz={-7.60}/>
+      <PalmTree px={ 5.20} pz={-7.20}/>
+      <PalmTree px={ 7.60} pz={ 1.80}/>
+      <PalmTree px={ 7.60} pz={-1.20}/>
+      <PalmTree px={-1.20} pz={ 7.40}/>
+
     </group>
   );
 }
@@ -1544,9 +1761,12 @@ function BlockMesh({ slot, state }) {
       case 'manor_porch':   return ManorPorchVisual;
       case 'manor_balcony': return ManorBalconyVisual;
       case 'manor_parapet': return ManorParapetVisual;
-      case 'modern_wall':   return ModernWallVisual;
-      case 'modern_slab':   return ModernSlabVisual;
-      case 'villa_grounds': return VillaGroundsVisual;
+      case 'modern_wall':        return ModernWallVisual;
+      case 'modern_slab':        return ModernSlabVisual;
+      case 'villa_tower_wall':   return VillaTowerWallVisual;
+      case 'villa_wing_wall':    return VillaWingWallVisual;
+      case 'villa_slab':         return VillaSlabVisual;
+      case 'villa_grounds':      return VillaGroundsVisual;
       default:              return StoneVisual;
     }
   }, [slot.comp]);
@@ -1972,10 +2192,10 @@ function Ground() {
 function BuildingShell({ score, currentStage, peekStage }) {
   const isPeeking = peekStage !== null;
   const peeking   = isPeeking; // alias for sub-expressions
-  const showThatch = score >= 20;
-  const showClay   = score >= 42;
-  const showSlate  = score >= 65 && currentStage <= 2;
-  const showManor  = score >= 86 && currentStage === 3;
+  const showThatch = score >= 15;                          // last hut wicker sc:15
+  const showClay   = score >= 31 && currentStage <= 1;     // last cottage plaster sc:31
+  const showSlate  = score >= 51 && currentStage <= 2;     // chimney sc:51
+  const showManor  = score >= 72 && currentStage <= 3;     // last manor cornice sc:72, hides at Villa
   const showVilla  = score >= 96 && currentStage >= 4;
 
   // In peek mode: show the peekStage roof solid, everything else faint.
@@ -2019,18 +2239,18 @@ function BuildingShell({ score, currentStage, peekStage }) {
       )}
       {/* Candle windows — cottage */}
       {!isPeeking && score>=37 && currentStage>=1 && <CandleWindow position={[ 1.58,0.48,-1.10]} rotation={[0,Math.PI,0]} />}
-      {!isPeeking && score>=42 && currentStage>=1 && <CandleWindow position={[-1.58,0.48,-1.10]} rotation={[0,0,0]} />}
-      {/* Candle windows — house */}
-      {!isPeeking && score>=56 && currentStage>=2 && <CandleWindow position={[ 1.58,0.80, 0.00]} rotation={[0,Math.PI*0.5,0]} />}
-      {!isPeeking && score>=60 && currentStage>=2 && <CandleWindow position={[ 0.00,0.80,-1.58]} rotation={[0,Math.PI,0]} />}
-      {!isPeeking && score>=65 && currentStage>=2 && <CandleWindow position={[-1.58,0.80, 0.00]} rotation={[0,-Math.PI*0.5,0]} />}
+      {/* Cottage candle window — only during Cottage stage */}
+      {!isPeeking && score>=31 && currentStage===1 && <CandleWindow position={[-1.58,0.48,-1.10]} rotation={[0,0,0]} />}
+      {/* House candle windows — only during House stage */}
+      {!isPeeking && score>=56 && currentStage===2 && <CandleWindow position={[ 1.58,0.80, 0.00]} rotation={[0,Math.PI*0.5,0]} />}
+      {!isPeeking && score>=60 && currentStage===2 && <CandleWindow position={[ 0.00,0.80,-1.58]} rotation={[0,Math.PI,0]} />}
+      {!isPeeking && score>=65 && currentStage===2 && <CandleWindow position={[-1.58,0.80, 0.00]} rotation={[0,-Math.PI*0.5,0]} />}
 
       {/* ── MANOR ROOF ── */}
-      {showManor && (
-        isPeeking
-          ? (peekStage===3 ? <ManorRoof show ghost={false}/> : <ManorRoof show ghost={true}/>)
-          : <ManorRoof show ghost={false}/>
-      )}
+      {isPeeking
+        ? (peekStage===3 ? <ManorRoof show ghost={false}/> : (showManor ? <ManorRoof show ghost={true}/> : null))
+        : (showManor ? <ManorRoof show ghost={false}/> : null)
+      }
 
       {/* ── VILLA ROOF ── */}
       {showVilla && (
@@ -2076,19 +2296,37 @@ function CurrentGhost({ slot, opacity = 0.10 }) {
 function JourneyScene({ blockStates, fireDustRef, flashRef, score, peekStage }) {
   const currentStage = getStage(score);
   const isPeeking = peekStage !== null;
+  /* Stage-adaptive lighting */
+  const isVilla = currentStage >= 4 || (isPeeking && peekStage >= 4);
   return (
     <>
-      <ambientLight intensity={0.44} color="#4A4268" />
-      <directionalLight position={[-4,11,8]} intensity={2.7} color="#FFF2D8"
-        castShadow shadow-mapSize-width={2048} shadow-mapSize-height={2048}
-        shadow-bias={-0.0006} shadow-camera-far={44}
-        shadow-camera-left={-14} shadow-camera-right={14}
-        shadow-camera-top={16}  shadow-camera-bottom={-8}
+      {/* Ambient — villa night is brighter overall for a vibrant feel */}
+      <ambientLight intensity={isVilla ? 0.85 : 0.90} color={isVilla ? "#3A4A6A" : "#6A6090"} />
+      {/* Key directional — 1024 shadow map (4× cheaper than 2048) */}
+      <directionalLight position={[-4,12,8]} intensity={isVilla ? 2.8 : 3.4} color={isVilla ? "#D8EEFF" : "#FFF8E8"}
+        castShadow shadow-mapSize-width={1024} shadow-mapSize-height={1024}
+        shadow-bias={-0.0005} shadow-camera-far={50}
+        shadow-camera-left={-22} shadow-camera-right={22}
+        shadow-camera-top={24}  shadow-camera-bottom={-12}
       />
-      <directionalLight position={[6,4,8]}  intensity={0.80} color="#FFE4B0" />
-      <directionalLight position={[-3,8,-8]} intensity={0.24} color="#8090C0" />
-      <directionalLight position={[4,-4,-5]} intensity={0.12} color="#203060" />
-      <pointLight position={[0.3,0.9,0.5]} color="#FF9A3C" intensity={1.0} distance={5} decay={2} />
+      {/* Two fill lights — consolidated from four */}
+      <directionalLight position={[8,5,6]}   intensity={isVilla ? 1.20 : 1.20} color={isVilla ? "#5080C0" : "#FFE8B0"} />
+      <directionalLight position={[-4,6,-8]} intensity={isVilla ? 0.55 : 0.50} color={isVilla ? "#3060C0" : "#90A0D0"} />
+      {/* Warm centre glow */}
+      <pointLight position={[0.3,1.2,0.5]} color="#FF9A3C" intensity={isVilla ? 1.8 : 2.2} distance={7} decay={2} />
+      {/* Villa night extras — 4 consolidated point lights (was 7) */}
+      {isVilla && (
+        <>
+          {/* Pool — merged 3 lights into 1 wider one */}
+          <pointLight position={[-7.0,1.5, 0]}   color="#00D8FF" intensity={6.0} distance={16} decay={2} />
+          {/* Canopy/BBQ warm */}
+          <pointLight position={[3.60,2.8, 5.6]} color="#FFB460" intensity={4.5} distance={10} decay={2} />
+          {/* Court blue */}
+          <pointLight position={[0.0, 2.5,-6.0]} color="#4488FF" intensity={2.5} distance={12} decay={2} />
+          {/* Overhead fill */}
+          <directionalLight position={[0,8,0]} intensity={0.60} color="#2050A0" />
+        </>
+      )}
 
       {isPeeking ? (
         <>
@@ -2143,6 +2381,29 @@ function TitleHUD({ score, stage }) {
 
 function StageBar({ score, isPlaying, onTogglePlay, onStageClick }) {
   const stage=getStage(score);
+  // Inject keyframe once for the lock pulse
+  React.useEffect(() => {
+    const id = 'villa-lock-kf';
+    if (!document.getElementById(id)) {
+      const s = document.createElement('style');
+      s.id = id;
+      s.textContent = `
+        @keyframes lockPulse {
+          0%,100%{ opacity:0.40; transform:scale(0.90); }
+          50%{ opacity:0.70; transform:scale(1.05); }
+        }
+        @keyframes lockDotPulse {
+          0%,100%{ box-shadow:none; }
+          50%{ box-shadow:0 0 8px #5A3AAAaa; }
+        }
+      `;
+      document.head.appendChild(s);
+    }
+  }, []);
+
+  // Castle (si=5) is permanently locked in v1
+  const LOCKED_IDX = 5;
+
   return (
     <div style={{position:'absolute',bottom:28,left:'50%',transform:'translateX(-50%)',display:'flex',alignItems:'center',
       gap:14,background:'rgba(7,5,3,0.84)',backdropFilter:'blur(12px)',border:'1px solid #322618',
@@ -2166,7 +2427,35 @@ function StageBar({ score, isPlaying, onTogglePlay, onStageClick }) {
 
       {/* Stages list */}
       {STAGE_NAMES.map((name,i)=>{
+        const isLocked = i === LOCKED_IDX;
         const reached=score>=STAGE_SCORES[i], current=stage===i;
+
+        if (isLocked) {
+          return (
+            <React.Fragment key={name}>
+              {/* Connector line before lock */}
+              <div style={{width:24,height:1,margin:'0 2px',marginBottom:12,background:'#1E1810'}}/>
+              {/* Locked Castle teaser */}
+              <div
+                title="Castle — Coming Soon"
+                style={{display:'flex',flexDirection:'column',alignItems:'center',gap:5,cursor:'default',opacity:0.55}}>
+                <div style={{
+                  width:8,height:8,borderRadius:'50%',
+                  background:'#2A1E4A',
+                  animation:'lockDotPulse 2.8s ease-in-out infinite',
+                  transition:'all 0.4s ease'
+                }}/>
+                <span style={{
+                  fontSize:10,fontFamily:'Outfit, monospace',fontWeight:700,
+                  color:'#4A3A6A',letterSpacing:'0.10em',
+                  animation:'lockPulse 2.8s ease-in-out infinite',
+                  display:'inline-block',
+                }}>🔒</span>
+              </div>
+            </React.Fragment>
+          );
+        }
+
         return (
           <React.Fragment key={name}>
             <div
@@ -2186,13 +2475,14 @@ function StageBar({ score, isPlaying, onTogglePlay, onStageClick }) {
                 textTransform:'uppercase',transition:'color 0.4s ease'
               }}>{name}</span>
             </div>
-            {i<STAGE_NAMES.length-1&&<div style={{width:24,height:1,margin:'0 2px',marginBottom:12,background:reached&&score>=STAGE_SCORES[i+1]?'#5A4030':'#1E1810',transition:'background 0.4s ease'}}/>}
+            {i<STAGE_NAMES.length-2&&<div style={{width:24,height:1,margin:'0 2px',marginBottom:12,background:reached&&score>=STAGE_SCORES[i+1]?'#5A4030':'#1E1810',transition:'background 0.4s ease'}}/>}
           </React.Fragment>
         );
       })}
     </div>
   );
 }
+
 
 function RepairBtn({ blockStates, onRepair }) {
   const hasCracked=[...CRACKED_IDS].some(id=>blockStates[id]==='cracked');
@@ -2427,8 +2717,8 @@ export default function BranchingPOCViewport() {
       return next;
     });
 
-    // 4. Fill queue with subsequent blocks
-    queueRef.current=SLOTS.filter(s=>s.sc>targetScore).sort((a,b)=>a.sc-b.sc).map(s=>s.id);
+    // 4. Fill queue with subsequent blocks — cap at POC_SCORE so Castle never fires
+    queueRef.current=SLOTS.filter(s=>s.sc>targetScore && s.sc<=POC_SCORE).sort((a,b)=>a.sc-b.sc).map(s=>s.id);
   },[]);
 
   const repair=useCallback(()=>{
@@ -2457,9 +2747,16 @@ export default function BranchingPOCViewport() {
   return (
     <div style={{width:'100vw',height:'100vh',background:'#060504',position:'relative',overflow:'hidden'}}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap');*{box-sizing:border-box;}button{outline:none;font-family:monospace;}`}</style>
-      <Canvas shadows camera={{position:[5.2,4.6,11.8],fov:46}} style={{width:'100%',height:'100%'}} gl={{antialias:true}}>
-        <color attach="background" args={['#060504']} />
-        <fogExp2 attach="fog" color="#060504" density={0.015} />
+      <Canvas
+        shadows
+        dpr={[1, 1.5]}
+        performance={{ min: 0.5 }}
+        camera={{position:[5.2,4.6,11.8],fov:46}}
+        style={{width:'100%',height:'100%'}}
+        gl={{ antialias: false, powerPreference: 'high-performance', stencil: false, depth: true }}
+      >
+        <color attach="background" args={['#080C14']} />
+        <fogExp2 attach="fog" color="#080C14" density={0.006} />
         <JourneyScene
           blockStates={blockStates}
           fireDustRef={fireDustRef}
@@ -2477,7 +2774,6 @@ export default function BranchingPOCViewport() {
         onSelect={si => setPeekStage(prev => prev === si ? null : si)}
         onClose={() => setPeekStage(null)}
       />
-      <RepairBtn blockStates={blockStates} onRepair={repair} />
       <StageBar
         score={score}
         isPlaying={isPlaying}
