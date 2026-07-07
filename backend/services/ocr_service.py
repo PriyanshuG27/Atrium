@@ -3,22 +3,32 @@ backend/services/ocr_service.py
 ===============================
 Enhanced local OCR service wrapper utilizing PIL image preprocessing,
 OpenCV QR code detection, and in-memory local PaddleOCR with confidence filtering.
-Executes completely in memory without temporary files, enforcing a 30s timeout.
+Runs PaddleOCR inside a ProcessPoolExecutor so that C++ GIL-blocking compilation
+cannot freeze uvicorn worker threads. The OCR subprocess singleton persists for
+the lifetime of the worker process, so cold-start only occurs once.
 """
 
 import io
 import os
 import logging
 import asyncio
-from typing import Dict, Union, Optional
+from concurrent.futures import ProcessPoolExecutor
+from typing import Union, Optional
 from PIL import Image, ImageEnhance, ImageFilter
 
+# Set env vars before any paddle import (must be done at module level in
+# the *worker* process — these are inherited when the pool is forked/spawned).
 os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 
 logger = logging.getLogger(__name__)
 
+# ProcessPoolExecutor with a single worker so PaddleOCR runs in an isolated
+# subprocess and cannot block uvicorn's event loop or thread pool.
+_ocr_executor: Optional[ProcessPoolExecutor] = None
+
+# Module-level singleton inside the *worker* subprocess (not the uvicorn process).
 _paddle_client = None
 
 def check_paddleocr_available() -> bool:
@@ -32,7 +42,7 @@ def check_paddleocr_available() -> bool:
         return False
 
 def get_paddle_client():
-    """Retrieves the cached singleton PaddleOCR client."""
+    """Retrieves the cached singleton PaddleOCR client (runs inside subprocess)."""
     global _paddle_client
     if _paddle_client is None:
         if not check_paddleocr_available():
@@ -44,6 +54,13 @@ def get_paddle_client():
         except Exception:
             _paddle_client = PaddleOCR(use_angle_cls=True, lang="en")
     return _paddle_client
+
+def _get_ocr_executor() -> ProcessPoolExecutor:
+    """Returns the module-level ProcessPoolExecutor, creating it if needed."""
+    global _ocr_executor
+    if _ocr_executor is None:
+        _ocr_executor = ProcessPoolExecutor(max_workers=1)
+    return _ocr_executor
 
 def preprocess_and_ocr_image(image_bytes: bytes) -> dict:
     """
@@ -75,31 +92,42 @@ def preprocess_and_ocr_image(image_bytes: bytes) -> dict:
     except Exception as qr_err:
         logger.warning("In-memory QR code detection failed: %s", qr_err)
         
-    # 2. PIL Image Preprocessing
-    # A. Convert to grayscale & enhance contrast & sharpen
-    image = image.convert('L')
-    image = ImageEnhance.Contrast(image).enhance(2.0)
-    image = image.filter(ImageFilter.SHARPEN)
-    
-    # B. Resize if width < 800px
+    # 2. PIL Image Preprocessing — adaptive for light AND dark backgrounds
+    # np and cv2 are already imported above inside this function
+
+    # Convert to numpy grayscale for brightness analysis
+    gray_np = np.array(image.convert('L'))
+    mean_brightness = float(gray_np.mean())
+
+    # B. Resize if width < 800px before heavy processing
     if image.width < 800:
         ratio = 1200.0 / image.width
         image = image.resize((1200, int(image.height * ratio)), Image.Resampling.LANCZOS)
-        
-    # C. Adaptive binarization & convert back to 'L' grayscale (uint8)
-    image = image.point(lambda p: 0 if p < 128 else 255, '1')
-    image = image.convert('L')
+        gray_np = np.array(image.convert('L'))
+
+    # C. Enhance contrast slightly
+    image_l = ImageEnhance.Contrast(image.convert('L')).enhance(1.5)
+    image_l = image_l.filter(ImageFilter.SHARPEN)
+    gray_np = np.array(image_l)
+
+    # D. Adaptive thresholding (handles uneven lighting far better than fixed 128)
+    #    For dark-background images (mean < 128), invert first so text becomes dark on white
+    if mean_brightness < 128:
+        gray_np = 255 - gray_np
+
+    binary_np = cv2.adaptiveThreshold(
+        gray_np, 255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        blockSize=15, C=8
+    )
     
     # 3. PaddleOCR with confidence filtering (>= 60%)
     high_conf_words = []
     try:
         ocr_client = get_paddle_client()
-        img_np = np.array(image)
-        # Ensure image has 3 channels (BGR) to prevent indexing crashes inside PaddleOCR
-        if len(img_np.shape) == 2:
-            img_np = cv2.cvtColor(img_np, cv2.COLOR_GRAY2BGR)
-        elif len(img_np.shape) == 3 and img_np.shape[2] == 4:
-            img_np = cv2.cvtColor(img_np, cv2.COLOR_RGBA2BGR)
+        # Use the preprocessed binary image; ensure 3 channels (BGR) for PaddleOCR
+        img_np = cv2.cvtColor(binary_np, cv2.COLOR_GRAY2BGR)
             
         result = ocr_client.ocr(img_np)
         
@@ -166,16 +194,19 @@ async def perform_ocr(img_or_path_or_bytes: Union[Image.Image, str, bytes]) -> s
 
     try:
         loop = asyncio.get_running_loop()
-        # Enforce 60-second timeout on the CPU-bound preprocessing and OCR task
+        executor = _get_ocr_executor()
+        # Run in a ProcessPoolExecutor so PaddleOCR's C++ GIL-blocking
+        # compilation/inference cannot freeze uvicorn threads.
+        # Enforce 120s timeout to accommodate cold-start model compilation.
         result = await asyncio.wait_for(
-            loop.run_in_executor(None, preprocess_and_ocr_image, image_bytes),
-            timeout=60.0
+            loop.run_in_executor(executor, preprocess_and_ocr_image, image_bytes),
+            timeout=120.0
         )
         if result.get("trigger_gemini_fallback"):
             return ""
         return result.get("ocr_text") or ""
     except asyncio.TimeoutError:
-        logger.error("OCR preprocessing and extraction timed out after 60 seconds.")
+        logger.error("OCR preprocessing and extraction timed out after 120 seconds.")
         return ""
     except Exception as e:
         logger.error("Exception in perform_ocr pipeline: %s", e)

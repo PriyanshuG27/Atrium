@@ -1,6 +1,7 @@
 import pytest
 import io
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
 from PIL import Image
 from backend.services.ocr_service import check_paddleocr_available, perform_ocr, preprocess_and_ocr_image
@@ -41,7 +42,8 @@ async def test_perform_ocr_success_high_confidence():
     
     with patch("backend.services.ocr_service.check_paddleocr_available", return_value=True), \
          patch("backend.services.ocr_service.get_paddle_client", return_value=mock_ocr), \
-         patch("cv2.QRCodeDetector.detectAndDecode", return_value=("", None, None)):
+         patch("cv2.QRCodeDetector.detectAndDecode", return_value=("", None, None)), \
+         patch("backend.services.ocr_service._get_ocr_executor", return_value=ThreadPoolExecutor(max_workers=1)):
          
         text = await perform_ocr(img_bytes)
         assert len(text.split()) == 10
@@ -91,7 +93,8 @@ async def test_perform_ocr_qr_code_detected():
     # Mock detectAndDecode to return a valid URL
     with patch("backend.services.ocr_service.check_paddleocr_available", return_value=True), \
          patch("backend.services.ocr_service.get_paddle_client", return_value=mock_ocr), \
-         patch("cv2.QRCodeDetector.detectAndDecode", return_value=("https://example.com/qr", None, None)):
+         patch("cv2.QRCodeDetector.detectAndDecode", return_value=("https://example.com/qr", None, None)), \
+         patch("backend.services.ocr_service._get_ocr_executor", return_value=ThreadPoolExecutor(max_workers=1)):
          
         text = await perform_ocr(img_bytes)
         # Should NOT trigger fallback, and should return the QR URL
