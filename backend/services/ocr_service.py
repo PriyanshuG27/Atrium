@@ -33,8 +33,11 @@ def get_paddle_client():
         if not check_paddleocr_available():
             raise RuntimeError("PaddleOCR or PaddlePaddle is not installed/available.")
         from paddleocr import PaddleOCR
-        # Instantiate with silent logging to prevent stdout pollution
-        _paddle_client = PaddleOCR(use_angle_cls=True, lang="en", show_log=False)
+        try:
+            # Instantiate with silent logging to prevent stdout pollution
+            _paddle_client = PaddleOCR(use_angle_cls=True, lang="en", show_log=False)
+        except TypeError:
+            _paddle_client = PaddleOCR(use_angle_cls=True, lang="en")
     return _paddle_client
 
 def preprocess_and_ocr_image(image_bytes: bytes) -> dict:
