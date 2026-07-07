@@ -42,10 +42,12 @@ def get_git_commit() -> str:
         return "unknown"
 
 class BenchmarkRunner:
-    def __init__(self, dataset_path: str):
+    def __init__(self, dataset_path: str, limit: int = None):
         self.dataset_path = dataset_path
         with open(dataset_path, "r", encoding="utf-8") as f:
             self.samples = json.load(f)
+        if limit is not None:
+            self.samples = self.samples[:limit]
         self.adapter = LegacyAdapter()
 
     async def run(self) -> Dict[str, Any]:
@@ -219,6 +221,23 @@ class BenchmarkRunner:
         print(f"Results archived successfully under:\n* {latest_path}\n* {history_path}")
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--limit", type=int, default=None, help="Limit number of samples to run")
+    args = parser.parse_args()
+
+    if sys.platform == "win32":
+        import selectors
+        selector = selectors.SelectSelector()
+        loop = asyncio.SelectorEventLoop(selector)
+        asyncio.set_event_loop(loop)
+    else:
+        loop = None
+
     dataset = os.path.join(os.path.dirname(__file__), "datasets/v1.json")
-    runner = BenchmarkRunner(dataset)
-    asyncio.run(runner.run())
+    runner = BenchmarkRunner(dataset, limit=args.limit)
+    
+    if sys.platform == "win32" and loop:
+        loop.run_until_complete(runner.run())
+    else:
+        asyncio.run(runner.run())
