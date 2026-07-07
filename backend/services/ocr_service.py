@@ -14,6 +14,8 @@ from typing import Dict, Union, Optional
 from PIL import Image, ImageEnhance, ImageFilter
 
 os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = "True"
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +40,9 @@ def get_paddle_client():
         from paddleocr import PaddleOCR
         try:
             # Instantiate with silent logging to prevent stdout pollution
-            _paddle_client = PaddleOCR(use_angle_cls=True, lang="en", show_log=False)
+            _paddle_client = PaddleOCR(use_angle_cls=True, lang="en", show_log=False, ir_optim=False)
         except Exception:
-            _paddle_client = PaddleOCR(use_angle_cls=True, lang="en")
+            _paddle_client = PaddleOCR(use_angle_cls=True, lang="en", ir_optim=False)
     return _paddle_client
 
 def preprocess_and_ocr_image(image_bytes: bytes) -> dict:

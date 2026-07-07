@@ -265,6 +265,7 @@ async def test_answer_graph_question_banned_phrases():
     # 3rd call (gemini) returns clean response -> accepted
     with mock.patch("backend.services.ai_cascade.settings.ENV", "production"), \
          mock.patch("backend.services.ai_cascade.settings.COMPUTE_PROVIDER", None), \
+         mock.patch("backend.services.ai_cascade.settings.USE_NEW_CASCADE", False), \
          mock.patch("backend.services.ai_cascade.settings.OPENROUTER_API_KEY", "mock_key"), \
          mock.patch("backend.services.ai_cascade.settings.NVIDIA_API_KEY", "mock_key"), \
          mock.patch("backend.services.ai_cascade.settings.GEMINI_API_KEY", "mock_key"), \
