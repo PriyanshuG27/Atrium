@@ -244,6 +244,20 @@ async def lifespan(app: FastAPI):
         await start_scheduler(app)
         logger.info("Recall background scheduler started.")
 
+        # Warm up PaddleOCR in a background thread so model compilation
+        # happens at startup, not during the first image request.
+        def _warmup_paddle():
+            try:
+                from backend.services.ocr_service import check_paddleocr_available, get_paddle_client
+                if check_paddleocr_available():
+                    get_paddle_client()
+                    logger.info("PaddleOCR warmup complete — models loaded and ready.")
+            except Exception as warmup_err:
+                logger.warning("PaddleOCR warmup failed (non-fatal): %s", warmup_err)
+
+        import threading
+        threading.Thread(target=_warmup_paddle, daemon=True, name="paddle-warmup").start()
+
     yield  # ← application runs here
 
     # --- SHUTDOWN ---
