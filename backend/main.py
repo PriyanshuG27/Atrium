@@ -369,13 +369,13 @@ from backend.routes.webhook import router as webhook_router
 from backend.routes.auth import router as auth_router
 from backend.routes.api import router as api_router
 from backend.routes.websocket import router as websocket_router
-from backend.routes.bridges import router as bridges_router
+from backend.routes.hearth import router as hearth_router
 
 app.include_router(webhook_router)
 app.include_router(auth_router)
 app.include_router(api_router)
 app.include_router(websocket_router)
-app.include_router(bridges_router)
+app.include_router(hearth_router)
 
 @app.get(
     "/health",

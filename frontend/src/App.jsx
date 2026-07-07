@@ -18,7 +18,7 @@ const Map     = lazy(() => import('./pages/Map'));
 const Drill   = lazy(() => import('./pages/Drill'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Profile  = lazy(() => import('./pages/Profile'));
-const Bridges  = lazy(() => import('./pages/Bridges'));
+const Hearth   = lazy(() => import('./pages/Hearth'));
 const BranchingPOC = lazy(() => import('./pages/BranchingPOC'));
 import PWAInstallBanner from './components/PWAInstallBanner';
 
@@ -30,7 +30,7 @@ function pathToRoom(pathname) {
   if (pathname.startsWith('/drill'))   return 'drill';
   if (pathname.startsWith('/settings')) return 'settings';
   if (pathname.startsWith('/profile')) return 'profile';
-  if (pathname.startsWith('/bridges')) return 'bridges';
+  if (pathname.startsWith('/hearth')) return 'hearth';
   if (pathname.startsWith('/poc/branching')) return 'poc-branching';
   return 'archive';
 }
@@ -316,7 +316,7 @@ function App() {
 
   /* ── Navigation with transition ──────────────────────────── */
   const handleNavigate = useCallback((roomId) => {
-    const paths = { archive: '/archive', map: '/map', drill: '/drill', settings: '/settings', profile: '/profile', bridges: '/bridges' };
+    const paths = { archive: '/archive', map: '/map', drill: '/drill', settings: '/settings', profile: '/profile', hearth: '/hearth' };
     if (!paths[roomId] || roomId === currentRoom) return;
     prevRoomRef.current = currentRoom;
     window.history.pushState({}, '', paths[roomId]);
@@ -452,7 +452,7 @@ function App() {
               {currentRoom === 'drill'   && <Drill />}
               {currentRoom === 'settings' && <Settings />}
               {currentRoom === 'profile'  && <Profile />}
-              {currentRoom === 'bridges'  && <Bridges />}
+              {currentRoom === 'hearth'   && <Hearth />}
             </Suspense>
           </RoomTransition>
         </RoomErrorBoundary>

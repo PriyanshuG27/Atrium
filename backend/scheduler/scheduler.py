@@ -2654,6 +2654,64 @@ async def daily_pulse_updater() -> None:
             logger.error("Failed to update daily pulse for user %d: %s", user_id, e)
 
 
+async def tick_hearth_shared_days() -> None:
+    """
+    Daily job (00:05 UTC): for every active Hearth pair, check if BOTH users
+    saved at least 1 item yesterday. If yes → increment shared_days by 1.
+
+    Uses the existing items.created_at partition column — no extra tracking tables.
+    misfire_grace_time=60 ensures the job won't be skipped if the server is
+    briefly down at midnight.
+    """
+    from datetime import date, timedelta
+    yesterday = (datetime.utcnow() - timedelta(days=1)).date()
+
+    pool = await get_pool()
+    try:
+        async with pool.connection() as conn:
+            pairs = await conn.execute(
+                "SELECT id, user_a_id, user_b_id FROM journey_pairs WHERE status = 'active'"
+            )
+            rows = await pairs.fetchall()
+            ticked = 0
+            for row in rows:
+                pair_id, user_a, user_b = row[0], row[1], row[2]
+
+                a_active = await conn.fetchval(
+                    "SELECT 1 FROM items WHERE user_id = $1 AND created_at::date = $2 LIMIT 1",
+                    user_a, yesterday
+                ) if hasattr(conn, 'fetchval') else None
+
+                # Fallback for psycopg3 cursor style
+                if not hasattr(conn, 'fetchval'):
+                    cur_a = await conn.execute(
+                        "SELECT 1 FROM items WHERE user_id = %s AND created_at::date = %s LIMIT 1",
+                        (user_a, yesterday)
+                    )
+                    a_active = await cur_a.fetchone()
+                    cur_b = await conn.execute(
+                        "SELECT 1 FROM items WHERE user_id = %s AND created_at::date = %s LIMIT 1",
+                        (user_b, yesterday)
+                    )
+                    b_active = await cur_b.fetchone()
+                else:
+                    b_active = await conn.fetchval(
+                        "SELECT 1 FROM items WHERE user_id = $1 AND created_at::date = $2 LIMIT 1",
+                        user_b, yesterday
+                    )
+
+                if a_active and b_active:
+                    await conn.execute(
+                        "UPDATE journey_pairs SET shared_days = shared_days + 1 WHERE id = %s",
+                        (pair_id,)
+                    )
+                    ticked += 1
+
+            logger.info("Hearth tick: %d/%d pairs advanced (date: %s)", ticked, len(rows), yesterday)
+    except Exception as exc:
+        logger.error("Hearth tick_hearth_shared_days failed: %s", exc)
+
+
 # ---------------------------------------------------------------------------
 # Scheduler Manager
 # ---------------------------------------------------------------------------
@@ -2842,8 +2900,17 @@ async def start_scheduler(app=None) -> None:
         misfire_grace_time=60
     )
     
+
+    # 23. tick_hearth_shared_days (daily at 00:05 UTC)
+    _scheduler.add_job(
+        tick_hearth_shared_days,
+        trigger=CronTrigger(hour=0, minute=5, timezone="UTC"),
+        id="tick_hearth_shared_days",
+        misfire_grace_time=60
+    )
+
     _scheduler.start()
-    logger.info("Background job scheduler started successfully with all 22 jobs.")
+    logger.info("Background job scheduler started successfully with all 23 jobs.")
 
 
 async def stop_scheduler() -> None:

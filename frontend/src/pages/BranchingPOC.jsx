@@ -2587,9 +2587,9 @@ function PeekPanel({ completedStages, peekStage, onSelect, onClose }) {
 }
 
 /* ═══ VIEWPORT ═══════════════════════════════════════════════════════════ */
-export default function BranchingPOCViewport() {
+export default function BranchingPOCViewport({ externalScore, hearthMode } = {}) {
   const [blockStates,setBlockStates]=useState(()=>Object.fromEntries(SLOTS.map(s=>[s.id,'pending'])));
-  const [score,setScore]=useState(0);
+  const [score,setScore]=useState(externalScore ?? 0);
   const [peekStage,setPeekStage]=useState(null); // null=normal, 0=hut, 1=cottage, 2=house...
   const [isPlaying,setIsPlaying]=useState(true);
   const fireDustRef=useRef(null), flashRef=useRef(null);
@@ -2600,6 +2600,13 @@ export default function BranchingPOCViewport() {
   const timeoutIdRef=useRef(null);
 
   const setOne=useCallback((id,s)=>setBlockStates(p=>({...p,[id]:s})),[]);
+
+  // When Hearth provides a real score from the API, sync it in
+  useEffect(() => {
+    if (externalScore !== undefined && externalScore !== null) {
+      setScore(externalScore);
+    }
+  }, [externalScore]);
 
   // Retire old-stage blocks when stage advances — permanent blocks always stay
   const retireStage=useCallback((oldSi)=>{
