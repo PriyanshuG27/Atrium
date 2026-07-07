@@ -164,16 +164,16 @@ async def perform_ocr(img_or_path_or_bytes: Union[Image.Image, str, bytes]) -> s
 
     try:
         loop = asyncio.get_running_loop()
-        # Enforce 30-second timeout on the CPU-bound preprocessing and OCR task
+        # Enforce 60-second timeout on the CPU-bound preprocessing and OCR task
         result = await asyncio.wait_for(
             loop.run_in_executor(None, preprocess_and_ocr_image, image_bytes),
-            timeout=30.0
+            timeout=60.0
         )
         if result.get("trigger_gemini_fallback"):
             return ""
         return result.get("ocr_text") or ""
     except asyncio.TimeoutError:
-        logger.error("OCR preprocessing and extraction timed out after 30 seconds.")
+        logger.error("OCR preprocessing and extraction timed out after 60 seconds.")
         return ""
     except Exception as e:
         logger.error("Exception in perform_ocr pipeline: %s", e)
