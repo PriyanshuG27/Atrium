@@ -249,12 +249,19 @@ class AICascade:
             from backend.services.ai_cascade.executor.engine import ExecutionEngine
             from backend.services.ai_cascade.models import LabelResult
             
+            from backend.services.ai_cascade.pipelines.label import LabelPipeline
+            from backend.services.ai_cascade.models import PipelineContext
+            
             task = AITask(input_data={"text": text})
             plan = AIPlanner().plan_execution(task, "label")
             context = ExecutionContext()
             engine = ExecutionEngine()
+            pipeline = LabelPipeline()
+            pipeline_context = PipelineContext(metadata={"text": text})
+            system_prompt = pipeline.build_system_prompt(pipeline_context)
+            user_prompt = pipeline.build_user_prompt(pipeline_context)
             try:
-                res = await engine.execute_plan(plan, context, "", "")
+                res = await engine.execute_plan(plan, context, system_prompt, user_prompt)
                 if isinstance(res, LabelResult):
                     return res.label.strip()
             except Exception as e:
@@ -287,12 +294,19 @@ class AICascade:
             from backend.services.ai_cascade.executor.engine import ExecutionEngine
             from backend.services.ai_cascade.models import OnboardingResult
 
+            from backend.services.ai_cascade.pipelines.onboarding import OnboardingPipeline
+            from backend.services.ai_cascade.models import PipelineContext
+
             task = AITask(input_data={"text": text})
             plan = AIPlanner().plan_execution(task, "onboarding")
             context = ExecutionContext()
             engine = ExecutionEngine()
+            pipeline = OnboardingPipeline()
+            pipeline_context = PipelineContext(metadata={"text": text})
+            system_prompt = pipeline.build_system_prompt(pipeline_context)
+            user_prompt = pipeline.build_user_prompt(pipeline_context)
             try:
-                res = await engine.execute_plan(plan, context, "", "")
+                res = await engine.execute_plan(plan, context, system_prompt, user_prompt)
                 if isinstance(res, OnboardingResult):
                     return res.summary.strip()
             except Exception as e:
@@ -491,12 +505,19 @@ class AICascade:
             from backend.services.ai_cascade.executor.engine import ExecutionEngine
             from backend.services.ai_cascade.models import SanitizeTranscriptResult
 
+            from backend.services.ai_cascade.pipelines.sanitize_transcript import SanitizeTranscriptPipeline
+            from backend.services.ai_cascade.models import PipelineContext
+
             task = AITask(input_data={"text": masked_text})
             plan = AIPlanner().plan_execution(task, "sanitize_transcript")
             context = ExecutionContext()
             engine = ExecutionEngine()
+            pipeline = SanitizeTranscriptPipeline()
+            pipeline_context = PipelineContext(metadata={"text": masked_text})
+            system_prompt = pipeline.build_system_prompt(pipeline_context)
+            user_prompt = pipeline.build_user_prompt(pipeline_context)
             try:
-                res = await engine.execute_plan(plan, context, "", "")
+                res = await engine.execute_plan(plan, context, system_prompt, user_prompt)
                 if isinstance(res, SanitizeTranscriptResult):
                     return res.transcript.strip()
             except Exception as e:
@@ -539,12 +560,19 @@ class AICascade:
             from backend.services.ai_cascade.executor.engine import ExecutionEngine
             from backend.services.ai_cascade.models import GenerateContextQuestionResult
 
+            from backend.services.ai_cascade.pipelines.generate_context_question import GenerateContextQuestionPipeline
+            from backend.services.ai_cascade.models import PipelineContext
+
             task = AITask(input_data={"title": title, "summary": summary})
             plan = AIPlanner().plan_execution(task, "generate_context_question")
             context = ExecutionContext()
             engine = ExecutionEngine()
+            pipeline = GenerateContextQuestionPipeline()
+            pipeline_context = PipelineContext(metadata={"title": title, "summary": summary})
+            system_prompt = pipeline.build_system_prompt(pipeline_context)
+            user_prompt = pipeline.build_user_prompt(pipeline_context)
             try:
-                res = await engine.execute_plan(plan, context, "", "")
+                res = await engine.execute_plan(plan, context, system_prompt, user_prompt)
                 if isinstance(res, GenerateContextQuestionResult):
                     return res.context_prompt.strip()
             except Exception as e:
@@ -852,12 +880,19 @@ class AICascade:
             from backend.services.ai_cascade.planner.ai_planner import AIPlanner
             from backend.services.ai_cascade.executor.engine import ExecutionEngine
 
+            from backend.services.ai_cascade.pipelines.graph import GraphPipeline
+            from backend.services.ai_cascade.models import PipelineContext
+
             task = AITask(input_data={"query": query, "context_text": context_text})
             plan = AIPlanner().plan_execution(task, "graph")
             context = ExecutionContext()
             engine = ExecutionEngine()
+            pipeline = GraphPipeline()
+            pipeline_context = PipelineContext(metadata={"query": query, "context_text": context_text})
+            system_prompt = pipeline.build_system_prompt(pipeline_context)
+            user_prompt = pipeline.build_user_prompt(pipeline_context)
             try:
-                res = await engine.execute_plan(plan, context, "", "")
+                res = await engine.execute_plan(plan, context, system_prompt, user_prompt)
                 if isinstance(res, RAGResult):
                     return res.answer.strip()
             except Exception as e:
@@ -1004,12 +1039,19 @@ class AICascade:
             from backend.services.ai_cascade.executor.engine import ExecutionEngine
             from backend.services.ai_cascade.models import JointSummaryResult
 
+            from backend.services.ai_cascade.pipelines.joint_summary import JointSummaryPipeline
+            from backend.services.ai_cascade.models import PipelineContext
+
             task = AITask(input_data={"text": input_text})
             plan = AIPlanner().plan_execution(task, "joint_summary")
             context = ExecutionContext()
             engine = ExecutionEngine()
+            pipeline = JointSummaryPipeline()
+            pipeline_context = PipelineContext(metadata={"text": input_text})
+            system_prompt = pipeline.build_system_prompt(pipeline_context)
+            user_prompt = pipeline.build_user_prompt(pipeline_context)
             try:
-                res = await engine.execute_plan(plan, context, "", "")
+                res = await engine.execute_plan(plan, context, system_prompt, user_prompt)
                 if isinstance(res, JointSummaryResult):
                     return {
                         "title": res.title.strip(),
@@ -1083,12 +1125,19 @@ class AICascade:
             from backend.services.ai_cascade.executor.engine import ExecutionEngine
             from backend.services.ai_cascade.models import OCRCleanupResult
 
+            from backend.services.ai_cascade.pipelines.ocr_cleanup import OCRCleanupPipeline
+            from backend.services.ai_cascade.models import PipelineContext
+
             task = AITask(input_data={"ocr_text": ocr_text})
             plan = AIPlanner().plan_execution(task, "ocr_cleanup")
             context = ExecutionContext()
             engine = ExecutionEngine()
+            pipeline = OCRCleanupPipeline()
+            pipeline_context = PipelineContext(metadata={"ocr_text": ocr_text})
+            system_prompt = pipeline.build_system_prompt(pipeline_context)
+            user_prompt = pipeline.build_user_prompt(pipeline_context)
             try:
-                res = await engine.execute_plan(plan, context, "", "")
+                res = await engine.execute_plan(plan, context, system_prompt, user_prompt)
                 if isinstance(res, OCRCleanupResult):
                     cleaned = []
                     for u in res.urls:
