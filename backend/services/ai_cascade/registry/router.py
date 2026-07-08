@@ -103,6 +103,7 @@ class AIRouter:
                     input_size_chars += len(m.get("content", ""))
 
         candidates = await cls.select_candidate_models(requirements, input_size_chars=input_size_chars)
+        logger.info("Routing task '%s' using candidates: %s", task_name, [m.model_id for m in candidates])
         if not candidates:
             err_msg = f"No active or healthy models matched requirements: {requirements}"
             logger.error(err_msg)
