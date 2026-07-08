@@ -28,7 +28,12 @@ class MockRedisRateLimitState:
         
         card = len(self.state[key])
         
-        oldest_member = f"{self.state[key][0]}-mockuuid"
+        oldest_member = f"{self.state[key][0]}-mockuuid" if self.state[key] else ""
+        
+        if card > limit:
+            # Replicate Lua ZREM deletion of member_id on failure
+            self.state[key].remove(now)
+            
         return [card, oldest_member]
 
 @pytest.mark.asyncio
@@ -118,3 +123,36 @@ async def test_rate_limiter_invalid_oldest_member():
             await check_rate_limit("user_a")
         # Since parsing fails, it falls back to current time, making retry_after = window_seconds (60)
         assert exc_info.value.retry_after == 60.0
+
+
+@pytest.mark.asyncio
+async def test_rate_limiter_redis_unavailable_fail_open():
+    # If Redis raises an exception, the rate limiter MUST fail open
+    with mock.patch("backend.services.redis_client.redis.eval", side_effect=Exception("Redis offline!")):
+        # Should not raise RateLimitExceeded and return True
+        res = await check_rate_limit("user_a")
+        assert res is True
+
+
+@pytest.mark.asyncio
+async def test_rate_limiter_lua_cleanup_on_rejection():
+    # Test that rejected spammed requests do not linger in the ZSET
+    db_state = MockRedisRateLimitState()
+    with mock.patch("backend.services.redis_client.redis.eval", side_effect=db_state.eval):
+        current_time = 1719270000.0
+        
+        # Send 20 requests -> all should pass
+        for i in range(20):
+            with mock.patch("time.time", return_value=current_time):
+                await check_rate_limit("user_a")
+                
+        assert len(db_state.state["rate:user_a"]) == 20
+        
+        # 21st request -> rate limit exceeded
+        with mock.patch("time.time", return_value=current_time):
+            with pytest.raises(RateLimitExceeded):
+                await check_rate_limit("user_a")
+                
+        # The 21st request member should have been removed from the set, so set size remains exactly 20!
+        assert len(db_state.state["rate:user_a"]) == 20
+

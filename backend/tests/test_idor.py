@@ -103,7 +103,7 @@ def test_delete_own_item_success(client):
     response = client.delete("/api/items/5", cookies={"recall_session": token})
     
     assert response.status_code == 204
-    assert len(current_cursor.executed) == 6
+    assert len(current_cursor.executed) == 7
     
     q_query, q_params = current_cursor.executed[1]
     assert "DELETE FROM quizzes" in q_query
@@ -125,6 +125,9 @@ def test_delete_own_item_success(client):
     assert "DELETE FROM items" in item_query
     assert "user_id = %s" in item_query
     assert item_params == (5, 42)
+    
+    audit_query, audit_params = current_cursor.executed[6]
+    assert "INSERT INTO audit_logs" in audit_query
 
 def test_delete_other_user_item_idor_prevented(client):
     """User B attempts to delete User A's item -> returns 404, not 204."""

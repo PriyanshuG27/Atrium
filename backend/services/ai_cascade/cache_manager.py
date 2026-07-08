@@ -4,10 +4,80 @@ import json
 from typing import Optional, Any
 from backend.services.redis_client import redis, RedisUnavailableError
 
+import collections
+import time
+from backend.config import settings
+
 logger = logging.getLogger(__name__)
 
+
+import threading
+
+
+class LocalTTLCache:
+    def __init__(self, maxsize: int, ttl: float):
+        self.maxsize = maxsize
+        self.ttl = ttl
+        self._cache = {}
+        self._keys_order = collections.deque()
+        self._lock = threading.RLock()
+
+    def get(self, key: str) -> Optional[Any]:
+        with self._lock:
+            if key not in self._cache:
+                return None
+            value, expiry = self._cache[key]
+            if time.time() > expiry:
+                self.delete(key)
+                return None
+            return value
+
+    def set(self, key: str, value: Any) -> None:
+        with self._lock:
+            self.cleanup()
+            expiry = time.time() + self.ttl
+            if key in self._cache:
+                self._cache[key] = (value, expiry)
+                if key in self._keys_order:
+                    self._keys_order.remove(key)
+                self._keys_order.append(key)
+            else:
+                while len(self._cache) >= self.maxsize and self._keys_order:
+                    oldest = self._keys_order.popleft()
+                    self._cache.pop(oldest, None)
+                self._cache[key] = (value, expiry)
+                self._keys_order.append(key)
+
+    def delete(self, key: str) -> None:
+        with self._lock:
+            self._cache.pop(key, None)
+            try:
+                self._keys_order.remove(key)
+            except ValueError:
+                pass
+
+    def cleanup(self) -> None:
+        with self._lock:
+            now = time.time()
+            expired = [k for k, v in self._cache.items() if now > v[1]]
+            for k in expired:
+                self.delete(k)
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        self.set(key, value)
+
+    def __getitem__(self, key: str) -> Any:
+        with self._lock:
+            val = self.get(key)
+            if val is None:
+                raise KeyError(key)
+            return val
+
+
 class CacheManager:
-    _memory_cache = {}
+    _max_entries = settings.CACHE_MAX_ENTRIES if settings else 1000
+    _ttl_seconds = settings.CACHE_TTL_SECONDS if settings else 3600
+    _memory_cache = LocalTTLCache(maxsize=_max_entries, ttl=_ttl_seconds)
 
     @classmethod
     def generate_hash(cls, content: Any) -> str:

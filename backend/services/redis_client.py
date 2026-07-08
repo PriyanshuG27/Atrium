@@ -150,10 +150,44 @@ class UpstashRedis:
         Pushes a value to the head of a list.
         Returns the number of elements in the list after the push.
         """
+        if key == "recall:tasks" and isinstance(value, str):
+            try:
+                import json
+                import structlog
+                payload = json.loads(value)
+                if isinstance(payload, dict) and "correlation_id" not in payload:
+                    context = structlog.contextvars.get_contextvars()
+                    correlation_id = context.get("correlation_id")
+                    if correlation_id:
+                        payload["correlation_id"] = correlation_id
+                        value = json.dumps(payload)
+            except Exception:
+                pass
+
         data = await self._request("", ["LPUSH", key, value])
         if isinstance(data, dict) and "error" in data:
             raise RedisUnavailableError(self._redact(data["error"]))
         return int(data["result"])
+
+    async def llen(self, key: str) -> int:
+        """
+        Returns the length of the list stored at key.
+        """
+        data = await self._request("", ["LLEN", key])
+        if isinstance(data, dict) and "error" in data:
+            raise RedisUnavailableError(self._redact(data["error"]))
+        if data.get("result") is None:
+            return 0
+        return int(data["result"])
+
+    async def lindex(self, key: str, index: int) -> str | None:
+        """
+        Returns the element at index in the list stored at key.
+        """
+        data = await self._request("", ["LINDEX", key, str(index)])
+        if isinstance(data, dict) and "error" in data:
+            raise RedisUnavailableError(self._redact(data["error"]))
+        return data.get("result")
 
     async def brpop(self, key: str, timeout: int = 5) -> Optional[Tuple[str, str]]:
         """

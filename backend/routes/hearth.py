@@ -256,6 +256,14 @@ async def create_invite(
             """,
             (user.id, code),
         )
+        # Log audit
+        from backend.services.audit_service import log_audit
+        await log_audit(
+            db=db,
+            user_id=user.id,
+            action="change_permissions",
+            details={"action_sub": "hearth_invite_created", "invite_code": code}
+        )
         await db.commit()
 
     return {
@@ -326,6 +334,18 @@ async def accept_invite(
             await cur.execute(
                 "UPDATE journey_invites SET status = 'accepted' WHERE id = %s;",
                 (invite_id,),
+            )
+            # Log audit
+            from backend.services.audit_service import log_audit
+            await log_audit(
+                db=db,
+                user_id=user.id,
+                action="change_permissions",
+                details={
+                    "action_sub": "hearth_invite_accepted",
+                    "partner_id": inviter_id,
+                    "invite_code": body.invite_code
+                }
             )
 
         # Fetch inviter info for Telegram nudge
@@ -401,6 +421,18 @@ async def leave_journey(
             await cur.execute(
                 "DELETE FROM journey_pairs WHERE id = %s;",
                 (pair_id,),
+            )
+            # Log audit
+            from backend.services.audit_service import log_audit
+            await log_audit(
+                db=db,
+                user_id=user.id,
+                action="change_permissions",
+                details={
+                    "action_sub": "hearth_journey_left",
+                    "pair_id": pair_id,
+                    "partner_id": partner_id
+                }
             )
 
     if partner_chat_id:

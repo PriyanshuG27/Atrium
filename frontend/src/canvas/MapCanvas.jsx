@@ -63,7 +63,44 @@ export default function MapCanvas({
     gapsMode: false, burstHubId: null,
     activeCandidates: [],
     alive: false, stars: [],
+    matches: new Set(),
   });
+
+  const matches = React.useMemo(() => {
+    const set = new Set();
+    const query = (searchQuery || '').trim().toLowerCase();
+    if (!query || nodes.length === 0) return set;
+    
+    const nodeMap = new Map();
+    nodes.forEach(n => { nodeMap.set(n.id, n); });
+    
+    nodes.forEach(n => {
+      const isHubNode = n.type === 'hub';
+      if (isHubNode) {
+        const memberMatches = (n._members || []).some(mid => {
+          const m = nodeMap.get(mid);
+          return m && (
+            (m.title || '').toLowerCase().includes(query) || 
+            (m.summary || '').toLowerCase().includes(query)
+          );
+        });
+        if ((n.title || '').toLowerCase().includes(query) || memberMatches) {
+          set.add(n.id);
+        }
+      } else {
+        if (
+          (n.title || '').toLowerCase().includes(query) || 
+          (n.summary || '').toLowerCase().includes(query) ||
+          (n.raw_text || '').toLowerCase().includes(query)
+        ) {
+          set.add(n.id);
+        }
+      }
+    });
+    return set;
+  }, [nodes, searchQuery]);
+
+  useEffect(() => { s.current.matches = matches; }, [matches]);
 
   useEffect(() => { s.current.filterType     = filterType;    }, [filterType]);
   useEffect(() => { s.current.selectedNodeId = selectedNodeId; }, [selectedNodeId]);
@@ -289,31 +326,7 @@ export default function MapCanvas({
       ctx.scale(k, k);
 
       /* ── Search Query Highlights ──────────────────────────────────── */
-      const matches = new Set();
-      if (query) {
-        sn.forEach(n => {
-          if (isHub(n)) {
-            const memberMatches = (n._members || []).some(mid => {
-              const m = sn.find(x => x.id === mid);
-              return m && (
-                (m.title || '').toLowerCase().includes(query) || 
-                (m.summary || '').toLowerCase().includes(query)
-              );
-            });
-            if (n.title.toLowerCase().includes(query) || memberMatches) {
-              matches.add(n.id);
-            }
-          } else {
-            if (
-              (n.title || '').toLowerCase().includes(query) || 
-              (n.summary || '').toLowerCase().includes(query) ||
-              (n.raw_text || '').toLowerCase().includes(query)
-            ) {
-              matches.add(n.id);
-            }
-          }
-        });
-      }
+      const matches = st.matches || new Set();
 
       /* ── Highlight sets ───────────────────────────────────────────── */
       const litEdges = new Set();

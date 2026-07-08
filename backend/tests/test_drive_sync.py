@@ -111,7 +111,7 @@ async def test_sync_user_to_drive_success(monkeypatch):
 
     original_client = httpx.AsyncClient
     transport = httpx.MockTransport(mock_http_request)
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: original_client(transport=transport, **kwargs))
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: original_client(**{**kwargs, "transport": transport}))
 
     await sync_user_to_drive(1, conn)
 
@@ -144,7 +144,7 @@ async def test_sync_user_to_drive_revoked_401(monkeypatch):
 
     original_client = httpx.AsyncClient
     transport = httpx.MockTransport(mock_http_request)
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: original_client(transport=transport, **kwargs))
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: original_client(**{**kwargs, "transport": transport}))
 
     await sync_user_to_drive(1, conn)
 
@@ -173,7 +173,7 @@ async def test_sync_user_to_drive_quota_403(monkeypatch):
 
     original_client = httpx.AsyncClient
     transport = httpx.MockTransport(mock_http_request)
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: original_client(transport=transport, **kwargs))
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: original_client(**{**kwargs, "transport": transport}))
 
     await sync_user_to_drive(1, conn)
 

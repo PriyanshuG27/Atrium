@@ -52,6 +52,9 @@ class MockConnection:
     def cursor(self):
         return self.cursor_inst
 
+    async def execute(self, query, params=None):
+        return await self.cursor_inst.execute(query, params)
+
     async def commit(self):
         pass
 
@@ -181,15 +184,22 @@ async def test_partition_creator_success():
         
         await partition_creator()
         
-        # In June 2026, it should create a partition for July 2026 (y2026m07)
-        # Bounds: start 2026-07-01 to end 2026-08-01
-        assert len(cursor.executed) == 1
-        query = cursor.executed[0][0]
+        # In June 2026, it should create current partition (y2026m06) and next partition (y2026m07)
+        # after acquiring advisory lock.
+        assert len(cursor.executed) == 3
         
-        assert "create table if not exists items_y2026m07" in query.lower()
-        assert "partition of items" in query.lower()
-        assert "'2026-07-01 00:00:00'" in query
-        assert "'2026-08-01 00:00:00'" in query
+        query_lock = cursor.executed[0][0]
+        assert "pg_advisory_xact_lock" in query_lock.lower()
+        
+        query_curr = cursor.executed[1][0]
+        assert "create table if not exists items_y2026m06" in query_curr.lower()
+        assert "'2026-06-01 00:00:00'" in query_curr
+        assert "'2026-07-01 00:00:00'" in query_curr
+        
+        query_next = cursor.executed[2][0]
+        assert "create table if not exists items_y2026m07" in query_next.lower()
+        assert "'2026-07-01 00:00:00'" in query_next
+        assert "'2026-08-01 00:00:00'" in query_next
 
 
 @pytest.mark.asyncio
@@ -394,4 +404,39 @@ async def test_monthly_discrepancy_scanner_json_fallback():
             "💭 *Graph Reflection*\n\n"
             "You state a focus on side-panel delete verification, yet you save AI trends."
         )
+
+
+@pytest.mark.asyncio
+async def test_onboarding_sequence_dispatcher_completion_logging():
+    class OnboardingMockCursor(MockCursor):
+        async def fetchall(self):
+            last_q = self.executed[-1][0]
+            if "onboarding_day = 3" in last_q:
+                # Returns 1 user (id=42) on day 3 with node_count=5
+                return [(42, 5)]
+            return []
+            
+        async def fetchone(self):
+            return None
+            
+    cursor = OnboardingMockCursor()
+    conn = MockConnection(cursor)
+    mock_pool = mock.MagicMock()
+    mock_pool.connection = mock.MagicMock(return_value=conn)
+    
+    with mock.patch("backend.scheduler.scheduler.get_pool", mock_read_pool := mock.AsyncMock(return_value=mock_pool)):
+        from backend.scheduler.scheduler import onboarding_sequence_dispatcher
+        await onboarding_sequence_dispatcher()
+        
+        # Verify that UPDATE and INSERT INTO audit_logs were executed
+        updates = [q for q, p in cursor.executed if "UPDATE users SET onboarding_day = 5" in q]
+        assert len(updates) == 1
+        
+        audit_logs = [q for q, p in cursor.executed if "INSERT INTO audit_logs" in q]
+        assert len(audit_logs) == 1
+        # The user_id is the first parameter (42) and action is "complete_onboarding"
+        audit_params = [p for q, p in cursor.executed if "INSERT INTO audit_logs" in q][0]
+        assert audit_params[0] == 42
+        assert audit_params[1] == "complete_onboarding"
+
 

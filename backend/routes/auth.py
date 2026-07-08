@@ -24,6 +24,8 @@ from backend.services.encryption import encrypt
 from backend.middleware.twa_auth import generate_jwt, verify_jwt, get_current_user, UserContext
 from backend.models.schemas import ErrorResponse
 
+from backend.services.rate_limiter import rate_limit_by_route
+
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -38,7 +40,8 @@ class LoginStatusResponse(BaseModel):
     description="Verifies the signature of the Telegram login widget data and sets the recall_session JWT cookie.",
     responses={
         401: {"model": ErrorResponse, "description": "Invalid signature or expired authentication data."},
-    }
+    },
+    dependencies=[Depends(rate_limit_by_route("login", limit=5, window=60, burst=2))]
 )
 async def auth_telegram(
     request: Request,
@@ -116,15 +119,22 @@ async def auth_telegram(
         
     user_id = await upsert_user(telegram_chat_id, db)
     
-    # Save first_name and username
+    # Save first_name and username (only if changed to avoid redundant WAL writes and lock contention)
     first_name = params.get("first_name")
     username = params.get("username")
     async with db.cursor() as cur:
         await cur.execute(
-            "UPDATE users SET first_name = %s, username = %s WHERE id = %s;",
-            (first_name, username, user_id)
+            "SELECT first_name, username FROM users WHERE id = %s;",
+            (user_id,)
         )
-        await db.commit()
+        row = await cur.fetchone()
+        if row is None or row[0] != first_name or row[1] != username:
+            await cur.execute(
+                "UPDATE users SET first_name = %s, username = %s WHERE id = %s;",
+                (first_name, username, user_id)
+            )
+            await db.commit()
+            logger.info("Updated Telegram profile details for user %d", user_id)
     
     # Issue JWT: {sub: users.id, chat_id: telegram_chat_id, exp: +7 days}
     payload = {

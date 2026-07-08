@@ -98,6 +98,9 @@ class StatefulMockCursor:
         # If conflict and SELECT id
         if self.executed and "SELECT id FROM users WHERE telegram_chat_id" in self.executed[-1][0]:
             return (42,)
+        # If it's the SELECT first_name, username check
+        if self.executed and "SELECT first_name, username FROM users" in self.executed[-1][0]:
+            return self.fetchone_result or (None, None)
         return self.fetchone_result
 
 class StatefulMockConn:
@@ -390,3 +393,48 @@ def test_google_oauth_callback_expired_state(client):
     response = client.get(f"/auth/google/callback?state={expired_state}&code=auth_code_123")
     assert response.status_code == 401
     assert "Expired state token" in response.json()["detail"]
+
+
+def test_login_widget_redundant_write_elimination(client):
+    from backend.db.connection import get_db
+    # Setup stateful db pool mock
+    stateful_conn = StatefulMockConn()
+    mock_pool = mock.MagicMock()
+    mock_pool.connection = mock.MagicMock(return_value=stateful_conn)
+    
+    # 1. Test scenario where first_name and username are different/new (UPDATE should run)
+    stateful_conn._cursor.fetchone_result = (None, None) # simulate new user details
+    
+    # Mock get_db
+    async def mock_get_db():
+        yield stateful_conn
+        
+    app.dependency_overrides[get_db] = mock_get_db
+    
+    try:
+        now = int(time.time())
+        params = make_widget_params("12345", settings.TELEGRAM_BOT_TOKEN, now)
+        
+        response = client.get("/auth/telegram", params=params, follow_redirects=False)
+        assert response.status_code in [302, 303, 307]
+        
+        # Verify UPDATE users query WAS executed
+        updates = [q for q, p in stateful_conn._cursor.executed if "UPDATE users" in q]
+        assert len(updates) == 1
+        
+        # 2. Reset query log and test scenario where details are identical (UPDATE should NOT run!)
+        stateful_conn._cursor.executed = []
+        stateful_conn._cursor.fetchone_result = ("Test", "testuser") # matches make_widget_params
+        
+        response2 = client.get("/auth/telegram", params=params, follow_redirects=False)
+        assert response2.status_code in [302, 303, 307]
+        
+        # Verify SELECT was executed, but UPDATE was skipped!
+        selects = [q for q, p in stateful_conn._cursor.executed if "SELECT first_name" in q]
+        updates2 = [q for q, p in stateful_conn._cursor.executed if "UPDATE users" in q]
+        assert len(selects) == 1
+        assert len(updates2) == 0
+        
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+

@@ -40,6 +40,7 @@ if count > limit then
     if oldest_list and #oldest_list > 0 then
         oldest = oldest_list[1]
     end
+    redis.call("ZREM", key, member_id)
 end
 
 return {count, oldest}
@@ -100,6 +101,12 @@ async def check_rate_limit(
             # Bound retry_after between [0, window_seconds]
             retry_after = max(0.0, min(float(window_seconds), retry_after))
             
+            # Emit structured telemetry log event name RATE_LIMIT_EXCEEDED
+            import logging
+            logging.getLogger("backend.security").error(
+                "Security telemetry: event=RATE_LIMIT_EXCEEDED prefix=%s identifier=%s count=%d",
+                key_prefix, user_id, count
+            )
             logger.warning("Rate limit exceeded for key %s: count=%d, retry_after=%.2fs", key, count, retry_after)
             raise RateLimitExceeded(retry_after=retry_after)
             
@@ -131,4 +138,73 @@ def rate_limit(
             limit=limit,
             window_seconds=window,
         )
+    return _dependency
+
+
+def rate_limit_by_route(
+    prefix: str,
+    limit: int,
+    window: int = 60,
+    burst: int = 0
+):
+    """
+    FastAPI dependency factory that returns a dependency check for route rate limits.
+    Key precedence: Authenticated -> user_id, Unauthenticated -> IP address.
+    """
+    from fastapi import Request
+    import urllib.parse
+    import json
+    import jwt
+    from backend.config import settings
+    
+    async def _dependency(request: Request):
+        user_id = None
+        try:
+            # 1. Try JWT cookie or Bearer header
+            token = (
+                request.cookies.get("jwt")
+                or request.cookies.get("recall_session")
+            )
+            auth_header = request.headers.get("Authorization")
+            if not token and auth_header and auth_header.startswith("Bearer "):
+                token = auth_header.split(" ", 1)[1].strip()
+                
+            if token:
+                try:
+                    payload = jwt.decode(token, settings.JWT_SECRET, algorithms=["HS256"])
+                    user_id = payload.get("sub")
+                except Exception:
+                    pass
+            
+            # 2. Try TelegramInitData header
+            if user_id is None and auth_header and auth_header.startswith("TelegramInitData "):
+                init_data_raw = auth_header[len("TelegramInitData "):]
+                params = dict(urllib.parse.parse_qsl(init_data_raw, keep_blank_values=True))
+                user_json = params.get('user')
+                if user_json:
+                    user_data = json.loads(user_json)
+                    tg_id = user_data.get('id')
+                    if tg_id:
+                        user_id = f"tg:{tg_id}"
+        except Exception:
+            pass
+            
+        if user_id is not None:
+            key_id = f"user:{user_id}"
+        else:
+            client_ip = "unknown"
+            if request.client:
+                client_ip = request.client.host
+            forwarded_for = request.headers.get("x-forwarded-for")
+            if forwarded_for:
+                client_ip = forwarded_for.split(",")[0].strip()
+            key_id = f"ip:{client_ip}"
+            
+        await check_rate_limit(
+            user_id=key_id,
+            key_prefix=prefix,
+            limit=limit + burst,
+            window_seconds=window,
+        )
+        
     return _dependency

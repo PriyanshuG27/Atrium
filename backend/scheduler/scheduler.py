@@ -1193,43 +1193,9 @@ async def partition_creator() -> None:
     Runs on the 25th of each month at 00:00 UTC.
     """
     try:
-        today = datetime.date.today()
-        # Compute M+1 year and month
-        if today.month == 12:
-            next_month_year = today.year + 1
-            next_month_val = 1
-        else:
-            next_month_year = today.year
-            next_month_val = today.month + 1
-
-        # Bounds: start_date is first day of M+1, end_date is first day of M+2
-        start_date = f"{next_month_year:04d}-{next_month_val:02d}-01"
-        
-        if next_month_val == 12:
-            after_next_year = next_month_year + 1
-            after_next_val = 1
-        else:
-            after_next_year = next_month_year
-            after_next_val = next_month_val + 1
-        end_date = f"{after_next_year:04d}-{after_next_val:02d}-01"
-        
-        partition_name = f"items_y{next_month_year:04d}m{next_month_val:02d}"
-
-        # Identifier validation to avoid SQL Injection
-        if not (2000 <= next_month_year <= 2100) or not (1 <= next_month_val <= 12):
-            raise ValueError(f"Calculated invalid year/month bounds: {next_month_year}/{next_month_val}")
-
-        query = f"""
-        CREATE TABLE IF NOT EXISTS {partition_name} PARTITION OF items
-        FOR VALUES FROM ('{start_date} 00:00:00') TO ('{end_date} 00:00:00');
-        """
-        
+        from backend.db.connection import ensure_partitions
         pool = await get_pool()
-        async with pool.connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(query)
-                await conn.commit()
-        logger.info("Successfully checked/created partition: %s", partition_name)
+        await ensure_partitions(pool)
     except Exception as e:
         logger.critical("Partition creation failed: %s", e, exc_info=True)
 
@@ -1883,6 +1849,13 @@ async def onboarding_sequence_dispatcher() -> None:
                             "UPDATE users SET onboarding_day = 5, onboarding_last_sent = CURRENT_TIMESTAMP WHERE id = %s;",
                             (u_id,)
                         )
+                        from backend.services.audit_service import log_audit
+                        await log_audit(
+                            db=conn,
+                            user_id=u_id,
+                            action="complete_onboarding",
+                            details={"method": "onboarding_timeout"}
+                        )
                         await conn.commit()
 
         # 4. Monitor Day 3 (Handoff when they reach >= 5 items)
@@ -1906,6 +1879,13 @@ async def onboarding_sequence_dispatcher() -> None:
                         await cur.execute(
                             "UPDATE users SET onboarding_day = 5, onboarding_last_sent = CURRENT_TIMESTAMP WHERE id = %s;",
                             (u_id,)
+                        )
+                        from backend.services.audit_service import log_audit
+                        await log_audit(
+                            db=conn,
+                            user_id=u_id,
+                            action="complete_onboarding",
+                            details={"method": "node_threshold_met", "node_count": node_count}
                         )
                         await conn.commit()
 
@@ -2932,8 +2912,83 @@ async def start_scheduler(app=None) -> None:
         misfire_grace_time=60
     )
 
+    # 24. observability_metrics_logger (every 5 minutes)
+    _scheduler.add_job(
+        observability_metrics_logger,
+        trigger="interval",
+        minutes=5,
+        id="observability_metrics_logger",
+        misfire_grace_time=60
+    )
+
+    # 25. observability_retention_cleanup (weekly on Sunday at 04:00 UTC)
+    _scheduler.add_job(
+        observability_retention_cleanup,
+        trigger=CronTrigger(day_of_week="sun", hour=4, minute=0, timezone="UTC"),
+        id="observability_retention_cleanup",
+        misfire_grace_time=60
+    )
+
     _scheduler.start()
-    logger.info("Background job scheduler started successfully with all 23 jobs.")
+    logger.info("Background job scheduler started successfully with all 25 jobs.")
+
+
+async def observability_retention_cleanup() -> None:
+    """Invokes the batched retention cleanup for old engagement events and AI logs."""
+    from backend.services.analytics_service import run_retention_cleanup
+    await run_retention_cleanup()
+
+
+async def observability_metrics_logger() -> None:
+    """Scheduled task to collect queue depth, oldest job age (FIFO), and database pool metrics."""
+    import structlog
+    import time
+    import json
+    from datetime import datetime, timezone
+    from backend.services.redis_client import redis
+    import backend.db.connection as db_conn
+
+    logger = structlog.get_logger()
+    try:
+        # 1. Queue depth and oldest task age (assuming FIFO)
+        queue_len = await redis.llen("recall:tasks")
+        
+        oldest_age_seconds = 0.0
+        if queue_len > 0:
+            tail_element = await redis.lindex("recall:tasks", -1)
+            if tail_element:
+                try:
+                    payload = json.loads(tail_element)
+                    created_at = payload.get("created_at")
+                    if created_at:
+                        dt = datetime.fromisoformat(created_at)
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        oldest_age_seconds = (datetime.now(timezone.utc) - dt).total_seconds()
+                except Exception:
+                    pass
+        
+        # 2. Database pool stats
+        pool_stats = {}
+        if db_conn._pool is not None:
+            try:
+                stats = db_conn._pool.pop_stats()
+                pool_stats = {
+                    "pool_size": stats.get("pool_size", 0),
+                    "pool_available": stats.get("pool_available", 0),
+                    "requests_waiting": stats.get("requests_waiting", 0),
+                }
+            except Exception:
+                pass
+
+        logger.info(
+            "observability_metrics",
+            queue_depth=queue_len,
+            oldest_job_age_seconds=round(oldest_age_seconds, 2),
+            db_pool=pool_stats
+        )
+    except Exception as e:
+        logger.error("observability_metrics_logger failed", error=str(e))
 
 
 async def stop_scheduler() -> None:

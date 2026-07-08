@@ -16,7 +16,7 @@ import psycopg
 from backend.middleware.twa_auth import get_current_user, UserContext
 from backend.db.connection import get_db
 from backend.services.sm2 import update_sm2
-from backend.services.rate_limiter import rate_limit
+from backend.services.rate_limiter import rate_limit, rate_limit_by_route
 from backend.models.schemas import (
     ItemResponse,
     ItemCreateRequest,
@@ -162,6 +162,7 @@ async def get_items(
     summary="Save a new item",
     description="Saves a new item (url with optional title) for the authenticated user.",
     responses={401: {"model": ErrorResponse}},
+    dependencies=[Depends(rate_limit_by_route("ingest_url", limit=10, window=60, burst=5))]
 )
 async def create_item(
     req: ItemCreateRequest,
@@ -423,6 +424,7 @@ async def extension_suggest_tags(
     summary="Save content from Chrome Extension",
     description="Saves a page URL or a selection text from the Chrome Extension.",
     responses={401: {"model": ErrorResponse}},
+    dependencies=[Depends(rate_limit_by_route("ingest_url", limit=10, window=60, burst=5))]
 )
 async def extension_save(
     req: ExtensionSaveRequest,
@@ -655,6 +657,7 @@ async def get_item(
     },
 )
 async def delete_item(
+    request: Request,
     item_id: int = Path(..., description="ID of the item to delete."),
     user: UserContext = Depends(get_current_user),
     db: psycopg.AsyncConnection = Depends(get_db),
@@ -694,6 +697,17 @@ async def delete_item(
                     detail="Item not found"
                 )
                 
+            # Log deletion audit event in the same transaction
+            from backend.services.audit_service import log_audit
+            req_id = request.headers.get("x-request-id") or request.headers.get("request-id")
+            await log_audit(
+                db=db,
+                user_id=user.id,
+                action="delete_item",
+                details={"item_id": item_id, "source_type": row[1]},
+                request_id=req_id
+            )
+            
             await db.commit()
             
             # Invalidate graph cache
@@ -731,7 +745,7 @@ from datetime import datetime, timezone
     summary="Search items with RAG",
     description="Performs a hybrid search and generates a synthesised RAG answer if at least 3 sources are found.",
     responses={401: {"model": ErrorResponse}},
-    dependencies=[Depends(rate_limit("search", 60))],
+    dependencies=[Depends(rate_limit_by_route("search", limit=60, window=60, burst=10))],
 )
 async def search_items(
     req: SearchRequest,
@@ -1918,6 +1932,7 @@ async def get_user_me(
     },
 )
 async def update_user_me(
+    request: Request,
     req: UserMeUpdateRequest,
     user: UserContext = Depends(get_current_user),
     db: psycopg.AsyncConnection = Depends(get_db),
@@ -1953,6 +1968,23 @@ async def update_user_me(
             params.append(user.id)
             query = f"UPDATE users SET {', '.join(update_fields)} WHERE id = %s;"
             await cur.execute(query, tuple(params))
+            
+            # Log audit
+            from backend.services.audit_service import log_audit
+            req_id = request.headers.get("x-request-id") or request.headers.get("request-id")
+            details = {}
+            if req.timezone_offset is not None:
+                details["timezone_offset"] = req.timezone_offset
+            if req.digest_enabled is not None:
+                details["digest_enabled"] = req.digest_enabled
+            await log_audit(
+                db=db,
+                user_id=user.id,
+                action="update_settings",
+                details=details,
+                request_id=req_id
+            )
+            
             await db.commit()
 
         # Fetch the updated user details
@@ -2772,7 +2804,8 @@ async def export_zip(
     responses={
         401: {"model": ErrorResponse},
         400: {"model": ErrorResponse, "description": "Invalid file format or failed parsing."},
-    }
+    },
+    dependencies=[Depends(rate_limit_by_route("ingest_upload", limit=15, window=60, burst=5))]
 )
 async def import_zip(
     file: UploadFile = File(...),

@@ -68,6 +68,8 @@ CREATE TABLE IF NOT EXISTS items_y2026m06 PARTITION OF items
 CREATE TABLE IF NOT EXISTS items_y2026m07 PARTITION OF items
      FOR VALUES FROM ('2026-07-01 00:00:00') TO ('2026-08-01 00:00:00');
 
+CREATE TABLE IF NOT EXISTS items_default PARTITION OF items DEFAULT;
+
 -- 5. QUIZZES TABLE
 CREATE TABLE IF NOT EXISTS quizzes (
     id             SERIAL PRIMARY KEY,
@@ -378,6 +380,48 @@ CREATE INDEX IF NOT EXISTS idx_entity_mentions_item ON entity_mentions (item_id)
 
 ALTER TABLE item_chunks ADD COLUMN IF NOT EXISTS chunk_version INT DEFAULT 1;
 CREATE INDEX IF NOT EXISTS idx_item_chunks_version ON item_chunks (chunk_version);
+
+
+-- 15. AUDIT LOGS TABLE
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id          SERIAL PRIMARY KEY,
+    user_id     INT REFERENCES users(id) ON DELETE CASCADE,
+    action      VARCHAR(50) NOT NULL,
+    details     JSONB NOT NULL,
+    request_id  VARCHAR(50),
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs (user_id);
+
+
+-- 16. ENGAGEMENT EVENTS TABLE
+CREATE TABLE IF NOT EXISTS engagement_events (
+    id           SERIAL PRIMARY KEY,
+    user_id      INT REFERENCES users(id) ON DELETE CASCADE,
+    event_type   VARCHAR(50) NOT NULL,
+    details      JSONB DEFAULT '{}'::jsonb,
+    created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_engagement_events_user_type ON engagement_events(user_id, event_type);
+
+
+-- 17. AI COST LOGS TABLE
+CREATE TABLE IF NOT EXISTS ai_cost_logs (
+    id           SERIAL PRIMARY KEY,
+    user_id      INT REFERENCES users(id) ON DELETE CASCADE,
+    request_id   VARCHAR(50),
+    provider     VARCHAR(50) NOT NULL,
+    model_name   VARCHAR(100) NOT NULL,
+    operation    VARCHAR(50) NOT NULL,
+    input_tokens INT DEFAULT 0,
+    output_tokens INT DEFAULT 0,
+    cost_usd     NUMERIC(10, 6) DEFAULT 0.000000,
+    success      BOOLEAN DEFAULT TRUE,
+    retry_count  INT DEFAULT 0,
+    cache_hit    BOOLEAN DEFAULT FALSE,
+    created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_ai_cost_logs_user_request ON ai_cost_logs(user_id, request_id);
 
 
 

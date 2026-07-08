@@ -167,6 +167,17 @@ class ExecutionEngine:
                         messages.append({"role": "system", "content": system_prompt})
                     messages.append({"role": "user", "content": user_prompt})
 
+                    # PII Masking before outgoing payload and debug logging
+                    from backend.services.pii_masker import mask_payload
+                    masked_messages = mask_payload(messages)
+                    if masked_messages != messages:
+                        import logging
+                        logging.getLogger("backend.security").info(
+                            "Security telemetry: event=PII_MASK_APPLIED request_id=%s provider=%s model=%s",
+                            context.request_id, provider_name, model_id
+                        )
+                        messages = masked_messages
+
                     t0 = time.perf_counter()
                     try:
                         # Check model deprecation status

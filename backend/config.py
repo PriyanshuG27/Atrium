@@ -48,6 +48,17 @@ class Settings(BaseSettings):
 
     ENV: str = "development"
     USE_NEW_CASCADE: bool = True
+    ALLOW_PRIVATE_IPS: bool = False
+    CACHE_MAX_ENTRIES: int = 1000
+    CACHE_TTL_SECONDS: int = 3600
+
+    # Sentry & Observability configuration
+    SENTRY_DSN: str | None = None
+    SENTRY_ENV: str = "development"
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.1
+    LOG_JSON: bool = True
+    LOG_SAMPLE_RATE: float = 1.0
+    LOG_HASH_SECRET: str = "default_observability_secret_salt"
 
     # Reranker settings
     ENABLE_RERANKING: bool = True

@@ -72,9 +72,65 @@ async def open_pool() -> None:
             await conn.execute(schema_sql)
             await conn.commit()
         logger.info("Dynamic schema check completed: tables and columns verified/added successfully from schema.sql.")
+        await ensure_partitions(_pool)
         await seed_static_centroids(_pool)
     except Exception as ddl_err:
         logger.error("Failed to run dynamic schema update: %s", ddl_err)
+
+
+async def ensure_partitions(pool) -> None:
+    """
+    Acquire a transaction-level advisory lock to ensure current and next month partitions
+    are created safely and without concurrent DDL lock contention.
+    """
+    import datetime
+    try:
+        today = datetime.date.today()
+        # We need current month (M) and next month (M+1)
+        months_to_create = []
+        
+        # 1. Current month
+        months_to_create.append((today.year, today.month))
+        
+        # 2. Next month
+        if today.month == 12:
+            months_to_create.append((today.year + 1, 1))
+        else:
+            months_to_create.append((today.year, today.month + 1))
+
+        async with pool.connection() as conn:
+            async with conn.cursor() as cur:
+                # Acquire transactional advisory lock. Safe: automatically released on commit/rollback.
+                # Lock ID: 123456789
+                await cur.execute("SELECT pg_advisory_xact_lock(123456789);")
+                
+                for year, month in months_to_create:
+                    partition_name = f"items_y{year:04d}m{month:02d}"
+                    
+                    # Compute bounds
+                    start_date = f"{year:04d}-{month:02d}-01"
+                    if month == 12:
+                        next_year = year + 1
+                        next_month = 1
+                    else:
+                        next_year = year
+                        next_month = month + 1
+                    end_date = f"{next_year:04d}-{next_month:02d}-01"
+                    
+                    # Identifier validation (sanity checks to prevent injection)
+                    if not (2000 <= year <= 2100) or not (1 <= month <= 12):
+                        raise ValueError(f"Invalid year/month calculated: {year}/{month}")
+                        
+                    query = f"""
+                    CREATE TABLE IF NOT EXISTS {partition_name} PARTITION OF items
+                    FOR VALUES FROM ('{start_date} 00:00:00') TO ('{end_date} 00:00:00');
+                    """
+                    await cur.execute(query)
+            await conn.commit()
+        logger.info("Partition pre-creation completed successfully.")
+    except Exception as e:
+        logger.error("Failed to pre-create partitions on startup: %s", e, exc_info=True)
+        raise
 
 
 async def seed_static_centroids(pool) -> None:
@@ -189,6 +245,19 @@ async def get_db() -> AsyncGenerator[psycopg.AsyncConnection, None]:
             status_code=503,
             detail="Database temporarily unavailable. Please try again."
         ) from exc
+
+
+@asynccontextmanager
+async def get_connection() -> AsyncGenerator[psycopg.AsyncConnection, None]:
+    """
+    Public context manager to yield a checked-out AsyncConnection from the pool.
+    Useful for background tasks and non-FastAPI request contexts.
+    """
+    if _pool is None:
+        raise RuntimeError("Database connection pool is not initialized.")
+    async with _pool.connection() as conn:
+        await conn.execute("SET statement_timeout = '30s'")
+        yield conn
 
 
 # ---------------------------------------------------------------------------

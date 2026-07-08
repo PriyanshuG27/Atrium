@@ -180,6 +180,37 @@ async def lifespan(app: FastAPI):
             "Check that all required environment variables are set."
         )
 
+    # Initialize structured logging config
+    from backend.services.logging_config import configure_logging
+    configure_logging()
+
+    # Initialize Sentry if DSN is set
+    if settings.SENTRY_DSN:
+        import sentry_sdk
+        from sentry_sdk.integrations.fastapi import FastAPIIntegration
+        from backend.services.pii_masker import mask_payload
+
+        def before_send(event, hint):
+            # Scrub any potential PII values in extra payload fields recursively
+            if "extra" in event:
+                event["extra"] = mask_payload(event["extra"])
+            # Scrub stack trace local variables to prevent stack frame PII leakage
+            if "exception" in event and "values" in event["exception"]:
+                for value in event["exception"]["values"]:
+                    if "stacktrace" in value and "frames" in value["stacktrace"]:
+                        for frame in value["stacktrace"]["frames"]:
+                            if "vars" in frame:
+                                frame["vars"] = mask_payload(frame["vars"])
+            return event
+
+        sentry_sdk.init(
+            dsn=settings.SENTRY_DSN,
+            environment=settings.SENTRY_ENV,
+            traces_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE,
+            integrations=[FastAPIIntegration()],
+            before_send=before_send
+        )
+
     # Validate cryptographic keys — raises ValueError on bad format
     settings.validate_crypto_keys()
     logger.info("Recall API started — crypto keys validated.")
@@ -252,6 +283,10 @@ async def lifespan(app: FastAPI):
     yield  # ← application runs here
 
     # --- SHUTDOWN ---
+    # Gracefully await and cancel outstanding analytics background tasks
+    from backend.services.analytics_service import shutdown_background_tasks
+    await shutdown_background_tasks(timeout=5.0)
+
     # Cancel the task worker loop
     if hasattr(app.state, "worker_task"):
         app.state.worker_task.cancel()
@@ -341,6 +376,10 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization"],
 )
 
+
+
+from backend.middleware.structured_logging_middleware import structured_logging_middleware
+app.middleware("http")(structured_logging_middleware)
 
 # ---------------------------------------------------------------------------
 from backend.services.rate_limiter import RateLimitExceeded

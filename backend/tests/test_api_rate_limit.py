@@ -105,12 +105,14 @@ def get_auth_token(user_id=42):
 
 
 def test_exempt_routes(client):
-    # /auth/telegram (and auth routes generally) should not trigger rate limit checks.
+    # /health should not trigger rate limit checks, but auth telegram widget should.
     with mock.patch("backend.services.redis_client.redis.eval") as mock_eval:
         resp = client.get("/health")
         assert resp.status_code == 200
-        client.get("/auth/telegram")
         assert not mock_eval.called
+        
+        client.get("/auth/telegram")
+        assert mock_eval.called
 
 
 def test_rate_limit_exceeded_response(client):
@@ -118,8 +120,8 @@ def test_rate_limit_exceeded_response(client):
     db_state = MockRedisRateLimitState()
     
     with mock.patch("backend.services.redis_client.redis.eval", side_effect=db_state.eval):
-        # POST /api/search limit = 60
-        for _ in range(60):
+        # POST /api/search limit = 60 + burst 10 = 70
+        for _ in range(70):
             resp = client.post("/api/search", json={"query": "test"}, cookies={"recall_session": token})
             assert resp.status_code == 200
             
@@ -133,7 +135,7 @@ def test_rate_limit_exceeded_response(client):
         assert "Retry-After" in resp.headers
         assert resp.headers["Retry-After"] == str(data["retry_after"])
         
-        assert "rate:search:42" in db_state.state
+        assert "rate:search:user:42" in db_state.state
 
 
 def test_different_limits_search_vs_sync(client):

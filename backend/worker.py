@@ -528,14 +528,20 @@ async def process_task(task: Dict[str, Any], task_json: Optional[str] = None) ->
         worker_semaphore = asyncio.Semaphore(3)
         
     async with worker_semaphore:
+        from structlog.contextvars import bind_contextvars, clear_contextvars
+        chat_id = str(task.get("chat_id"))
+        correlation_id = task.get("correlation_id") or str(uuid.uuid4())
+        
+        clear_contextvars()
+        bind_contextvars(correlation_id=correlation_id, chat_id=chat_id)
+        
         try:
             update_id = task.get("update_id")
-            chat_id = str(task.get("chat_id"))
             content_type = task.get("content_type")
             file_id = task.get("file_id")
             text_content = task.get("text")
             
-            logger.info("Processing task: update_id=%s, chat_id=%s, type=%s", update_id, chat_id, content_type)
+            logger.info("Processing task: update_id=%s, type=%s", update_id, content_type)
             
             # Verify pool is open
             if _pool is None:
@@ -550,6 +556,8 @@ async def process_task(task: Dict[str, Any], task_json: Optional[str] = None) ->
                     await conn.execute("SET statement_timeout = '30s'")
                     user_id = await upsert_user(chat_id, conn)
                     await conn.commit()
+                
+                bind_contextvars(correlation_id=correlation_id, chat_id=chat_id, user_id=user_id)
 
                 # Check for previous ignore once before starting steady-state ingestion
                 prev_pending = await redis.get(f"pending_context:{chat_id}")

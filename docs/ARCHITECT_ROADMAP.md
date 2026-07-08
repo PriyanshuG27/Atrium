@@ -178,38 +178,27 @@ Add improvements that dramatically increase Recall's quality **without changing 
 ## Phase 3 — Production Hardening 🔒
 Focus on making Recall safe, observable, and reliable based on the finalized intelligence pipeline.
 
-### 1. Security
-*   **PII Masking**: Prevent sending sensitive data to external AI models.
-*   **Audit Logging**: Maintain access and alteration logs for security auditing.
-*   **Rate Limiting**: Enforce request rate limits to prevent denial-of-service.
-*   **URL Ingestion SSRF Protection**: Implement URL parsing and DNS resolution checks in `scrape_url` to reject local/private IP ranges (RFC 1918 / RFC 5735).
+### Phase 3.1 — Critical Launch Blockers & Security Audits 🛡️
+*   **August 2026 Partition DDL Fallback (Phase 1)**: Add a `DEFAULT` partition to the partitioned `items` table in SQL schema and verify/create current and next month partitions on startup.
+*   **URL Ingestion SSRF Protection (Phase 1)**: Implement URL parsing, scheme validation (only `http`/`https`), and DNS resolution/rebinding checks in `scrape_url` to reject local/private IP ranges (RFC 1918 / RFC 5735).
+*   **Unbounded Memory Eviction in CacheManager (Phase 1)**: Replace the raw class-level dictionary with `cachetools.TTLCache` in `cache_manager.py` (configured via env variables) to prevent OOM memory leaks.
+*   **Rate Limiting**: Enforce request rate limits using Redis on login, URL ingestion, upload, and AI routes to prevent denial-of-service and cost abuse.
+*   **PII Masking**: Prevent sending sensitive data (emails, phone numbers, SSNs, passwords) to external AI models by masking provider payloads and logs.
+*   **Audit Logging**: Maintain access and alteration logs (for deletions, restores, onboarding, settings) including optional request correlation IDs.
 
-### 2. Logging & Analytics
+### Phase 3.2 — Performance & UX Optimization ⚡
+*   **60FPS Canvas Search Recalculation Cache (Phase 2)**: Optimize search query matching inside the MapCanvas draw loop using React `useMemo`/state to avoid nested D3 iteration on every frame.
+*   **Redundant Auth Write Elimination (Phase 2)**: Only update the `users` table on Telegram login if payload values have actually changed.
+*   **Concurrent Reranker Execution (Phase 2)**: [FIXED] Protect only the model loading phase inside `_get_model` to allow concurrent cross-encoder ONNX inferences.
+
+### Phase 3.3 — Logging, Observability & Analytics 📊
 *   **Structured Logging**: Implement `structlog` with unified request/user/task context.
 *   **PostgreSQL Analytics**: Product, AI, and cost analytics tracked inside PostgreSQL.
-*   **Asynchronous Telemetry Database Logs**: Buffer and batch cost logs asynchronously using background tasks to prevent request blocking.
-
-### 3. Observability, Performance & Scalability
 *   **Sentry**: Crash and error reporting.
 *   **Monitoring & Alerts**: API/Database query latency, queue depth monitoring.
 *   **Performance Tuning**: Measure and record current baseline latency before setting hard targets (e.g., vector search < 10ms, text search < 5ms).
-*   **August 2026 Partition DDL Fallback**: Add a `DEFAULT` partition to the partitioned `items` table in SQL schema and verify/create current partition on startup.
-*   **Safe Database Connections in Webhook Background Tasks**: Check out dedicated pool connections for asynchronous background jobs to prevent closed connection crashes.
-*   **Unbounded Memory Eviction in CacheManager**: Replace the raw class-level dictionary with `cachetools.TTLCache` or direct Redis storage to prevent OOM memory leaks.
-*   **60FPS Canvas Search Recalculation Cache**: Optimize search query matching inside the MapCanvas draw loop using React `useMemo`/state to avoid nested D3 iteration on every frame.
-*   **Quadratic Edge Resolution Optimization**: Pre-index the nodes array into a Map lookup inside `MapCanvas.jsx` to prevent $O(E \times N)$ scans on every frame.
-*   **Quadratic Nightly Candidate Scan Optimization**: Restrict similarity searches in nightly cron jobs to items added/updated in the last 24 hours.
-*   **Redundant Auth Write Elimination**: Only update the `users` table on Telegram login if payload values have actually changed.
-*   **Concurrent Reranker Execution**: Run ONNX cross-encoder model inference in a separate process pool executor rather than using a global event loop lock.
-*   **Semaphore-Aware Worker Task Pop**: Acquire the concurrency semaphore prior to popping tasks from the Redis queue to prevent memory exhaustion under queue spikes.
-*   **Parallel Chunk Embedding Generation**: Batch chunk embedding requests in `pdf_ingester.py` using `asyncio.gather`.
-*   **Configurable Database Pool Limits**: Make pool boundaries configurable via environment variables.
-*   **Poison Ingestion Job Safeguards**: Enforce size and chunk limits on incoming PDF uploads.
-*   **Referential Integrity for Partitioned Items**: Write database triggers to cascade deletes from partitioned `items` to child tables (`quizzes`, `reminders`, `insight_candidates`).
-*   **Stateful Webhook Debounce Transition**: Move webhook debounce timers out of in-memory sleep into a persistent/distributed queue system to protect against container restarts.
-*   **Partition Pruning for Vector Searches**: Partition by user ID hash instead of date range, or include time-based bounds to enable partition pruning in PGvector searches.
 
-### 4. Deploy & Backups
+### Phase 3.4 — Deploy & Backups 🚀
 *   **Deployment Automation**: Configs for Vercel, Render, Modal.
 *   **Backup & Rollback Procedures**: Automated database backups and zero-downtime rollback scripts.
 
@@ -236,23 +225,42 @@ Ship Recall to production users.
 
 ---
 
-## Phase 4 — Knowledge Evolution 🧬
-Evolve the system to support advanced memory and traversal capabilities.
-* **Typed Memory**: Segment memory into working, episodic, and semantic layers.
-* **Memory Consolidation**: Implement background consolidation of old memories.
-* **Better Graph Traversal & GraphRAG**: Local and global query answering over the knowledge graph.
-* **Evaluation Pipeline Maturation (CI-integrated Ragas/DSPy)**: Maturation of the evaluation pipelines to support automated continuous integration testing for retrieval and generation quality.
-* **Knowledge Health Scoring**: Periodically check for broken links and outdated information.
+## Phase 4 — Knowledge Evolution & Intermediate Growth Scaling 🧬
+Evolve the system to support advanced memory capabilities while optimizing intermediate scalability (5,000+ users).
+
+### 1. Knowledge & Memory Evolution
+*   **Typed Memory**: Segment memory into working, episodic, and semantic layers.
+*   **Memory Consolidation**: Implement background consolidation of old memories.
+*   **Better Graph Traversal & GraphRAG**: Local and global query answering over the knowledge graph.
+*   **Evaluation Pipeline Maturation (CI-integrated Ragas/DSPy)**: Maturation of the evaluation pipelines to support automated continuous integration testing for retrieval and generation quality.
+*   **Knowledge Health Scoring**: Periodically check for broken links and outdated information.
+
+### 2. Intermediate Growth Scaling (5,000+ Users)
+*   **Connection Pool Starvation via Background Tasks**: Do not pass request-scoped database connections to background tasks; instead, check out a fresh connection from the pool inside the background task execution scope.
+*   **Unbounded Task Extraction in Background Worker**: Acquire the worker concurrency semaphore slot *before* popping the next task from the Redis queue.
+*   **Parallel Chunk Embedding Generation**: Batch and execute embedding calls concurrently using `asyncio.gather` in `pdf_ingester.py`.
+*   **Configurable Database Pool Limits**: Move connection pool boundaries (`max_size`) to environment variables.
+*   **Poison PDF Ingestions**: Add size bounds and page length limits to uploaded documents.
+*   **Lack of Chunk Overlap in PDF Chunking**: Implement sliding window chunking with an overlap ratio (e.g. 50–75 words overlap).
+*   **Orphaned Records on Item Deletion**: Add cascading database triggers on `items` partitions to clean up child table matches on deletion.
+*   **Stateful Webhook Debouncing**: Use Redis keyspace notifications or a robust task scheduler for delayed tasks instead of in-memory sleeps.
+*   **Partition Pruning for Vector Search**: Partition the main table by `user_id` hash rather than `created_at` range to enable partition pruning in PGvector searches.
 
 ---
 
 ## Phase 5 — Scale & Infrastructure ⚙️
-Only after users and metrics justify it:
-* **Vector & Graph DBs**: Transition to standalone Qdrant or Neo4j.
-* **Orchestration**: Implement LangGraph or advanced worker setups.
-* **Observability**: OpenTelemetry instrumentation.
-* **Analytics**: Move analytics to ClickHouse.
-* **Infrastructure**: Migrate to Kubernetes or distributed queues if needed.
+Only after users and metrics justify it (50,000+ users):
+
+### 1. Long-Term Optimizations
+*   **Multi-Tenant HNSW Vector Index Contention**: Move to partitioned HNSW indexes or run user-filtered flat index searches to prevent traversal degradation at scale.
+*   **Upstash Redis REST Call Costs**: Transition to standard TCP Redis protocol (using `redis-py` client) to eliminate REST HTTP overhead and reduce request costs.
+
+### 2. Scale & Architecture
+*   **Vector & Graph DBs**: Transition to standalone Qdrant or Neo4j.
+*   **Orchestration**: Implement LangGraph or advanced worker setups.
+*   **Observability**: OpenTelemetry instrumentation.
+*   **Analytics**: Move analytics to ClickHouse.
+*   **Infrastructure**: Migrate to Kubernetes or distributed queues if needed.
 * > [!WARNING]
   > **Scale Triggers & Bottlenecks**: Louvain clustering runs in \(O(N^2)\) time relative to the number of nodes. Before migrating to Neo4j/ClickHouse, this CPU bottleneck on the single scheduler process will trigger long locks; Louvain must be offloaded to background worker queues before \(N > 5000\).
 

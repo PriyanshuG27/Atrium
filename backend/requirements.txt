@@ -48,3 +48,7 @@ pytest-cov>=5.0.0
 pytest-mock>=3.11.1
 pytest-xdist>=3.6.1
 psutil>=5.9.8
+
+# Observability, Tracing & Structured Logging
+structlog>=24.2.0
+sentry-sdk[fastapi]>=2.5.1

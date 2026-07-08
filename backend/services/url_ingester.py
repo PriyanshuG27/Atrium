@@ -52,6 +52,9 @@ async def scrape_url(url: str, user_id = None, db = None) -> tuple[str, str]:
     Supports parsing Google Docs, Sheets, Slides, and general Google Drive files.
     If scraping fails, returns (URL, URL).
     """
+    from backend.services.http_client import validate_url_scheme
+    validate_url_scheme(url)
+
     import re
     import os
 

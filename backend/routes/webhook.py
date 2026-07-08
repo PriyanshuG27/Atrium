@@ -924,6 +924,17 @@ async def telegram_webhook(
                 async with db.cursor() as cur:
                     await cur.execute("DELETE FROM items WHERE user_id = %s;", (user_id,))
                     await cur.execute("UPDATE users SET onboarding_day = 0, onboarding_last_sent = NULL, timezone_offset = 0 WHERE id = %s;", (user_id,))
+                    
+                    # Log audit
+                    from backend.services.audit_service import log_audit
+                    await log_audit(
+                        db=db,
+                        user_id=user_id,
+                        action="reset_onboarding",
+                        details={"channel": "telegram"},
+                        request_id=f"tg_{chat_id}"
+                    )
+                    
                     await db.commit()
                 await redis.delete(f"onboarding_step:{chat_id}")
                 await redis.delete(f"pending_context:{chat_id}")
@@ -1224,6 +1235,15 @@ async def telegram_webhook(
                                 (item_id, user_id)
                             )
                             rows_deleted = cur.rowcount
+                            if rows_deleted > 0:
+                                from backend.services.audit_service import log_audit
+                                await log_audit(
+                                    db=db,
+                                    user_id=user_id,
+                                    action="delete_item",
+                                    details={"item_id": item_id, "channel": "telegram"},
+                                    request_id=f"tg_{chat_id}"
+                                )
                             await db.commit()
                         if rows_deleted > 0:
                             delete_msg = "Deleted ✓"
