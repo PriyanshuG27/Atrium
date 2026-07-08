@@ -351,7 +351,8 @@ async def hybrid_search(
     source_types: Optional[List[str]] = None,
     tags: Optional[List[str]] = None,
     start_date: Optional[datetime] = None,
-    end_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None,
+    bypass_rewrite: bool = False
 ) -> List[Dict[str, Any]]:
     """
     Perform a hybrid search using pgvector (HNSW cosine distance) on both items and item_chunks,
@@ -360,7 +361,11 @@ async def hybrid_search(
     Combines results using Reciprocal Rank Fusion (RRF) and runs a SOTA reranker step.
     """
     # Step 1: Optional Query Rewriting & Generation of search term parameters
-    rewritten, synonyms = await rewrite_search_query(query)
+    if bypass_rewrite:
+        rewritten = query
+        synonyms = []
+    else:
+        rewritten, synonyms = await rewrite_search_query(query)
 
     t_emb_start = time.perf_counter()
     query_embedding = await embed_text(rewritten)
@@ -429,10 +434,10 @@ async def hybrid_search(
             FROM combined_vector_ids
         ),
         fts_search AS (
-            SELECT i.id, ROW_NUMBER() OVER (ORDER BY ts_rank_cd(to_tsvector('english', COALESCE(i.summary, '')), query_ts) DESC) as rank
-            FROM items i, {tsquery_expression} AS query_ts
-            WHERE i.user_id = %s AND to_tsvector('english', COALESCE(i.summary, '')) @@ query_ts {filter_clause}
-            ORDER BY ts_rank_cd(to_tsvector('english', COALESCE(i.summary, '')), query_ts) DESC
+            SELECT i.id, ROW_NUMBER() OVER (ORDER BY ts_rank_cd(to_tsvector('english', COALESCE(i.summary, '')), query_ts.query_ts) DESC) as rank
+            FROM items i, (SELECT {tsquery_expression}) AS query_ts(query_ts)
+            WHERE i.user_id = %s AND to_tsvector('english', COALESCE(i.summary, '')) @@ query_ts.query_ts {filter_clause}
+            ORDER BY ts_rank_cd(to_tsvector('english', COALESCE(i.summary, '')), query_ts.query_ts) DESC
             LIMIT %s
         ),
         fts_count AS (

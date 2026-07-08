@@ -127,7 +127,7 @@ async def test_hybrid_search_fts_sql_construction(mock_rewrite, mock_embed):
         assert "trigram_search" in query
         assert "ts_rank_cd" in query
         assert "to_tsvector('english'" in query
-        assert "websearch_to_tsquery('english', %s) || to_tsquery('english', %s) || to_tsquery('english', %s)" in query
+        assert "(SELECT (websearch_to_tsquery('english', %s) || to_tsquery('english', %s) || to_tsquery('english', %s))) AS query_ts(query_ts)" in query
 
         # Ensure all synonyms are parameterized as separate elements (no concatenation)
         assert params[10] == "fastapi concurrency limits"

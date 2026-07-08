@@ -757,7 +757,8 @@ async def search_items(
         source_types=req.source_types,
         tags=req.tags,
         start_date=req.start_date,
-        end_date=req.end_date
+        end_date=req.end_date,
+        bypass_rewrite=req.rag
     )
     
     # Limit results as requested (up to 5 for summaries mapping)
