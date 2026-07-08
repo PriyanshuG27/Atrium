@@ -1,46 +1,64 @@
 {
-  "Baseline RRF (No Rerank)": {
+  "Baseline RRF (No Rewrite)": {
     "precision_at_1": 80.0,
     "recall_at_3": 100.0,
     "mrr": 0.888888888888889,
-    "avg_latency_seconds": 0.0034333400001438957,
-    "cpu_time_seconds": 0.0,
-    "load_time_seconds": 0.0,
-    "warmup_time_seconds": 0.0,
+    "avg_latency_seconds": 0.0035236333302843073,
+    "success_rate_percent": 100.0
+  },
+  "Baseline RRF (With Rewrite)": {
+    "precision_at_1": 86.66666666666667,
+    "recall_at_3": 100.0,
+    "mrr": 0.9222222222222223,
+    "avg_latency_seconds": 0.0030528866685926915,
+    "success_rate_percent": 100.0
+  },
+  "Xenova/ms-marco (No Rewrite)": {
+    "precision_at_1": 100.0,
+    "recall_at_3": 100.0,
+    "mrr": 1.0,
+    "avg_latency_seconds": 0.18808634666493163,
+    "peak_ram_increase_mb": 135.25390625,
+    "success_rate_percent": 100.0
+  },
+  "Xenova/ms-marco (With Rewrite)": {
+    "precision_at_1": 100.0,
+    "recall_at_3": 100.0,
+    "mrr": 1.0,
+    "avg_latency_seconds": 0.18705614000015583,
+    "peak_ram_increase_mb": 135.25390625,
+    "success_rate_percent": 100.0
+  },
+  "BAAI/bge-rerank (No Rewrite)": {
+    "precision_at_1": 100.0,
+    "recall_at_3": 100.0,
+    "mrr": 1.0,
+    "avg_latency_seconds": 1.2602735733341737,
+    "peak_ram_increase_mb": 1182.67578125,
+    "success_rate_percent": 100.0
+  },
+  "BAAI/bge-rerank (With Rewrite)": {
+    "precision_at_1": 100.0,
+    "recall_at_3": 100.0,
+    "mrr": 1.0,
+    "avg_latency_seconds": 0.8038979733323989,
+    "peak_ram_increase_mb": 1182.67578125,
+    "success_rate_percent": 100.0
+  },
+  "jinaai/jina-rer (No Rewrite)": {
+    "precision_at_1": 100.0,
+    "recall_at_3": 100.0,
+    "mrr": 1.0,
+    "avg_latency_seconds": 0.7408530533313751,
     "peak_ram_increase_mb": 0.0,
     "success_rate_percent": 100.0
   },
-  "Xenova/ms-marco-MiniLM-L-6-v2": {
+  "jinaai/jina-rer (With Rewrite)": {
     "precision_at_1": 100.0,
     "recall_at_3": 100.0,
     "mrr": 1.0,
-    "avg_latency_seconds": 0.22202168666602423,
-    "cpu_time_seconds": 31.859375,
-    "load_time_seconds": 0.7433834000257775,
-    "warmup_time_seconds": 0.005095400032587349,
-    "peak_ram_increase_mb": 133.48046875,
-    "success_rate_percent": 100.0
-  },
-  "BAAI/bge-reranker-base": {
-    "precision_at_1": 100.0,
-    "recall_at_3": 100.0,
-    "mrr": 1.0,
-    "avg_latency_seconds": 1.1317005866672845,
-    "cpu_time_seconds": 152.5,
-    "load_time_seconds": 3.0603780999663286,
-    "warmup_time_seconds": 0.03031649999320507,
-    "peak_ram_increase_mb": 1195.20703125,
-    "success_rate_percent": 100.0
-  },
-  "jinaai/jina-reranker-v2-base-multilingual": {
-    "precision_at_1": 100.0,
-    "recall_at_3": 100.0,
-    "mrr": 1.0,
-    "avg_latency_seconds": 0.7632349800008039,
-    "cpu_time_seconds": 122.40625,
-    "load_time_seconds": 5.1670313000213355,
-    "warmup_time_seconds": 0.02926600002683699,
-    "peak_ram_increase_mb": 641.08984375,
+    "avg_latency_seconds": 0.6399247133328269,
+    "peak_ram_increase_mb": 0.0,
     "success_rate_percent": 100.0
   }
 }

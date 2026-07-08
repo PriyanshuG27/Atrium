@@ -164,12 +164,13 @@ async def test_search_service_user_isolation_and_sql_composition():
     assert "summary %% %s" in query
     assert "similarity(summary, %s)" in query
     
-    # Check that user_id is bound in the key positions (1, 6, 11, 15, 18)
+    # Check that user_id is bound in the key positions
     assert params[1] == 42
     assert params[6] == 42
     assert params[11] == 42
-    assert params[15] == 42
-    assert params[18] == 42
+    assert params[14] == 42
+    assert params[24] == 42
+    assert params[27] == 42
 
 def test_search_api_endpoint_success(client):
     """POST /api/search with valid auth returns blended reciprocal rank fusion (RRF) results."""
@@ -247,8 +248,9 @@ def test_search_cross_user_isolation(client):
     assert consolidated_params[1] == 100
     assert consolidated_params[6] == 100
     assert consolidated_params[11] == 100
-    assert consolidated_params[15] == 100
-    assert consolidated_params[18] == 100
+    assert consolidated_params[14] == 100
+    assert consolidated_params[24] == 100
+    assert consolidated_params[27] == 100
 
 @pytest.mark.anyio
 async def test_embed_text_cascades():

@@ -83,8 +83,8 @@ async def test_hybrid_search_equivalence_without_filters():
         assert "tags &&" not in query_sql
         assert "created_at >=" not in query_sql
         
-        # Confirm default baseline parameter count (17 placeholders: 5 direct, 4 chunk, 1 combined, 4 text, 3 best, 2 final)
-        assert len(params) == 20
+        # Confirm default baseline parameter count
+        assert len(params) == 29
 
 @pytest.mark.anyio
 async def test_hybrid_search_parameter_ordering_combinatorics():

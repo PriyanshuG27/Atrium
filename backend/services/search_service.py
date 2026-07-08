@@ -1,7 +1,10 @@
 import logging
 import math
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional
+import asyncio
+import re
+import json
+from typing import List, Dict, Any, Optional, Tuple
 import httpx
 from psycopg import AsyncConnection
 
@@ -188,8 +191,153 @@ async def _generate_embedding_uncached(text: str) -> List[float]:
     logger.warning("All embedding generation methods failed. Returning fallback mock vector.")
     val = 1.0 / (384 ** 0.5)
     return [val] * 384
+def should_bypass_rewrite(query: str) -> bool:
+    """
+    Heuristically checks if a query should bypass the LLM rewriter to save latency & cost.
+    Bypasses if:
+    - Word count <= QUERY_REWRITE_MAX_WORDS
+    - Query is quoted (e.g. '"fastapi guide"')
+    - Query is a raw tag or hashtag format (e.g. '#work', 'work')
+    - Query matches a simple alphanumeric exact pattern without spaces
+    """
+    q_trimmed = query.strip()
+    if not q_trimmed:
+        return True
+        
+    # Check if quoted
+    if (q_trimmed.startswith('"') and q_trimmed.endswith('"')) or \
+       (q_trimmed.startswith("'") and q_trimmed.endswith("'")):
+        return True
+        
+    # Check word count
+    words = q_trimmed.split()
+    if len(words) <= settings.QUERY_REWRITE_MAX_WORDS:
+        return True
+        
+    # Check exact alphanumeric word tag (no spaces)
+    if len(words) == 1:
+        return True
+        
+    return False
 
+async def rewrite_search_query(query: str) -> Tuple[str, List[str]]:
+    """
+    Standardize and expand search queries before execution using the AICascade.
+    Strictly instructs the model to preserve intent, normalize wording, and generate synonyms.
+    Restricts synonyms to 2-3 single keywords (no phrases/explanations).
+    Enforces a strict timeout task with cancellation to prevent latency penalty.
+    """
+    # 1. Check heuristic bypass
+    if should_bypass_rewrite(query):
+        logger.info("Bypassed search query rewrite heuristically.")
+        return query, []
+        
+    if not settings.ENABLE_QUERY_REWRITING:
+        return query, []
 
+    from backend.services.ai_cascade.facade import AICascade
+    cascade = AICascade()
+
+    prompt = (
+        "You are an expert search query optimization agent.\n"
+        "Your task is to rewrite the user's raw search query to improve retrieval quality in a vector database and full-text keyword search.\n\n"
+        "STRICT CONSTRAINTS:\n"
+        "1. Rewrite the query for retrieval. DO NOT answer the query. DO NOT infer missing facts.\n"
+        "2. Preserve the query's original intent exactly. DO NOT narrow the scope. DO NOT broaden the scope.\n"
+        "3. Only normalize wording and generate close synonyms/alternate terms.\n"
+        "4. Generate a list of 2-3 synonyms. Synonyms must be single keywords, technologies, or concepts. STRICTLY forbid multi-word phrases, sentences, or explanations.\n"
+        "5. Do not introduce named entities that were not present in the user query unless they are direct lexical variants (e.g. 'postgres' -> 'postgresql').\n"
+        "6. Do not introduce named entities that were not present unless they are direct lexical variants.\n\n"
+        "Input query: {query}\n\n"
+        "Output your response strictly as a JSON object matching this schema:\n"
+        "{\n"
+        "  \"rewritten_query\": \"A search query optimized for embedding representation\",\n"
+        "  \"synonyms\": [\"synonym1\", \"synonym2\"]\n"
+        "}"
+    ).replace("{query}", query)
+
+    import time
+    duration_ms = 0.0
+    start_time = time.perf_counter()
+    rewrite_task = None
+    try:
+        # Wrap LLM call in an asyncio task to allow cancellation on timeout
+        async def call_cascade():
+            return await cascade.call_llm(prompt, temperature=0.0)
+            
+        rewrite_task = asyncio.create_task(call_cascade())
+        
+        # Enforce strict timeout
+        raw_res = await asyncio.wait_for(rewrite_task, timeout=settings.QUERY_REWRITE_TIMEOUT_SECONDS)
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        
+        if not raw_res:
+            raise ValueError("Empty response from model.")
+
+        # Clean JSON markdown blocks if present
+        cleaned = re.sub(r"^```json\s*", "", raw_res.strip(), flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s*```$", "", cleaned.strip(), flags=re.IGNORECASE)
+        data = json.loads(cleaned)
+
+        rewritten = data.get("rewritten_query", "").strip() or query
+        synonyms_raw = data.get("synonyms") or []
+        
+        # Bounding synonyms logic:
+        # - Max 3
+        # - Single keywords only (no spaces)
+        # - Lowercase & strip
+        # - Remove overlapping words present in the rewritten query or original query
+        # - Remove duplicates & empty values
+        synonyms = []
+        seen_words = set()
+        for s_str in (rewritten, query):
+            for w in s_str.lower().split():
+                w_clean = re.sub(r"[^\w]+", "", w)
+                if w_clean:
+                    seen_words.add(w_clean)
+
+        for syn in synonyms_raw:
+            if not isinstance(syn, str):
+                continue
+            syn_clean = syn.strip().lower()
+            syn_clean = re.sub(r"[^\w]+", "", syn_clean)
+            if not syn_clean or " " in syn_clean:
+                continue
+            if syn_clean not in seen_words:
+                seen_words.add(syn_clean)
+                synonyms.append(syn_clean)
+                
+        synonyms = synonyms[:3]
+        
+        logger.info(
+            "query_rewrite_success duration_ms=%.1f provider=default",
+            duration_ms
+        )
+        return rewritten, synonyms
+
+    except asyncio.TimeoutError:
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        logger.warning(
+            "query_rewrite_timeout duration_ms=%.1f provider=default",
+            duration_ms
+        )
+        if rewrite_task and not rewrite_task.done():
+            rewrite_task.cancel()
+        return query, []
+    except json.JSONDecodeError as jde:
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        logger.error(
+            "query_rewrite_malformed_json duration_ms=%.1f provider=default error=%s",
+            duration_ms, jde
+        )
+        return query, []
+    except Exception as exc:
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        logger.error(
+            "query_rewrite_provider_error duration_ms=%.1f provider=default error=%s",
+            duration_ms, exc
+        )
+        return query, []
 
 import time
 
@@ -208,9 +356,11 @@ async def hybrid_search(
     Enforces precise database-level metadata filtering dynamically.
     Combines results using Reciprocal Rank Fusion (RRF) and runs a SOTA reranker step.
     """
-    # Step 1: Generate query embedding
+    # Step 1: Optional Query Rewriting & Generation of search term parameters
+    rewritten, synonyms = await rewrite_search_query(query)
+
     t_emb_start = time.perf_counter()
-    query_embedding = await embed_text(query)
+    query_embedding = await embed_text(rewritten)
     t_emb = (time.perf_counter() - t_emb_start) * 1000
 
     is_reranking_active = settings.ENABLE_RERANKING and settings.RERANKER_MODEL != "benchmark_pending"
@@ -219,6 +369,18 @@ async def hybrid_search(
     # Build dynamic filter constraints using explicit table alias "i"
     conditions, filter_params = _build_metadata_filters("i", source_types, tags, start_date, end_date)
     filter_clause = (" AND " + " AND ".join(conditions)) if conditions else ""
+
+    # Build tsquery expression for Full Text Search (FTS)
+    # Default configuration is 'english'; stemming/tokenization is language-specific.
+    tsquery_parts = ["websearch_to_tsquery('english', %s)"]
+    tsquery_params = [rewritten]
+    for syn in synonyms:
+        tsquery_parts.append("to_tsquery('english', %s)")
+        tsquery_params.append(syn)
+    
+    tsquery_expression = " || ".join(tsquery_parts)
+    if len(tsquery_parts) > 1:
+        tsquery_expression = f"({tsquery_expression})"
 
     consolidated_query = f"""
         WITH latest_chunks AS (
@@ -263,17 +425,32 @@ async def hybrid_search(
             SELECT id, ROW_NUMBER() OVER (ORDER BY final_rank) as rank
             FROM combined_vector_ids
         ),
-        text_search AS (
+        fts_search AS (
+            SELECT i.id, ROW_NUMBER() OVER (ORDER BY ts_rank_cd(to_tsvector('english', COALESCE(i.summary, '')), query_ts) DESC) as rank
+            FROM items i, {tsquery_expression} AS query_ts
+            WHERE i.user_id = %s AND to_tsvector('english', COALESCE(i.summary, '')) @@ query_ts {filter_clause}
+            ORDER BY ts_rank_cd(to_tsvector('english', COALESCE(i.summary, '')), query_ts) DESC
+            LIMIT %s
+        ),
+        fts_count AS (
+            SELECT COUNT(*) AS cnt FROM fts_search
+        ),
+        trigram_search AS (
             SELECT i.id, ROW_NUMBER() OVER (ORDER BY similarity(summary, %s) DESC) as rank
-            FROM items i
-            WHERE i.user_id = %s AND i.summary %% %s {filter_clause}
+            FROM items i, fts_count fc
+            WHERE i.user_id = %s AND fc.cnt = 0 AND i.summary %% %s AND similarity(summary, %s) >= %s {filter_clause}
             ORDER BY similarity(summary, %s) DESC
             LIMIT %s
+        ),
+        text_search AS (
+            SELECT id, rank FROM fts_search
+            UNION ALL
+            SELECT id, rank FROM trigram_search
         ),
         rrf_scores AS (
             SELECT 
                 COALESCE(v.id, t.id) as id,
-                COALESCE(1.0 / (v.rank + 60), 0.0) + COALESCE(1.0 / (t.rank + 60), 0.0) as rrf_score
+                COALESCE(%s::float / (v.rank + %s::int), 0.0) + COALESCE(%s::float / (t.rank + %s::int), 0.0) as rrf_score
             FROM ranked_vector v
             FULL OUTER JOIN text_search t ON v.id = t.id
         ),
@@ -295,28 +472,40 @@ async def hybrid_search(
         LIMIT %s;
     """
 
-    # Duplicated dynamic parameters in the exact placeholder ordering
+    # Assemble dynamic parameters exactly matching query placeholders
     query_params = []
     
-    # direct_vector
+    # 1. direct_vector
     query_params.extend([query_embedding, user_id, query_embedding])
     query_params.extend(filter_params)
     query_params.extend([query_embedding, db_limit])
     
-    # chunk_vector
+    # 2. chunk_vector
     query_params.extend([query_embedding, user_id, query_embedding])
     query_params.extend(filter_params)
-    query_params.extend([db_limit, db_limit])
+    query_params.extend([db_limit])
     
-    # text_search
-    query_params.extend([query, user_id, query])
+    # 3. combined_vector_ids (rank + db_limit)
+    query_params.append(db_limit)
+    
+    # 4. fts_search
+    query_params.extend(tsquery_params)
+    query_params.append(user_id)
+    query_params.extend(filter_params)
+    query_params.append(db_limit)
+    
+    # 5. trigram_search (falls back if FTS count is 0)
+    query_params.extend([query, user_id, query, query, settings.TRIGRAM_MIN_SIMILARITY])
     query_params.extend(filter_params)
     query_params.extend([query, db_limit])
     
-    # best_chunk
+    # 6. rrf_scores
+    query_params.extend([settings.RRF_VECTOR_WEIGHT, settings.RRF_K, settings.RRF_TEXT_WEIGHT, settings.RRF_K])
+
+    # 7. best_chunk
     query_params.extend([user_id, query_embedding, query_embedding])
     
-    # final SELECT
+    # 8. final SELECT
     query_params.extend([user_id, db_limit])
 
     t_db_start = time.perf_counter()

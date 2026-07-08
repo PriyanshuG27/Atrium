@@ -73,6 +73,22 @@ class Settings(BaseSettings):
     SEMANTIC_SPLIT_THRESHOLD: float = 0.65
     DEFAULT_CHUNK_VERSION: int = 2
 
+    # Search & Fusion parameters (Phase 2.8)
+    RRF_K: int = 60
+    RRF_VECTOR_WEIGHT: float = 1.0
+    RRF_TEXT_WEIGHT: float = 1.0
+    ENABLE_QUERY_REWRITING: bool = True
+    QUERY_REWRITE_TIMEOUT_SECONDS: float = 1.5
+    QUERY_REWRITE_MAX_WORDS: int = 2
+    TRIGRAM_MIN_SIMILARITY: float = 0.3
+
+    @field_validator("RRF_VECTOR_WEIGHT", "RRF_TEXT_WEIGHT")
+    @classmethod
+    def validate_rrf_weights(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("RRF weights must be strictly positive (> 0).")
+        return v
+
     # Hub selection parameters
     HUB_FREQUENCY_WEIGHT: float = 1.0
     HUB_RECENCY_WEIGHT: float = 1.5

@@ -140,6 +140,11 @@ CREATE INDEX IF NOT EXISTS idx_items_embedding
 CREATE INDEX IF NOT EXISTS idx_items_text_gin
     ON items USING gin (summary gin_trgm_ops);
 
+-- Functional GIN index for full-text search over the summary column
+-- Default configuration is 'english' for stemming/tokenization; multilingual stemming is deferred post-v1.
+CREATE INDEX IF NOT EXISTS idx_items_summary_fts_gin
+    ON items USING gin (to_tsvector('english', COALESCE(summary, '')));
+
 -- GIN index for fast PostgreSQL native array overlap tags filtering
 CREATE INDEX IF NOT EXISTS idx_items_tags_gin
     ON items USING gin (tags);
