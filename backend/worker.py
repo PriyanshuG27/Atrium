@@ -1512,3 +1512,24 @@ async def compute_passive_context(user_id: int, source_type: str, conn) -> str:
         "session_gap_hours": session_gap_hours
     }
     return json.dumps(passive_context_dict)
+
+
+if __name__ == "__main__":
+    import sys
+    from backend.db.connection import open_pool, close_pool
+    
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        
+    async def main():
+        await open_pool()
+        try:
+            await start_worker_task()
+        finally:
+            await close_pool()
+            
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("Worker stopped by user.")
+
