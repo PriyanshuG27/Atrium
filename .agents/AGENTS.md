@@ -41,5 +41,22 @@ The following rules apply to all tasks and files in this codebase:
 - Always verify all changes yourself by running all automated tests and verification/execution scripts before completing a task.
 - After completing any implementation or task, always provide clear, step-by-step manual verification steps for the user to verify the correctness of the changes via the UI, avoiding the use of scripts.
 
+## STANDALONE & SCRATCH SCRIPT RULES
+- **Windows Asyncio Selector Loop**: Standalone Python scripts performing asynchronous database queries on Windows must enforce the `SelectorEventLoop` policy (psycopg3 does not support the default `ProactorEventLoop` for async DB operations on Windows):
+  ```python
+  import sys
+  import asyncio
+  if sys.platform == "win32":
+      asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+  ```
+- **Connection Pool Import Reference**: Never import connection variables by value (`from backend.db.connection import _pool`), as it permanently binds to `None` at module load time. Instead, import the module reference dynamically:
+  ```python
+  import backend.db.connection as db_conn
+  # Access db_conn._pool after calling open_pool()
+  ```
+- **Wildcard Escaping in psycopg3**: When executing SQL `LIKE` queries with wildcards (e.g., `LIKE 'Test%'`), you must escape the percent symbol by doubling it (`LIKE 'Test%%'`) to prevent psycopg3 formatting placeholder errors.
+- **Partitioned Table Constraints**: Avoid setting up standard foreign key constraints targeting the `items` table on child tables since `items` is partitioned. Retain reference mapping using basic integer columns.
+
+
 
 

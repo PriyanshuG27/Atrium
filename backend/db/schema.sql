@@ -344,7 +344,7 @@ CREATE TABLE IF NOT EXISTS entity_mentions (
     id           SERIAL PRIMARY KEY,
     user_id      INT REFERENCES users(id) ON DELETE CASCADE,
     entity_id    INT REFERENCES entities(id) ON DELETE CASCADE,
-    item_id      INT REFERENCES items(id) ON DELETE CASCADE,
+    item_id      INT,
     excerpt      TEXT,
     created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (user_id, entity_id, item_id)
@@ -361,7 +361,7 @@ CREATE TABLE IF NOT EXISTS relationships (
     description    TEXT,
     weight         FLOAT DEFAULT 1.0,
     confidence     FLOAT DEFAULT 1.0 CHECK (confidence >= 0 AND confidence <= 1), -- Model extraction confidence
-    item_id        INT REFERENCES items(id) ON DELETE CASCADE, -- Provenance
+    item_id        INT, -- Provenance
     created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (user_id, source_type, source_id, target_type, target_id, predicate)
 );
