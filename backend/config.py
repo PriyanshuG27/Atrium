@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     # Entity Resolution settings
     ENTITY_RESOLUTION_THRESHOLD: float = 0.85
 
+    # Semantic Chunking settings
+    SEMANTIC_SPLIT_THRESHOLD: float = 0.65
+    DEFAULT_CHUNK_VERSION: int = 2
+
     # Hub selection parameters
     HUB_FREQUENCY_WEIGHT: float = 1.0
     HUB_RECENCY_WEIGHT: float = 1.5

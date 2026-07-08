@@ -165,6 +165,7 @@ CREATE TABLE IF NOT EXISTS item_chunks (
     chunk_index INT NOT NULL,
     chunk_text  TEXT NOT NULL,             -- Plaintext (excerpt for search, max 500 chars)
     embedding   VECTOR(384),               -- MiniLM-L6-v2 output
+    chunk_version INT DEFAULT 1,
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -369,5 +370,9 @@ CREATE TABLE IF NOT EXISTS relationships (
 CREATE INDEX IF NOT EXISTS idx_entities_user ON entities (user_id);
 CREATE INDEX IF NOT EXISTS idx_entities_user_emb ON entities USING hnsw (embedding vector_cosine_ops);
 CREATE INDEX IF NOT EXISTS idx_entity_mentions_item ON entity_mentions (item_id);
+
+ALTER TABLE item_chunks ADD COLUMN IF NOT EXISTS chunk_version INT DEFAULT 1;
+CREATE INDEX IF NOT EXISTS idx_item_chunks_version ON item_chunks (chunk_version);
+
 
 

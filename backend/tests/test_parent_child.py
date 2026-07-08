@@ -19,7 +19,8 @@ def test_spacy_sentencizer_abbreviations():
     assert "Dr. Smith" in sentences[0].text
     assert "He returned" in sentences[1].text
 
-def test_adaptive_sentence_aware_chunking():
+@pytest.mark.asyncio
+async def test_adaptive_sentence_aware_chunking():
     """Verify chunk_text respects target, min, max word boundaries and overlap configurations."""
     # 5 sentences, each has 10 words -> 50 words total
     text = (
@@ -31,7 +32,7 @@ def test_adaptive_sentence_aware_chunking():
     )
     
     # Test case 1: Target = 20 words, Min = 10, Max = 30, Overlap = 1 sentence (10 words)
-    chunks = chunk_text(text, target_words=20, min_words=10, max_words=30, overlap_sentences=1)
+    chunks = await chunk_text(text, target_words=20, min_words=10, max_words=30, overlap_sentences=1)
     
     assert len(chunks) == 4
     assert chunks[0] == "Sentence one has exactly ten words in this dummy text. Sentence two has exactly ten words in this dummy text."
@@ -40,7 +41,7 @@ def test_adaptive_sentence_aware_chunking():
     assert chunks[3] == "Sentence four has exactly ten words in this dummy text. Sentence five has exactly ten words in this dummy text."
 
     # Test case 2: Target = 35 words, Min = 15. The remaining chunk will be small, so it should merge with previous.
-    chunks_merged = chunk_text(text, target_words=30, min_words=25, max_words=50, overlap_sentences=0)
+    chunks_merged = await chunk_text(text, target_words=30, min_words=25, max_words=50, overlap_sentences=0)
     # Sentence 1-3 is 30 words (Chunk 0). Sentence 4-5 is 20 words (remaining).
     # Since remaining 20 words < min_words (25), it should merge into Chunk 0.
     assert len(chunks_merged) == 1

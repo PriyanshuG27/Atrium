@@ -2860,7 +2860,8 @@ async def import_zip(
                     item_id = row[0]
 
                     # 3. Text chunking & item_chunks generation for RAG
-                    chunks = chunk_text(raw_text)
+                    from backend.config import settings
+                    chunks = await chunk_text(raw_text)
                     if chunks:
                         for chunk_idx, chunk in enumerate(chunks):
                             chunk_excerpt = chunk[:500]  # Respect db length limits
@@ -2871,10 +2872,10 @@ async def import_zip(
 
                             await cur.execute(
                                 """
-                                INSERT INTO item_chunks (item_id, user_id, chunk_index, chunk_text, embedding)
-                                VALUES (%s, %s, %s, %s, %s::vector);
+                                INSERT INTO item_chunks (item_id, user_id, chunk_index, chunk_text, embedding, chunk_version)
+                                VALUES (%s, %s, %s, %s, %s::vector, %s);
                                 """,
-                                (item_id, user.id, chunk_idx, chunk_excerpt, chunk_emb)
+                                (item_id, user.id, chunk_idx, chunk_excerpt, chunk_emb, settings.DEFAULT_CHUNK_VERSION)
                             )
                 imported_count += 1
         

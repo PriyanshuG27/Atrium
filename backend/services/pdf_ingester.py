@@ -67,7 +67,7 @@ async def extract_pdf_text(pdf_path: str, cascade: Optional[Any] = None) -> str:
 from backend.config import settings
 from backend.services.nlp import get_spacy_sentencizer
 
-def chunk_text(
+async def chunk_text(
     text: str,
     target_words: int = None,
     min_words: int = None,
@@ -76,10 +76,17 @@ def chunk_text(
     chunk_size_words: int = None
 ) -> List[str]:
     """
-    Split text into sentence-bounded chunks of target_words length,
-    respecting minimum and maximum boundaries, and incorporating a sentence overlap.
-    Uses the blank spaCy English sentencizer to split sentences.
+    Split text into sentence-bounded chunks.
+    If default chunk version is >= 2, delegates to semantic_chunk_text.
+    Otherwise, splits into sentence-bounded chunks of target_words length.
     """
+    # Delegate to semantic chunker by default if version >= 2
+    # and the user did not pass override parameters (e.g. in tests)
+    is_custom_count = any(x is not None for x in [target_words, min_words, max_words, chunk_size_words])
+    if settings.DEFAULT_CHUNK_VERSION >= 2 and not is_custom_count:
+        from backend.services.chunker import semantic_chunk_text
+        return await semantic_chunk_text(text)
+
     # Support backward-compatible chunk_size_words keyword argument
     if target_words is None and chunk_size_words is not None:
         target_words = chunk_size_words
@@ -221,7 +228,7 @@ async def ingest_pdf(
     full_text = await extract_pdf_text(pdf_path, cascade)
     
     # 2. Chunk text into segments of roughly 300 words
-    chunks = chunk_text(full_text, chunk_size_words=300)
+    chunks = await chunk_text(full_text, chunk_size_words=300)
     if not chunks:
         chunks = ["(Empty PDF)"]
         

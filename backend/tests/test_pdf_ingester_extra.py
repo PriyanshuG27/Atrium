@@ -1,9 +1,10 @@
 import pytest
 from backend.services.pdf_ingester import chunk_text, get_summarization_context
 
-def test_chunk_text():
+@pytest.mark.asyncio
+async def test_chunk_text():
     text = "Sentence one. " * 100 + "Sentence two. " * 100
-    chunks = chunk_text(text, chunk_size_words=50)
+    chunks = await chunk_text(text, chunk_size_words=50)
     assert len(chunks) > 1
 
 def test_get_summarization_context():

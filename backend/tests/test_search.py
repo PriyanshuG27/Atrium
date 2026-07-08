@@ -63,7 +63,7 @@ class RecordingCursor:
                     ("Bitmap Heap Scan on items  (cost=4.20..13.65 rows=2 width=32) (actual time=0.021..0.045 loops=1)",),
                     ("  ->  Bitmap Index Scan on idx_items_text_gin  (cost=0.00..4.20 rows=2 width=0) (actual time=0.012..0.012 loops=1)",)
                 ]
-        if "with direct_vector" in last_query:
+        if "with direct_vector" in last_query or "with latest_chunks" in last_query:
             vector_results = []
             seen_ids = set()
             for r in self.vector_rows:
@@ -99,7 +99,7 @@ class RecordingCursor:
             
             rows = []
             for r, score in sorted_results[:5]:
-                rows.append((r[0], r[1], r[2], r[3], r[4], r[5], r[6], score))
+                rows.append((r[0], r[1], r[2], r[3], r[4], r[5], r[6], score, "Mock raw text", "Mock chunk text", 0))
             return rows
             
         if "embedding <=>" in last_query:
@@ -159,7 +159,7 @@ async def test_search_service_user_isolation_and_sql_composition():
     assert len(cursor.executed) == 1
     
     query, params = cursor.executed[0]
-    assert "WHERE user_id = %s" in query
+    assert "user_id = %s" in query
     assert "embedding <=> %s::vector" in query
     assert "summary %% %s" in query
     assert "similarity(summary, %s)" in query

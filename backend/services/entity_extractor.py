@@ -55,39 +55,40 @@ def normalize_entity_name(name: str) -> str:
     normalized = re.sub(r"^[^\w\s]+|[^\w\s]+$", "", normalized)
     return normalized.strip()
 
-async def extract_and_resolve_entities(item_id: int, user_id: int, text: str, db_or_pool: Any) -> None:
+async def extract_and_resolve_entities(item_id: int, user_id: int, text: str, db: Any) -> None:
     """
     Runs background entity extraction and resolution pipeline.
     Idempotent, handles concurrent execution conflicts, and updates the item status.
     Supports receiving either AsyncConnection or AsyncConnectionPool.
     """
-    if hasattr(db_or_pool, "connection"):
-        async_conn_ctx = db_or_pool.connection()
+    # Identify if db is a pool (has connection method but not cursor) to support connection mocks
+    if hasattr(db, "connection") and not hasattr(db, "cursor"):
+        async_conn_ctx = db.connection()
     else:
         from contextlib import asynccontextmanager
         @asynccontextmanager
         async def dummy_ctx():
-            yield db_or_pool
+            yield db
         async_conn_ctx = dummy_ctx()
 
-    async with async_conn_ctx as db:
+    async with async_conn_ctx as db_conn:
         if not text or not text.strip():
             logger.info("Empty text for item %d, skipping entity extraction.", item_id)
-            async with db.cursor() as cur:
+            async with db_conn.cursor() as cur:
                 await cur.execute(
                     "UPDATE items SET extraction_status = 'completed' WHERE id = %s AND user_id = %s;",
                     (item_id, user_id)
                 )
-                await db.commit()
+                await db_conn.commit()
             return
 
         # 1. Update extraction status to 'running'
-        async with db.cursor() as cur:
+        async with db_conn.cursor() as cur:
             await cur.execute(
                 "UPDATE items SET extraction_status = 'running' WHERE id = %s AND user_id = %s;",
                 (item_id, user_id)
             )
-            await db.commit()
+            await db_conn.commit()
 
         cascade = AICascade()
         try:
@@ -125,7 +126,7 @@ async def extract_and_resolve_entities(item_id: int, user_id: int, text: str, db
                 entity_id = None
 
                 # Path A: Exact Match Lookup (Case-insensitive via normalized_name + type)
-                async with db.cursor() as cur:
+                async with db_conn.cursor() as cur:
                     await cur.execute(
                         """
                         SELECT id, description FROM entities 
@@ -144,14 +145,14 @@ async def extract_and_resolve_entities(item_id: int, user_id: int, text: str, db
                                 "UPDATE entities SET description = %s WHERE id = %s;",
                                 (desc, entity_id)
                             )
-                            await db.commit()
+                            await db_conn.commit()
 
                 # Path B: Semantic Vector Similarity Resolution
                 if not entity_id:
                     # Deterministic embedding of stable properties (excludes mutable description)
                     embedding = await embed_text(f"name: {normalized} | type: {ent_type.lower()}")
                     
-                    async with db.cursor() as cur:
+                    async with db_conn.cursor() as cur:
                         await cur.execute(
                             """
                             SELECT id, name, description, 1 - (embedding <=> %s::vector) AS similarity
@@ -178,18 +179,18 @@ async def extract_and_resolve_entities(item_id: int, user_id: int, text: str, db
                                 entity_id = cand_id
                                 # Sync description if empty
                                 if not cand_desc and desc:
-                                    async with db.cursor() as cur:
+                                    async with db_conn.cursor() as cur:
                                         await cur.execute(
                                             "UPDATE entities SET description = %s WHERE id = %s;",
                                             (desc, entity_id)
                                         )
-                                        await db.commit()
+                                        await db_conn.commit()
                                 break
 
                 # Path C: Create New Entity (Deterministic ON CONFLICT DO UPDATE handles concurrent races)
                 if not entity_id:
                     embedding = await embed_text(f"name: {normalized} | type: {ent_type.lower()}")
-                    async with db.cursor() as cur:
+                    async with db_conn.cursor() as cur:
                         await cur.execute(
                             """
                             INSERT INTO entities (user_id, name, normalized_name, type, description, embedding)
@@ -212,13 +213,13 @@ async def extract_and_resolve_entities(item_id: int, user_id: int, text: str, db
                             fallback_row = await cur.fetchone()
                             if fallback_row:
                                 entity_id = fallback_row[0]
-                        await db.commit()
+                        await db_conn.commit()
 
                 if entity_id:
                     entity_name_to_id[normalized] = entity_id
                     
                     # Insert mentioning provenance link (idempotent unique constraint handles retries)
-                    async with db.cursor() as cur:
+                    async with db_conn.cursor() as cur:
                         await cur.execute(
                             """
                             INSERT INTO entity_mentions (user_id, entity_id, item_id, excerpt)
@@ -227,7 +228,7 @@ async def extract_and_resolve_entities(item_id: int, user_id: int, text: str, db
                             """,
                             (user_id, entity_id, item_id, desc)
                         )
-                        await db.commit()
+                        await db_conn.commit()
 
             # 3. Relationship Ingestion Loop
             for rel in extracted_relationships:
@@ -244,7 +245,7 @@ async def extract_and_resolve_entities(item_id: int, user_id: int, text: str, db
                 tgt_id = entity_name_to_id.get(tgt_name)
 
                 if src_id and tgt_id and predicate:
-                    async with db.cursor() as cur:
+                    async with db_conn.cursor() as cur:
                         await cur.execute(
                             """
                             INSERT INTO relationships (user_id, source_type, source_id, target_type, target_id, predicate, description, confidence, item_id)
@@ -253,25 +254,25 @@ async def extract_and_resolve_entities(item_id: int, user_id: int, text: str, db
                             """,
                             (user_id, src_id, tgt_id, predicate.strip().lower(), rel_desc, confidence, item_id)
                         )
-                        await db.commit()
+                        await db_conn.commit()
 
             # 4. Success State Update
-            async with db.cursor() as cur:
+            async with db_conn.cursor() as cur:
                 await cur.execute(
                     "UPDATE items SET extraction_status = 'completed', extractor_version = 1 WHERE id = %s AND user_id = %s;",
                     (item_id, user_id)
                 )
-                await db.commit()
+                await db_conn.commit()
 
         except Exception as exc:
             logger.error("Entity extraction failed for item %d: %s", item_id, exc, exc_info=True)
             # Update extraction status to 'failed' to allow background cron retries
             try:
-                async with db.cursor() as cur:
+                async with db_conn.cursor() as cur:
                     await cur.execute(
                         "UPDATE items SET extraction_status = 'failed' WHERE id = %s AND user_id = %s;",
                         (item_id, user_id)
                     )
-                    await db.commit()
+                    await db_conn.commit()
             except Exception as update_err:
                 logger.error("Failed to set failed extraction status: %s", update_err)

@@ -897,7 +897,7 @@ async def process_batch_task(task: Dict[str, Any], user_id: int, chat_id: str) -
                     source_label = it["source_url"] or it["title"] or "Source Item"
                     prefix = f"[Source: {source_label}] "
                     
-                    chunks = chunk_text(raw_text)
+                    chunks = await chunk_text(raw_text)
                     if not chunks:
                         chunks = [raw_text or "(Empty content)"]
                         
@@ -911,10 +911,10 @@ async def process_batch_task(task: Dict[str, Any], user_id: int, chat_id: str) -
                             async with conn.cursor() as cur:
                                 await cur.execute(
                                     """
-                                    INSERT INTO item_chunks (item_id, user_id, chunk_index, chunk_text, embedding)
-                                    VALUES (%s, %s, %s, %s, %s::vector);
+                                    INSERT INTO item_chunks (item_id, user_id, chunk_index, chunk_text, embedding, chunk_version)
+                                    VALUES (%s, %s, %s, %s, %s::vector, %s);
                                     """,
-                                    (parent_id, user_id, chunk_idx, chunk_excerpt, chunk_emb)
+                                    (parent_id, user_id, chunk_idx, chunk_excerpt, chunk_emb, settings.DEFAULT_CHUNK_VERSION)
                                 )
                                 await conn.commit()
                         chunk_idx += 1

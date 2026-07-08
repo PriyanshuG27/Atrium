@@ -221,7 +221,12 @@ async def hybrid_search(
     filter_clause = (" AND " + " AND ".join(conditions)) if conditions else ""
 
     consolidated_query = f"""
-        WITH direct_vector AS (
+        WITH latest_chunks AS (
+            SELECT item_id, MAX(chunk_version) AS chunk_version
+            FROM item_chunks
+            GROUP BY item_id
+        ),
+        direct_vector AS (
             SELECT i.id, ROW_NUMBER() OVER (ORDER BY i.embedding <=> %s::vector) as rank
             FROM items i
             WHERE i.user_id = %s AND (i.embedding <=> %s::vector) < 0.8 {filter_clause}
@@ -236,6 +241,7 @@ async def hybrid_search(
                     SELECT c.item_id, ROW_NUMBER() OVER (ORDER BY c.embedding <=> %s::vector) as row_num
                     FROM item_chunks c
                     JOIN items i ON c.item_id = i.id AND c.user_id = i.user_id
+                    JOIN latest_chunks lc ON c.item_id = lc.item_id AND c.chunk_version = lc.chunk_version
                     WHERE c.user_id = %s AND (c.embedding <=> %s::vector) < 0.8 {filter_clause}
                     LIMIT 50
                 ) sub
@@ -272,10 +278,11 @@ async def hybrid_search(
             FULL OUTER JOIN text_search t ON v.id = t.id
         ),
         best_chunk AS (
-            SELECT DISTINCT ON (item_id) item_id, chunk_text, chunk_index
-            FROM item_chunks
-            WHERE user_id = %s AND (embedding <=> %s::vector) < 0.8
-            ORDER BY item_id, embedding <=> %s::vector
+            SELECT DISTINCT ON (c.item_id) c.item_id, c.chunk_text, c.chunk_index
+            FROM item_chunks c
+            JOIN latest_chunks lc ON c.item_id = lc.item_id AND c.chunk_version = lc.chunk_version
+            WHERE c.user_id = %s AND (c.embedding <=> %s::vector) < 0.8
+            ORDER BY c.item_id, c.embedding <=> %s::vector
         )
         SELECT 
             i.id, i.title, i.summary, i.source_type, i.source_url, i.tags, i.created_at,
@@ -385,10 +392,17 @@ async def hybrid_search(
         sibling_query = f"""
             WITH target_chunks(item_id, chunk_index) AS (
                 VALUES {values_placeholders}
+            ),
+            latest_versions AS (
+                SELECT item_id, MAX(chunk_version) AS max_v
+                FROM item_chunks
+                WHERE item_id IN ({", ".join(str(w["id"]) for w in winners)})
+                GROUP BY item_id
             )
             SELECT c.item_id, c.chunk_index, c.chunk_text
             FROM item_chunks c
             JOIN target_chunks t ON c.item_id = t.item_id AND c.chunk_index = t.chunk_index
+            JOIN latest_versions lv ON c.item_id = lv.item_id AND c.chunk_version = lv.max_v
             ORDER BY c.item_id, c.chunk_index;
         """
         async with db.cursor() as cur:
