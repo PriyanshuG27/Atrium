@@ -127,16 +127,23 @@ class RAGSearchResponse(BaseModel):
 # Mind Map Graph schemas
 # ---------------------------------------------------------------------------
 class GraphNode(BaseModel):
-    id: int = Field(..., description="Internal surrogate ID of the item.")
-    title: str = Field(..., description="Extracted or generated title of the item.")
-    source_type: str = Field(..., description="Type of ingest source.")
+    id: int = Field(..., description="Internal surrogate ID of the item or entity.")
+    title: str = Field(..., description="Extracted or generated title of the item or entity.")
+    source_type: str = Field(..., description="Type of ingest source or entity type.")
     created_at: AwareDateTime = Field(..., description="Creation timestamp in ISO format.")
     is_hub: bool = Field(..., description="True if the item is a member of any semantic hub.")
+    kind: str = Field("item", description="Kind of node: 'item' or 'entity'.")
+    entity_type: Optional[str] = Field(None, description="Detailed category of entity (e.g. 'Person', 'Technology').")
+    hub: bool = Field(False, description="True if precomputed hub score / degree exceeds centrality thresholds.")
 
 class GraphEdge(BaseModel):
-    source: int = Field(..., description="Source node item ID.")
-    target: int = Field(..., description="Target node item ID.")
-    weight: float = Field(..., description="Edge weight representing cosine similarity.")
+    source: int = Field(..., description="Source node ID.")
+    target: int = Field(..., description="Target node ID.")
+    weight: float = Field(..., description="Edge weight representing similarity or link strength.")
+    source_kind: str = Field("item", description="Source node kind: 'item' or 'entity'.")
+    target_kind: str = Field("item", description="Target node kind: 'item' or 'entity'.")
+    type: str = Field("similarity", description="Edge type: 'similarity' or 'semantic'.")
+    predicate: Optional[str] = Field(None, description="Dynamic predicate description for semantic relationships.")
 
 class GraphHub(BaseModel):
     id: int = Field(..., description="Hub ID.")

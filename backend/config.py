@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     PARENT_TARGET_WORDS: int = 400
     MAX_EXPANDED_WORDS: int = 500
 
+    # Entity Resolution settings
+    ENTITY_RESOLUTION_THRESHOLD: float = 0.85
+
     # Hub selection parameters
     HUB_FREQUENCY_WEIGHT: float = 1.0
     HUB_RECENCY_WEIGHT: float = 1.5

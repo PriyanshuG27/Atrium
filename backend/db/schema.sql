@@ -322,3 +322,52 @@ CREATE TABLE IF NOT EXISTS insight_candidates (
 
 CREATE INDEX IF NOT EXISTS idx_candidates_user_status ON insight_candidates(user_id, status);
 
+
+-- 23. ENTITY & RELATIONSHIP EXTRACTION SCHEMAS
+ALTER TABLE items ADD COLUMN IF NOT EXISTS extraction_status VARCHAR(20) DEFAULT 'pending';
+ALTER TABLE items ADD COLUMN IF NOT EXISTS extractor_version INT DEFAULT 1;
+
+CREATE TABLE IF NOT EXISTS entities (
+    id              SERIAL PRIMARY KEY,
+    user_id         INT REFERENCES users(id) ON DELETE CASCADE,
+    name            VARCHAR(255) NOT NULL,
+    normalized_name VARCHAR(255) NOT NULL,
+    type            VARCHAR(100) NOT NULL,      -- Person, Org, Project, Tech, Concept, Place
+    description     TEXT,
+    embedding       VECTOR(384),                -- Stable name + type embedding
+    degree          INT DEFAULT 0,              -- Precomputed node degree centrality
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (user_id, normalized_name, type)
+);
+
+CREATE TABLE IF NOT EXISTS entity_mentions (
+    id           SERIAL PRIMARY KEY,
+    user_id      INT REFERENCES users(id) ON DELETE CASCADE,
+    entity_id    INT REFERENCES entities(id) ON DELETE CASCADE,
+    item_id      INT REFERENCES items(id) ON DELETE CASCADE,
+    excerpt      TEXT,
+    created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (user_id, entity_id, item_id)
+);
+
+CREATE TABLE IF NOT EXISTS relationships (
+    id             SERIAL PRIMARY KEY,
+    user_id        INT REFERENCES users(id) ON DELETE CASCADE,
+    source_type    VARCHAR(50) NOT NULL,      -- 'entity' or 'item'
+    source_id      INT NOT NULL,
+    target_type    VARCHAR(50) NOT NULL,      -- 'entity' or 'item'
+    target_id      INT NOT NULL,
+    predicate      VARCHAR(100) NOT NULL,     -- 'works_on', 'uses', 'part_of', 'related_to'
+    description    TEXT,
+    weight         FLOAT DEFAULT 1.0,
+    confidence     FLOAT DEFAULT 1.0 CHECK (confidence >= 0 AND confidence <= 1), -- Model extraction confidence
+    item_id        INT REFERENCES items(id) ON DELETE CASCADE, -- Provenance
+    created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (user_id, source_type, source_id, target_type, target_id, predicate)
+);
+
+CREATE INDEX IF NOT EXISTS idx_entities_user ON entities (user_id);
+CREATE INDEX IF NOT EXISTS idx_entities_user_emb ON entities USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS idx_entity_mentions_item ON entity_mentions (item_id);
+
+

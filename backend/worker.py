@@ -1289,7 +1289,7 @@ async def process_single_item(task: Dict[str, Any], user_id: int, chat_id: str, 
             bot_reply = _build_success_message("🖼 Image", summary, item_tags)
             await send_telegram_message(chat_id, bot_reply, reply_markup=build_recall_keyboard(primary_id))
             
-        return res, True
+        item_id = primary_id
             
     else:
         logger.warning("Unsupported content type '%s'", content_type)
@@ -1309,56 +1309,78 @@ async def process_single_item(task: Dict[str, Any], user_id: int, chat_id: str, 
         except Exception as passive_err:
             logger.error("Failed to update passive_context for item %d: %s", item_id, passive_err)
 
-    if item_id and not is_batch_item:
-        # Standard post-save updates
-        try:
-            from backend.services.streak_service import update_streak
-            async with _pool.connection() as streak_conn:
-                await streak_conn.execute("SET statement_timeout = '30s'")
-                await update_streak(user_id, streak_conn)
-                await streak_conn.commit()
-        except Exception as streak_err:
-            logger.error("Failed to update user streak: %s", streak_err)
+        if not is_batch_item:
+            # Standard post-save updates
+            try:
+                from backend.services.streak_service import update_streak
+                async with _pool.connection() as streak_conn:
+                    await streak_conn.execute("SET statement_timeout = '30s'")
+                    await update_streak(user_id, streak_conn)
+                    await streak_conn.commit()
+            except Exception as streak_err:
+                logger.error("Failed to update user streak: %s", streak_err)
 
+            try:
+                await redis.delete(f"graph:{user_id}")
+            except Exception as e:
+                logger.error("Failed to delete graph cache: %s", e)
+                
+            try:
+                from backend.routes.websocket import broadcast
+                async with _pool.connection() as conn:
+                    async with conn.cursor() as cur:
+                        await cur.execute(
+                            "SELECT id, title, source_type, created_at FROM items WHERE id = %s AND user_id = %s;",
+                            (item_id, user_id)
+                        )
+                        item_row = await cur.fetchone()
+                if item_row:
+                    node_id, node_title, node_source_type, node_created_at = item_row
+                    await broadcast(user_id, {
+                        "type": "new_node",
+                        "node": {
+                            "id": str(node_id),
+                            "title": node_title,
+                            "source_type": node_source_type,
+                            "created_at": node_created_at.isoformat() if hasattr(node_created_at, "isoformat") else str(node_created_at)
+                        }
+                    })
+            except Exception as ws_err:
+                logger.error("Failed to broadcast new_node WS message: %s", ws_err)
+
+            # Dynamic Context Note
+            try:
+                async with _pool.connection() as conn:
+                    async with conn.cursor() as cur:
+                        await cur.execute("SELECT context_prompt FROM items WHERE id = %s AND user_id = %s;", (item_id, user_id))
+                        tag_row = await cur.fetchone()
+                if tag_row and tag_row[0]:
+                    context_prompt = tag_row[0]
+                    await send_context_prompt_with_checks(chat_id, user_id, item_id, context_prompt, mood_category)
+            except Exception as ctx_err:
+                logger.error("Failed to prompt dynamic context note: %s", ctx_err)
+
+        # Trigger Entity & Relationship Extraction
         try:
-            await redis.delete(f"graph:{user_id}")
-        except Exception as e:
-            logger.error("Failed to delete graph cache: %s", e)
-            
-        try:
-            from backend.routes.websocket import broadcast
             async with _pool.connection() as conn:
                 async with conn.cursor() as cur:
-                    await cur.execute(
-                        "SELECT id, title, source_type, created_at FROM items WHERE id = %s AND user_id = %s;",
-                        (item_id, user_id)
-                    )
+                    await cur.execute("SELECT raw_text, summary FROM items WHERE id = %s AND user_id = %s;", (item_id, user_id))
                     item_row = await cur.fetchone()
             if item_row:
-                node_id, node_title, node_source_type, node_created_at = item_row
-                await broadcast(user_id, {
-                    "type": "new_node",
-                    "node": {
-                        "id": str(node_id),
-                        "title": node_title,
-                        "source_type": node_source_type,
-                        "created_at": node_created_at.isoformat() if hasattr(node_created_at, "isoformat") else str(node_created_at)
-                    }
-                })
-        except Exception as ws_err:
-            logger.error("Failed to broadcast new_node WS message: %s", ws_err)
-
-        # Dynamic Context Note
-        try:
-            async with _pool.connection() as conn:
-                async with conn.cursor() as cur:
-                    await cur.execute("SELECT context_prompt FROM items WHERE id = %s AND user_id = %s;", (item_id, user_id))
-                    tag_row = await cur.fetchone()
-            if tag_row and tag_row[0]:
-                context_prompt = tag_row[0]
-                await send_context_prompt_with_checks(chat_id, user_id, item_id, context_prompt, mood_category)
-        except Exception as ctx_err:
-            logger.error("Failed to prompt dynamic context note: %s", ctx_err)
+                raw_encrypted, summary = item_row
+                decrypted_text = ""
+                if raw_encrypted:
+                    try:
+                        from backend.services.encryption import decrypt
+                        decrypted_text = decrypt(raw_encrypted)
+                    except Exception:
+                        pass
+                content_text = decrypted_text if decrypted_text else (summary or "")
+                
+                from backend.services.entity_extractor import extract_and_resolve_entities
+                await extract_and_resolve_entities(item_id, user_id, content_text, _pool)
+        except Exception as ext_err:
+            logger.error("Failed to run entity extraction on item %d: %s", item_id, ext_err)
 
     return item_id, True
 

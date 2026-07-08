@@ -101,6 +101,29 @@ async def _perform_db_hubs_swap(cur, user_id: int, hubs_to_insert: List[Dict[str
         row = await cur.fetchone()
         hub["id"] = row[0] if row else None
 
+    # Update precomputed degrees for all entities of the user
+    await cur.execute(
+        """
+        UPDATE entities e
+        SET degree = (
+            SELECT COUNT(*) 
+            FROM relationships r 
+            WHERE r.user_id = e.user_id 
+              AND (
+                (r.source_type = 'entity' AND r.source_id = e.id)
+                OR (r.target_type = 'entity' AND r.target_id = e.id)
+              )
+        ) + (
+            SELECT COUNT(*)
+            FROM entity_mentions m
+            WHERE m.user_id = e.user_id
+              AND m.entity_id = e.id
+        )
+        WHERE e.user_id = %s;
+        """,
+        (user_id,)
+    )
+
 
 # ---------------------------------------------------------------------------
 # Background Jobs

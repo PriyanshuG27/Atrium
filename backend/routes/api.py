@@ -961,7 +961,102 @@ async def get_graph(
                 # Keep the one with the higher similarity score
                 edges_dict[(src, tgt)] = max(edges_dict.get((src, tgt), 0.0), sim)
 
-    edges = [GraphEdge(source=src, target=tgt, weight=w) for (src, tgt), w in edges_dict.items()]
+    edges = [
+        GraphEdge(
+            source=src,
+            target=tgt,
+            weight=w,
+            source_kind="item",
+            target_kind="item",
+            type="similarity"
+        )
+        for (src, tgt), w in edges_dict.items()
+    ]
+
+    # 5.5 Fetch user's entities and insert them as nodes
+    try:
+        async with db.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT id, name, type, degree, created_at
+                FROM entities
+                WHERE user_id = %s;
+                """,
+                (user.id,)
+            )
+            entity_rows = await cur.fetchall()
+
+        for ent_row in entity_rows:
+            ent_id, ent_name, ent_type, ent_degree, ent_created_at = ent_row
+            ent_created_at_str = ent_created_at.isoformat() if hasattr(ent_created_at, "isoformat") else str(ent_created_at)
+            nodes.append(
+                GraphNode(
+                    id=10_000_000 + ent_id,
+                    title=ent_name,
+                    source_type=ent_type.lower(),
+                    created_at=ent_created_at_str,
+                    is_hub=False,
+                    kind="entity",
+                    entity_type=ent_type,
+                    hub=(ent_degree >= 5)
+                )
+            )
+
+        # Fetch semantic relationships
+        async with db.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT source_type, source_id, target_type, target_id, predicate, weight, confidence
+                FROM relationships
+                WHERE user_id = %s;
+                """,
+                (user.id,)
+            )
+            rel_rows = await cur.fetchall()
+
+        for r_row in rel_rows:
+            src_type, src_id, tgt_type, tgt_id, predicate, weight, confidence = r_row
+            s_node_id = (10_000_000 + src_id) if src_type == "entity" else src_id
+            t_node_id = (10_000_000 + tgt_id) if tgt_type == "entity" else tgt_id
+            edges.append(
+                GraphEdge(
+                    source=s_node_id,
+                    target=t_node_id,
+                    weight=float(weight or 1.0) * float(confidence or 1.0),
+                    source_kind=src_type,
+                    target_kind=tgt_type,
+                    type="semantic",
+                    predicate=predicate
+                )
+            )
+
+        # Fetch entity mentions
+        async with db.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT entity_id, item_id
+                FROM entity_mentions
+                WHERE user_id = %s;
+                """,
+                (user.id,)
+            )
+            mention_rows = await cur.fetchall()
+
+        for m_row in mention_rows:
+            ent_id, item_id = m_row
+            edges.append(
+                GraphEdge(
+                    source=item_id,
+                    target=10_000_000 + ent_id,
+                    weight=1.0,
+                    source_kind="item",
+                    target_kind="entity",
+                    type="semantic",
+                    predicate="mentions"
+                )
+            )
+    except Exception as ent_db_err:
+        logger.error("Failed to query entities or relationships for graph: %s", ent_db_err)
 
     # Fetch active candidates to return them on /graph too
     candidates = []
@@ -1000,7 +1095,16 @@ async def get_graph(
             src = min(c_row[1], c_row[2])
             tgt = max(c_row[1], c_row[2])
             if (src, tgt) not in edges_dict:
-                edges.append(GraphEdge(source=src, target=tgt, weight=float(c_row[3])))
+                edges.append(
+                    GraphEdge(
+                        source=src,
+                        target=tgt,
+                        weight=float(c_row[3]),
+                        source_kind="item",
+                        target_kind="item",
+                        type="similarity"
+                    )
+                )
     except Exception as cand_err:
         logger.error("Failed to fetch active candidates for graph: %s", cand_err)
 
