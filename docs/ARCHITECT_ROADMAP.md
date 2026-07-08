@@ -179,22 +179,39 @@ Add improvements that dramatically increase Recall's quality **without changing 
 Focus on making Recall safe, observable, and reliable based on the finalized intelligence pipeline.
 
 ### 1. Security
-* **PII Masking**: Prevent sending sensitive data to external AI models.
-* **Audit Logging**: Maintain access and alteration logs for security auditing.
-* **Rate Limiting**: Enforce request rate limits to prevent denial-of-service.
+*   **PII Masking**: Prevent sending sensitive data to external AI models.
+*   **Audit Logging**: Maintain access and alteration logs for security auditing.
+*   **Rate Limiting**: Enforce request rate limits to prevent denial-of-service.
+*   **URL Ingestion SSRF Protection**: Implement URL parsing and DNS resolution checks in `scrape_url` to reject local/private IP ranges (RFC 1918 / RFC 5735).
 
 ### 2. Logging & Analytics
-* **Structured Logging**: Implement `structlog` with unified request/user/task context.
-* **PostgreSQL Analytics**: Product, AI, and cost analytics tracked inside PostgreSQL.
+*   **Structured Logging**: Implement `structlog` with unified request/user/task context.
+*   **PostgreSQL Analytics**: Product, AI, and cost analytics tracked inside PostgreSQL.
+*   **Asynchronous Telemetry Database Logs**: Buffer and batch cost logs asynchronously using background tasks to prevent request blocking.
 
-### 3. Observability & Performance
-* **Sentry**: Crash and error reporting.
-* **Monitoring & Alerts**: API/Database query latency, queue depth monitoring.
-* **Performance Tuning**: Measure and record current baseline latency before setting hard targets (e.g., vector search < 10ms, text search < 5ms). If no baseline exists yet, mark these targets as provisional until measured.
+### 3. Observability, Performance & Scalability
+*   **Sentry**: Crash and error reporting.
+*   **Monitoring & Alerts**: API/Database query latency, queue depth monitoring.
+*   **Performance Tuning**: Measure and record current baseline latency before setting hard targets (e.g., vector search < 10ms, text search < 5ms).
+*   **August 2026 Partition DDL Fallback**: Add a `DEFAULT` partition to the partitioned `items` table in SQL schema and verify/create current partition on startup.
+*   **Safe Database Connections in Webhook Background Tasks**: Check out dedicated pool connections for asynchronous background jobs to prevent closed connection crashes.
+*   **Unbounded Memory Eviction in CacheManager**: Replace the raw class-level dictionary with `cachetools.TTLCache` or direct Redis storage to prevent OOM memory leaks.
+*   **60FPS Canvas Search Recalculation Cache**: Optimize search query matching inside the MapCanvas draw loop using React `useMemo`/state to avoid nested D3 iteration on every frame.
+*   **Quadratic Edge Resolution Optimization**: Pre-index the nodes array into a Map lookup inside `MapCanvas.jsx` to prevent $O(E \times N)$ scans on every frame.
+*   **Quadratic Nightly Candidate Scan Optimization**: Restrict similarity searches in nightly cron jobs to items added/updated in the last 24 hours.
+*   **Redundant Auth Write Elimination**: Only update the `users` table on Telegram login if payload values have actually changed.
+*   **Concurrent Reranker Execution**: Run ONNX cross-encoder model inference in a separate process pool executor rather than using a global event loop lock.
+*   **Semaphore-Aware Worker Task Pop**: Acquire the concurrency semaphore prior to popping tasks from the Redis queue to prevent memory exhaustion under queue spikes.
+*   **Parallel Chunk Embedding Generation**: Batch chunk embedding requests in `pdf_ingester.py` using `asyncio.gather`.
+*   **Configurable Database Pool Limits**: Make pool boundaries configurable via environment variables.
+*   **Poison Ingestion Job Safeguards**: Enforce size and chunk limits on incoming PDF uploads.
+*   **Referential Integrity for Partitioned Items**: Write database triggers to cascade deletes from partitioned `items` to child tables (`quizzes`, `reminders`, `insight_candidates`).
+*   **Stateful Webhook Debounce Transition**: Move webhook debounce timers out of in-memory sleep into a persistent/distributed queue system to protect against container restarts.
+*   **Partition Pruning for Vector Searches**: Partition by user ID hash instead of date range, or include time-based bounds to enable partition pruning in PGvector searches.
 
 ### 4. Deploy & Backups
-* **Deployment Automation**: Configs for Vercel, Render, Modal.
-* **Backup & Rollback Procedures**: Automated database backups and zero-downtime rollback scripts.
+*   **Deployment Automation**: Configs for Vercel, Render, Modal.
+*   **Backup & Rollback Procedures**: Automated database backups and zero-downtime rollback scripts.
 
 ---
 
