@@ -378,11 +378,37 @@ export default function Login() {
           </button>
         </div>
 
-        {/* TWA Debug overlay — only visible inside Telegram */}
-        {twaDebug && (
-          <div style={{ marginBottom: '1rem', padding: '0.6rem 0.75rem', borderRadius: 4, background: 'rgba(41,171,226,0.08)', border: '1px solid rgba(41,171,226,0.2)', fontFamily: '"JetBrains Mono", monospace', fontSize: 10 }}>
-            <div style={{ color: '#29ABE2', marginBottom: 2, letterSpacing: '0.08em' }}>TWA · {twaDebug.step}</div>
-            <div style={{ color: 'rgba(244,239,235,0.5)' }}>{twaDebug.detail}</div>
+        {/* TWA overlay — visible inside Telegram */}
+        {twaDebug && twaDebug.step === 'initData empty' && (
+          <div style={{ marginBottom: '1rem', padding: '0.75rem', borderRadius: 6, background: 'rgba(41,171,226,0.07)', border: '1px solid rgba(41,171,226,0.18)' }}>
+            <div style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 9, color: '#29ABE2', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '0.5rem' }}>You&apos;re inside Telegram</div>
+            <div style={{ fontFamily: '"Inter", sans-serif', fontSize: 11, color: 'rgba(244,239,235,0.5)', marginBottom: '0.6rem', lineHeight: 1.4 }}>
+              Tap the button below to open the bot — then click <strong style={{ color: '#F0EDE8' }}>Open Atrium 🧠</strong> in the bot reply to log in instantly.
+            </div>
+            <button
+              onClick={() => {
+                if (window.Telegram?.WebApp?.openTelegramLink) {
+                  window.Telegram.WebApp.openTelegramLink(`https://t.me/${import.meta.env.VITE_BOT_USERNAME || 'AtriumHub_bot'}?start=login`);
+                } else {
+                  window.open(`https://t.me/${import.meta.env.VITE_BOT_USERNAME || 'AtriumHub_bot'}?start=login`, '_blank');
+                }
+              }}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
+                padding: '0.45rem 0.9rem', borderRadius: 4,
+                background: 'rgba(41,171,226,0.15)', border: '1px solid rgba(41,171,226,0.3)',
+                color: '#29ABE2', fontFamily: '"JetBrains Mono", monospace',
+                fontSize: '0.75rem', cursor: 'pointer', letterSpacing: '0.04em',
+              }}
+            >
+              Open bot → get login button
+            </button>
+          </div>
+        )}
+        {twaDebug && twaDebug.step !== 'initData empty' && (
+          <div style={{ marginBottom: '1rem', padding: '0.5rem 0.75rem', borderRadius: 4, background: 'rgba(41,171,226,0.05)', border: '1px solid rgba(41,171,226,0.15)', fontFamily: '"JetBrains Mono", monospace', fontSize: 10 }}>
+            <span style={{ color: '#29ABE2' }}>TWA · {twaDebug.step}</span>
+            <span style={{ color: 'rgba(244,239,235,0.4)', marginLeft: 8 }}>{twaDebug.detail}</span>
           </div>
         )}
 
