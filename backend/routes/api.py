@@ -3036,3 +3036,38 @@ async def get_remote_ai_timings():
     return get_timings()
 
 
+@router.get("/setup-webhook")
+async def setup_telegram_webhook(request: Request):
+    """Registers the Telegram bot webhook using the server's own config variables."""
+    import httpx
+    if not settings.TELEGRAM_BOT_TOKEN:
+        return {"status": "error", "message": "TELEGRAM_BOT_TOKEN is not configured on this server."}
+
+    base_url = str(request.base_url).rstrip("/")
+    webhook_url = f"{base_url}/webhook"
+
+    url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/setWebhook"
+    payload = {
+        "url": webhook_url
+    }
+    if settings.TELEGRAM_WEBHOOK_SECRET:
+        payload["secret_token"] = settings.TELEGRAM_WEBHOOK_SECRET
+
+    logger.info("Triggering Telegram webhook setup via endpoint for URL: %s", webhook_url)
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.post(url, json=payload, timeout=10.0)
+            return {
+                "status": "ok",
+                "webhook_url": webhook_url,
+                "telegram_response": resp.json()
+            }
+        except Exception as e:
+            logger.error("Failed to setup Telegram webhook via API: %s", e)
+            return {
+                "status": "error",
+                "message": str(e)
+            }
+
+
+
