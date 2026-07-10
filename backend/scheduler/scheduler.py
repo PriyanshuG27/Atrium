@@ -1751,7 +1751,12 @@ async def onboarding_sequence_dispatcher() -> None:
             msg = (
                 f"I looked at \"{title_label}\" you sent me. Quick question — was this for you, or were you planning to act on it or share it with someone?\n\n"
                 "💻 *Complementary Save Path*:\n"
-                "If you're usually on your laptop, the Chrome extension lets you save directly from any webpage — one click, no copy-paste. Download it here: https://chromewebstore.google.com/"
+                "If you're usually on your laptop, the Chrome extension lets you save directly from any webpage — one click, no copy-paste. "
+                f"Download the ZIP from the Settings page of your web dashboard ({settings.WEBSITE_URL}/settings) and load it as an unpacked extension:\n\n"
+                "1. Extract the downloaded ZIP.\n"
+                "2. Go to chrome://extensions/ in Chrome.\n"
+                "3. Enable Developer Mode (top-right toggle).\n"
+                "4. Click 'Load unpacked' (top-left) and select the extracted folder."
             )
             reply_markup = {
                 "inline_keyboard": [

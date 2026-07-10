@@ -636,6 +636,13 @@ export default function Settings() {
               <p style={{ margin: 0, fontFamily: 'var(--font-sans)', fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.55 }}>
                 Capture links, page selections, and quote highlights from any webpage. Download the pre-packaged extension directly, extract the ZIP, and load it into Google Chrome via Developer Mode.
               </p>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: '0.4rem', borderLeft: '2px solid rgba(207, 163, 101, 0.25)', paddingLeft: '0.75rem', margin: '0.25rem 0' }}>
+                <div style={{ fontWeight: 600, color: '#F0EDE8', fontFamily: 'var(--font-sans)', marginBottom: '0.15rem' }}>Developer Mode Installation Steps:</div>
+                <div>1. Download and extract the <code>atrium_extension.zip</code> file.</div>
+                <div>2. Open Google Chrome and navigate to <code>chrome://extensions/</code>.</div>
+                <div>3. Enable <strong>Developer mode</strong> using the toggle in the top-right corner.</div>
+                <div>4. Click <strong>Load unpacked</strong> in the top-left and select the extracted folder.</div>
+              </div>
               <button
                 onClick={() => {
                   AudioEngine.playClick();

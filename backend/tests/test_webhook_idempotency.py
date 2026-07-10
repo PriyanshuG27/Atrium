@@ -340,7 +340,13 @@ def test_webhook_start_command(client, db_state, mock_redis, mock_telegram_ack):
         "💡 <b>We also support screenshots!</b> You can send us screenshots of your <b>WhatsApp Saved Messages</b> (or chats containing links), and we will automatically scrape, clean, and save them for you!"
     )
     assert mock_telegram_ack.call_count == 1
-    mock_telegram_ack.assert_called_with("77777", welcome_msg, "HTML")
+    mock_telegram_ack.assert_called_with(
+        "77777",
+        welcome_msg,
+        "HTML",
+        None,
+        {"inline_keyboard": [[{"text": "Open Atrium 🧠", "web_app": {"url": "http://localhost:5173"}}]]}
+    )
 
 
 def test_webhook_rate_limit_exceeded(client, mock_redis, mock_telegram_ack):

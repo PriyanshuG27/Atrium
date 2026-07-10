@@ -129,7 +129,8 @@ async def send_telegram_ack(
     chat_id: str,
     ack_message: str,
     parse_mode: Optional[str] = None,
-    reply_to_message_id: Optional[int] = None
+    reply_to_message_id: Optional[int] = None,
+    reply_markup: Optional[dict] = None
 ):
     """Sends an immediate message back to the Telegram chat using the shared connection pool."""
     url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -141,6 +142,8 @@ async def send_telegram_ack(
         payload["parse_mode"] = parse_mode
     if reply_to_message_id is not None:
         payload["reply_to_message_id"] = reply_to_message_id
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
     try:
         resp = await http_client.post(url, json=payload)
         resp.raise_for_status()
@@ -849,13 +852,7 @@ async def telegram_webhook(
                         [{"text": "Skip Question ⏭️", "callback_data": "onboarding_skip:1"}]
                     ]}
                     await redis.setex(f"onboarding_step:{chat_id}", 86400, "1")
-                    url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
-                    payload = {
-                        "chat_id": chat_id,
-                        "text": welcome_msg,
-                        "reply_markup": markup
-                    }
-                    background_tasks.add_task(http_client.post, url, json=payload)
+                    background_tasks.add_task(send_telegram_ack, chat_id, welcome_msg, "HTML", None, markup)
                 else:
                     welcome_msg_standard = (
                         "Welcome back to Recall! Forward me any link, voice note, PDF, or image and I'll remember it for you.\n\n"
@@ -864,14 +861,7 @@ async def telegram_webhook(
                     returning_markup = {"inline_keyboard": [
                         [{"text": "Open Atrium 🧠", "web_app": {"url": settings.WEBSITE_URL}}]
                     ]}
-                    tg_url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/sendMessage"
-                    returning_payload = {
-                        "chat_id": chat_id,
-                        "text": welcome_msg_standard,
-                        "parse_mode": "HTML",
-                        "reply_markup": returning_markup
-                    }
-                    background_tasks.add_task(http_client.post, tg_url, json=returning_payload)
+                    background_tasks.add_task(send_telegram_ack, chat_id, welcome_msg_standard, "HTML", None, returning_markup)
                     
                 logger.info("Processed /start: created/retrieved user %d for chat_id %s", user_id, chat_id)
                 return {"status": "ok", "detail": "welcome_sent"}
