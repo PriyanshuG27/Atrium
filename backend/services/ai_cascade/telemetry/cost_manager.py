@@ -61,7 +61,7 @@ MODEL_PRICING: Dict[str, Dict[str, float]] = {
         "input_cost_per_1m": 0.15,
         "output_cost_per_1m": 0.15,
     },
-    "qwen/qwen3-32b": {
+    "qwen/qwen3.6-27b": {
         "input_cost_per_1m": 0.20,
         "output_cost_per_1m": 0.20,
     },

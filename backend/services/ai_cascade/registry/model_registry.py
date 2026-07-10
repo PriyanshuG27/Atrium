@@ -139,6 +139,30 @@ DEFAULT_MODELS = [
         max_output_tokens=2048,
         latency_class="medium"
     ),
+    ModelMetadata(
+        model_id="meta/llama-4-maverick-17b-128e-instruct",
+        provider_name="nvidia",
+        capabilities={ModelCapability.VISION},
+        context_window=8192,
+        max_output_tokens=2048,
+        latency_class="medium"
+    ),
+    ModelMetadata(
+        model_id="nvidia/nemotron-nano-12b-v2-vl",
+        provider_name="nvidia",
+        capabilities={ModelCapability.VISION},
+        context_window=8192,
+        max_output_tokens=2048,
+        latency_class="low"
+    ),
+    ModelMetadata(
+        model_id="nvidia/cosmos3-nano-reasoner",
+        provider_name="nvidia",
+        capabilities={ModelCapability.VISION},
+        context_window=8192,
+        max_output_tokens=2048,
+        latency_class="medium"
+    ),
     # OpenRouter
     ModelMetadata(
         model_id="openai/gpt-oss-120b:free",

@@ -34,10 +34,10 @@ def test_calculate_cost_gemini():
     assert cost == round(expected_input + expected_output, 8)
 
 def test_calculate_cost_groq():
-    # qwen/qwen3-32b pricing: input=$0.20/1M, output=$0.20/1M
+    # qwen/qwen3.6-27b pricing: input=$0.20/1M, output=$0.20/1M
     cost = CostManager.calculate_cost(
         provider="groq",
-        model="qwen/qwen3-32b",
+        model="qwen/qwen3.6-27b",
         prompt_tokens=500_000,
         completion_tokens=500_000
     )

@@ -41,6 +41,15 @@ providers:
       nvidia/gpt-oss-120b:
         status: active
         replacement: none
+      meta/llama-4-maverick-17b-128e-instruct:
+        status: active
+        replacement: nvidia/nemotron-nano-12b-v2-vl
+      nvidia/nemotron-nano-12b-v2-vl:
+        status: active
+        replacement: nvidia/cosmos3-nano-reasoner
+      nvidia/cosmos3-nano-reasoner:
+        status: active
+        replacement: none
   cerebras:
     enabled: true
     priority: 2

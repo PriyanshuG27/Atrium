@@ -37,7 +37,8 @@ class RetryEngine:
                     response = await provider.caption_image(
                         image_bytes=extra_args.get("image_bytes"),
                         mime_type=extra_args.get("mime_type", "image/jpeg"),
-                        timeout=timeout
+                        timeout=timeout,
+                        model=model
                     )
                 elif capability == "speech_to_text" or capability == "transcribe":
                     response = await provider.transcribe(

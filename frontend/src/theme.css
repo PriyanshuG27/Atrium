@@ -374,7 +374,7 @@ body::after {
   right: 0;
   height: 40px !important;
   z-index: 10 !important;
-  padding: 0 1rem !important;
+  padding: 0 1rem 0 3.75rem !important;
   display: flex;
   align-items: center;
   justify-content: space-between;

@@ -206,12 +206,33 @@ async def perform_nvidia_ocr(image_bytes: bytes, api_key: str) -> Optional[str]:
         processed_bytes = image_bytes
 
     b64_image = base64.b64encode(processed_bytes).decode("utf-8")
+
+    # 3. Retrieve active vision models from config & registry
+    from backend.services.ai_cascade.config import settings as cascade_settings
+    from backend.services.ai_cascade.registry.model_registry import ModelRegistry, ModelCapability
     
-    models = [
-        "meta/llama-4-maverick-17b-128e-instruct",
-        "nvidia/nemotron-nano-12b-v2-vl",
-        "nvidia/cosmos3-nano-reasoner"
-    ]
+    try:
+        provider_cfg = cascade_settings.get_provider_config("nvidia")
+        cfg_models = provider_cfg.get("models", {})
+        models = []
+        for model_id, meta in cfg_models.items():
+            if meta.get("status") == "active":
+                try:
+                    model_meta = ModelRegistry.get_model(model_id)
+                    if ModelCapability.VISION in model_meta.capabilities:
+                        models.append(model_id)
+                except ValueError:
+                    continue
+    except Exception as resolve_err:
+        logger.warning("Failed to resolve active vision models from registry: %s", resolve_err)
+        models = []
+        
+    if not models:
+        models = [
+            "meta/llama-4-maverick-17b-128e-instruct",
+            "nvidia/nemotron-nano-12b-v2-vl",
+            "nvidia/cosmos3-nano-reasoner"
+        ]
     
     for model_name in models:
         payload = {
@@ -220,7 +241,7 @@ async def perform_nvidia_ocr(image_bytes: bytes, api_key: str) -> Optional[str]:
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": "Extract all legible text from this image as raw text. Do not summarize, describe, or add explanations."},
+                        {"type": "text", "text": "Provide a detailed caption or summary of this image."},
                         {
                             "type": "image_url",
                             "image_url": {

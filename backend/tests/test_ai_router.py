@@ -25,12 +25,12 @@ async def test_select_candidate_models_by_capability():
         assert ModelCapability.SPEECH_TO_TEXT in c.capabilities
         assert c.provider_name in ["groq", "modal", "gemini"]
 
-    # Vision capability should select Gemini
+    # Vision capability should select Gemini or Nvidia
     req_vision = RoutingRequirements(capability=ModelCapability.VISION)
     candidates_vision = await AIRouter.select_candidate_models(req_vision)
     for c in candidates_vision:
         assert ModelCapability.VISION in c.capabilities
-        assert c.provider_name == "gemini"
+        assert c.provider_name in ["gemini", "nvidia"]
 
 
 @pytest.mark.asyncio
@@ -78,7 +78,7 @@ async def test_router_cascade_success(monkeypatch):
     monkeypatch.setattr(settings, "GROQ_API_KEY", "mock-groq-key")
     monkeypatch.setattr(settings, "GEMINI_API_KEY", "mock-gemini-key")
 
-    groq_meta = ModelRegistry.get_model("qwen/qwen3-32b")
+    groq_meta = ModelRegistry.get_model("qwen/qwen3.6-27b")
     gemini_meta = ModelRegistry.get_model("gemini-3.1-flash-lite")
     
     async def mock_select(*args, **kwargs):
@@ -143,7 +143,7 @@ async def test_router_raises_on_all_failed(monkeypatch):
     mock_groq.chat_completion.side_effect = Exception("Groq Down")
     monkeypatch.setitem(AIRouter.adapters, "groq", mock_groq)
 
-    groq_meta = ModelRegistry.get_model("qwen/qwen3-32b")
+    groq_meta = ModelRegistry.get_model("qwen/qwen3.6-27b")
     async def mock_select(*args, **kwargs):
         return [groq_meta]
     monkeypatch.setattr(AIRouter, "select_candidate_models", mock_select)

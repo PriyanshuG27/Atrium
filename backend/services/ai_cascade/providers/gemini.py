@@ -165,15 +165,19 @@ class GeminiProvider(BaseProvider):
         self,
         image_bytes: bytes,
         mime_type: str,
-        timeout: float
+        timeout: float,
+        model: Optional[str] = None
     ) -> Optional[str]:
         if not settings.GEMINI_API_KEY:
             return None
 
-        provider_cfg = cascade_settings.get_provider_config(self.provider_name)
-        cfg_models = provider_cfg.get("models", {})
-        models = [m for m, meta in cfg_models.items() if meta.get("status") == "active"]
-        target_model = models[0] if models else "gemini-1.5-flash"
+        if model:
+            target_model = model
+        else:
+            provider_cfg = cascade_settings.get_provider_config(self.provider_name)
+            cfg_models = provider_cfg.get("models", {})
+            models = [m for m, meta in cfg_models.items() if meta.get("status") == "active"]
+            target_model = models[0] if models else "gemini-1.5-flash"
 
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{target_model}:generateContent?key={settings.GEMINI_API_KEY}"
         base64_image = base64.b64encode(image_bytes).decode("utf-8")

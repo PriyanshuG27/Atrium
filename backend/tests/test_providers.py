@@ -37,6 +37,7 @@ def test_provider_instantiation():
     nvidia = NvidiaProvider()
     assert nvidia.provider_name == "nvidia"
     assert ProviderCapability.CHAT_COMPLETION in nvidia.supported_capabilities
+    assert ProviderCapability.VISION in nvidia.supported_capabilities
     assert ProviderCapability.TRANSCRIPTION not in nvidia.supported_capabilities
 
     modal = ModalProvider()
@@ -74,6 +75,7 @@ async def test_providers_no_keys(monkeypatch):
 
     assert await OpenRouterProvider().chat_completion(messages, 0.7, 5.0) is None
     assert await NvidiaProvider().chat_completion(messages, 0.7, 5.0) is None
+    assert await NvidiaProvider().caption_image(b"data", "image/png", 5.0) is None
     assert await ModalProvider().chat_completion(messages, 0.7, 5.0) is None
     assert await ModalProvider().transcribe(b"data", "mp3", 5.0) is None
     assert await CerebrasProvider().chat_completion(messages, 0.7, 5.0) is None
@@ -311,6 +313,29 @@ async def test_nvidia_success(monkeypatch):
         timeout=10.0
     )
     assert response == "Hello from Nvidia"
+
+
+@pytest.mark.asyncio
+async def test_nvidia_caption_image_success(monkeypatch):
+    monkeypatch.setattr(settings, "NVIDIA_API_KEY", "test-nvidia-key")
+
+    mock_resp = mock.Mock()
+    mock_resp.status_code = 200
+    mock_resp.json = mock.Mock(return_value={
+        "choices": [{"message": {"content": "A detailed caption of the image from Nvidia"}}]
+    })
+
+    async def mock_post(*args, **kwargs):
+        payload = kwargs.get("json") or {}
+        assert payload.get("model") == "meta/llama-4-maverick-17b-128e-instruct"
+        assert payload.get("messages")[0]["content"][0]["text"] == "Provide a detailed caption or summary of this image."
+        return mock_resp
+
+    monkeypatch.setattr("httpx.AsyncClient.post", mock_post)
+
+    provider = NvidiaProvider()
+    result = await provider.caption_image(b"image-bytes", "image/png", 10.0)
+    assert result == "A detailed caption of the image from Nvidia"
 
 
 # -------------------------------------------------------------------------
