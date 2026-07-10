@@ -138,7 +138,7 @@ def test_login_widget_success(client):
     now = int(time.time())
     params = make_widget_params("12345", settings.TELEGRAM_BOT_TOKEN, now)
     
-    response = client.get("/auth/telegram", params=params, follow_redirects=False)
+    response = client.get("/auth/telegram", params=params, headers={"Accept": "text/html"}, follow_redirects=False)
     assert response.status_code in [302, 303, 307]
     assert response.headers["location"] == f"{settings.WEBSITE_URL}/dashboard"
     
@@ -415,7 +415,7 @@ def test_login_widget_redundant_write_elimination(client):
         now = int(time.time())
         params = make_widget_params("12345", settings.TELEGRAM_BOT_TOKEN, now)
         
-        response = client.get("/auth/telegram", params=params, follow_redirects=False)
+        response = client.get("/auth/telegram", params=params, headers={"Accept": "text/html"}, follow_redirects=False)
         assert response.status_code in [302, 303, 307]
         
         # Verify UPDATE users query WAS executed
@@ -426,7 +426,7 @@ def test_login_widget_redundant_write_elimination(client):
         stateful_conn._cursor.executed = []
         stateful_conn._cursor.fetchone_result = ("Test", "testuser") # matches make_widget_params
         
-        response2 = client.get("/auth/telegram", params=params, follow_redirects=False)
+        response2 = client.get("/auth/telegram", params=params, headers={"Accept": "text/html"}, follow_redirects=False)
         assert response2.status_code in [302, 303, 307]
         
         # Verify SELECT was executed, but UPDATE was skipped!
@@ -435,6 +435,74 @@ def test_login_widget_redundant_write_elimination(client):
         assert len(selects) == 1
         assert len(updates2) == 0
         
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+def test_bot_session_init(client):
+    """Test generating a bot session OTP and token."""
+    response = client.get("/auth/bot-session/init")
+    assert response.status_code == 200
+    data = response.json()
+    assert "token" in data
+    assert "otp" in data
+    assert "bot_username" in data
+    assert len(data["otp"]) == 6
+    assert data["expires_in"] == 300
+
+
+def test_bot_session_poll_pending(client, monkeypatch):
+    """Test polling a bot session when confirmation is still pending (Redis returns None)."""
+    from backend.services.redis_client import redis
+    async def mock_get(key):
+        return None
+    monkeypatch.setattr(redis, "get", mock_get)
+
+    response = client.get("/auth/bot-session/poll?token=test_token")
+    assert response.status_code == 202
+
+
+def test_bot_session_poll_success(client, monkeypatch):
+    """Test polling a bot session when confirmation succeeds (Redis returns user ID)."""
+    from backend.services.redis_client import redis
+    from backend.db.connection import get_db
+    
+    # Mock Redis return of confirmed user ID
+    async def mock_get(key):
+        if "bot_web_login:test_token" in key:
+            return "42"
+        return None
+    monkeypatch.setattr(redis, "get", mock_get)
+    
+    # Mock Redis delete
+    async def mock_delete(key):
+        return 1
+    monkeypatch.setattr(redis, "delete", mock_delete)
+
+    # Mock DB select of chat_id
+    mock_conn = mock.MagicMock()
+    mock_conn.cursor = mock.MagicMock()
+    mock_cursor = mock.MagicMock()
+    mock_cursor.execute = mock.AsyncMock()
+    mock_conn.cursor.return_value.__aenter__ = mock.AsyncMock(return_value=mock_cursor)
+    mock_cursor.fetchone = mock.AsyncMock(return_value=(7732257445,))
+    
+    async def mock_get_db():
+        yield mock_conn
+    app.dependency_overrides[get_db] = mock_get_db
+
+    try:
+        response = client.get("/auth/bot-session/poll?token=test_token")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ok"
+        assert data["user_id"] == 42
+        assert data["chat_id"] == "7732257445"
+        
+        # Check cookies are set
+        cookies = response.cookies
+        assert "atrium_session" in cookies
+        assert "jwt" in cookies
     finally:
         app.dependency_overrides.pop(get_db, None)
 
