@@ -31,8 +31,8 @@ pipelines:
     validator: "OCRValidator"
     schema: "ocr.json"
     providers:
-      - gemini
       - nvidia
+      - gemini
   insight:
     cache: true
     validator: "InsightValidator"

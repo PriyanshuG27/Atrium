@@ -189,7 +189,7 @@ async def perform_nvidia_ocr(image_bytes: bytes, api_key: str) -> Optional[str]:
     
     b64_image = base64.b64encode(image_bytes).decode("utf-8")
     payload = {
-        "model": "nvidia/llama-3.2-90b-vision-instruct",
+        "model": "meta/llama-3.2-90b-vision-instruct",
         "messages": [
             {
                 "role": "user",

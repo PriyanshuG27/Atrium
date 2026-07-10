@@ -105,7 +105,10 @@ class OCRValidator(BaseValidator):
 class InsightValidator(BaseValidator):
     def parse_json(self, raw_text: str) -> Dict[str, Any]:
         try:
-            return super().parse_json(raw_text)
+            data = super().parse_json(raw_text)
+            if "tension" in data and "insight" not in data:
+                data["insight"] = data["tension"]
+            return data
         except Exception:
             return {"insight": raw_text.strip()}
 
