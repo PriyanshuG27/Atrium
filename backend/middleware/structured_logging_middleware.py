@@ -52,12 +52,13 @@ async def structured_logging_middleware(request: Request, call_next):
             except Exception:
                 pass
 
-        # Log successful completion
-        logger.info(
-            "request_processed",
-            status_code=response.status_code,
-            duration_ms=round(duration_ms, 2)
-        )
+        # Log successful completion (skip health checks to avoid log flooding)
+        if request.url.path not in ("/health", "/healthcheck"):
+            logger.info(
+                "request_processed",
+                status_code=response.status_code,
+                duration_ms=round(duration_ms, 2)
+            )
         return response
     except Exception as e:
         duration_ms = (time.perf_counter() - start_time) * 1000
