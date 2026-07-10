@@ -836,6 +836,7 @@ export default function Landing() {
 
   /* Pinned scroll step tracker (robust window-center proximity logic) */
   const [activeStep, setActiveStep] = useState(0);
+  const [mobileStep, setMobileStep] = useState(0);
   const pinBlockRefs = useRef([]);
   useEffect(() => {
     const handleScroll = () => {
@@ -1053,7 +1054,8 @@ export default function Landing() {
 
       {/* HOW IT WORKS */}
       <section style={{ background: 'linear-gradient(to bottom, #080B14, #06080F)' }}>
-        <div className="lp-steps-container">
+        {/* Desktop version */}
+        <div className="lp-steps-container lp-desktop-steps">
           <div className="lp-section-label" style={{ marginBottom: 20 }}>How it works</div>
           {FEATURES.map((f, i) => (
             <div key={i} className="lp-step-row" ref={el => pinBlockRefs.current[i] = el}>
@@ -1069,6 +1071,34 @@ export default function Landing() {
               </div>
             </div>
           ))}
+        </div>
+
+        {/* Mobile version */}
+        <div className="lp-steps-container lp-mobile-steps">
+          <div className="lp-section-label" style={{ marginBottom: 10 }}>How it works</div>
+          
+          <div className="lp-mobile-tabs">
+            {FEATURES.map((f, i) => (
+              <button
+                key={i}
+                className={`lp-mobile-tab-btn ${mobileStep === i ? 'active' : ''}`}
+                onClick={() => setMobileStep(i)}
+              >
+                {f.num.split(' — ')[1]}
+              </button>
+            ))}
+          </div>
+
+          <div className="lp-mobile-step-card">
+            <div className="lp-step-visual-box">
+              <StepVisual index={mobileStep} />
+            </div>
+            <div className="lp-mobile-step-text">
+              <div className="lp-pin-num">{FEATURES[mobileStep].num}</div>
+              <h2 className="lp-pin-title">{FEATURES[mobileStep].title}</h2>
+              <p className="lp-pin-desc">{FEATURES[mobileStep].desc}</p>
+            </div>
+          </div>
         </div>
       </section>
 

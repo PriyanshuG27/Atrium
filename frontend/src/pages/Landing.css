@@ -739,10 +739,106 @@
   .lp-pin-img-col { position: static; }
   .lp-pin-text-col { gap: 56px; padding: 0 0 16px; }
   .lp-pin-block { opacity: 1; transform: none; }
+  
+  /* Bento Grid mobile stacking */
   .lp-bento-grid { grid-template-columns: 1fr; }
-  .lp-bento-card.span2 { grid-column: span 1; }
+  .lp-bento-card.span2 {
+    grid-column: span 1;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+  .lp-bento-card.span2 .lp-bento-chat-box {
+    position: relative;
+    bottom: auto;
+    right: auto;
+    width: 100%;
+    margin-top: 1rem;
+  }
+  
   .lp-stat-div { display: none; }
   .lp-nav-r .lp-nav-link { display: none; }
+
+  /* Steps Section mobile tabbed layout styles */
+  .lp-desktop-steps {
+    display: none !important;
+  }
+  .lp-mobile-steps {
+    display: flex !important;
+    flex-direction: column;
+    gap: 24px;
+    padding: 60px 20px 80px;
+  }
+  .lp-mobile-tabs {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    padding-bottom: 12px;
+    margin-bottom: 12px;
+  }
+  .lp-mobile-tab-btn {
+    background: transparent;
+    border: none;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    color: rgba(240, 237, 232, 0.35);
+    padding: 8px 16px;
+    cursor: pointer;
+    text-transform: uppercase;
+    transition: all 0.3s ease;
+    border-radius: 6px;
+  }
+  .lp-mobile-tab-btn.active {
+    color: #CFA365;
+    background: rgba(207, 163, 101, 0.05);
+  }
+  .lp-mobile-step-card {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    background: rgba(255, 255, 255, 0.015);
+    border: 1px solid rgba(207, 163, 101, 0.08);
+    border-radius: 20px;
+    padding: 24px;
+    backdrop-filter: blur(10px);
+    animation: fadeUp 0.4s ease;
+  }
+  .lp-mobile-step-text {
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+  .lp-mobile-step-text .lp-pin-desc {
+    margin: 0 auto;
+  }
+
+  /* Padding and margin reductions on mobile */
+  .lp-steps-container {
+    padding: 60px 20px 80px;
+    gap: 64px;
+  }
+  .lp-bento {
+    padding: 60px 20px 80px;
+  }
+  .lp-trust {
+    padding: 60px 20px;
+  }
+  .lp-final {
+    padding: 100px 20px;
+  }
+}
+
+@media (max-width: 600px) {
+  .lp-footer {
+    flex-direction: column;
+    gap: 12px;
+    text-align: center;
+    padding: 32px 20px;
+  }
 }
 
 @keyframes blink {
