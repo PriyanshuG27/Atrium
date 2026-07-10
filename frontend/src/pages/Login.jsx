@@ -395,7 +395,7 @@ export default function Login() {
               or
             </div>
             <a
-              href={`https://t.me/${import.meta.env.VITE_BOT_USERNAME || 'AtriumHub_bot'}?startapp=open`}
+              href={`https://t.me/${import.meta.env.VITE_BOT_USERNAME || 'AtriumHub_bot'}`}
               target="_blank"
               rel="noopener noreferrer"
               style={{
@@ -419,10 +419,10 @@ export default function Login() {
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.289c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12l-6.871 4.326-2.962-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.833.932z"/>
               </svg>
-              Open in Telegram App
+              Open bot → click Open App
             </a>
             <div style={{ fontFamily: '"Inter", sans-serif', fontSize: 10, color: 'rgba(244,239,235,0.2)', marginTop: '0.4rem' }}>
-              Instant login · no confirmation needed
+              Opens bot chat → tap "Open App" → instant login
             </div>
           </div>
         </div>
