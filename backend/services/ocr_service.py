@@ -178,16 +178,34 @@ def preprocess_and_ocr_image(image_bytes: bytes) -> dict:
 
 async def perform_nvidia_ocr(image_bytes: bytes, api_key: str) -> Optional[str]:
     """Calls NVIDIA NIM vision models in cascade order (11b-vision -> 90b-vision -> nemotron-nano-vl)."""
+    from PIL import Image
+    from io import BytesIO
     import base64
     import httpx
     
+    # 1. Strip whitespaces/quotes from API key defensively
+    clean_key = api_key.strip().replace('"', '').replace("'", "")
+    
     url = "https://integrate.api.nvidia.com/v1/chat/completions"
     headers = {
-        "Authorization": f"Bearer {api_key}",
+        "Authorization": f"Bearer {clean_key}",
         "Content-Type": "application/json"
     }
     
-    b64_image = base64.b64encode(image_bytes).decode("utf-8")
+    # 2. Compress and resize image to avoid payload size limit resets (NVIDIA gateway limits)
+    try:
+        img = Image.open(BytesIO(image_bytes))
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+        img.thumbnail((1024, 1024))
+        out_buf = BytesIO()
+        img.save(out_buf, format="JPEG", quality=80)
+        processed_bytes = out_buf.getvalue()
+    except Exception as compress_err:
+        logger.warning("Failed to compress image for NVIDIA NIM: %s", compress_err)
+        processed_bytes = image_bytes
+
+    b64_image = base64.b64encode(processed_bytes).decode("utf-8")
     
     models = [
         "meta/llama-3.2-11b-vision-instruct",
