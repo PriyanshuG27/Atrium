@@ -60,10 +60,46 @@ export async function apiFetch(url, options = {}) {
 
 // Retain a dummy default client export to prevent import breaks in unused code or tests
 const dummyClient = {
-  get: (url, config) => apiFetch(url, { ...config, method: 'GET' }),
-  post: (url, data, config) => apiFetch(url, { ...config, method: 'POST', body: JSON.stringify(data), headers: { 'Content-Type': 'application/json', ...config?.headers } }),
-  put: (url, data, config) => apiFetch(url, { ...config, method: 'PUT', body: JSON.stringify(data), headers: { 'Content-Type': 'application/json', ...config?.headers } }),
-  delete: (url, config) => apiFetch(url, { ...config, method: 'DELETE' }),
+  get: async (url, config) => {
+    const res = await apiFetch(url, { ...config, method: 'GET' });
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      res.data = await res.clone().json().catch(() => null);
+    } else {
+      res.data = await res.clone().blob().catch(() => null);
+    }
+    return res;
+  },
+  post: async (url, data, config) => {
+    const res = await apiFetch(url, { ...config, method: 'POST', body: JSON.stringify(data), headers: { 'Content-Type': 'application/json', ...config?.headers } });
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      res.data = await res.clone().json().catch(() => null);
+    } else {
+      res.data = await res.clone().blob().catch(() => null);
+    }
+    return res;
+  },
+  put: async (url, data, config) => {
+    const res = await apiFetch(url, { ...config, method: 'PUT', body: JSON.stringify(data), headers: { 'Content-Type': 'application/json', ...config?.headers } });
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      res.data = await res.clone().json().catch(() => null);
+    } else {
+      res.data = await res.clone().blob().catch(() => null);
+    }
+    return res;
+  },
+  delete: async (url, config) => {
+    const res = await apiFetch(url, { ...config, method: 'DELETE' });
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      res.data = await res.clone().json().catch(() => null);
+    } else {
+      res.data = await res.clone().blob().catch(() => null);
+    }
+    return res;
+  },
   interceptors: {
     request: { use: () => {}, eject: () => {} },
     response: { use: () => {}, eject: () => {} }
