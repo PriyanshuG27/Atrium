@@ -59,10 +59,14 @@ def get_spacy_sentencizer():
             logger.info("Using RemoteSentencizer (bypassing spaCy import)...")
             _nlp_instance = RemoteSentencizer()
         else:
-            logger.info("Initializing spaCy English sentencizer...")
-            import spacy
-            nlp = spacy.blank("en")
-            nlp.add_pipe("sentencizer")
-            _nlp_instance = nlp
+            try:
+                logger.info("Initializing spaCy English sentencizer...")
+                import spacy
+                nlp = spacy.blank("en")
+                nlp.add_pipe("sentencizer")
+                _nlp_instance = nlp
+            except ImportError:
+                logger.warning("spaCy is not installed. Falling back to lightweight RegexSentencizer.")
+                _nlp_instance = RegexSentencizer()
     return _nlp_instance
 

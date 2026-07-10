@@ -1,12 +1,17 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime, timezone
-import spacy
+try:
+    import spacy
+    HAS_SPACY = True
+except ImportError:
+    HAS_SPACY = False
 
 from backend.config import settings
 from backend.services.pdf_ingester import chunk_text
 from backend.services.search_service import hybrid_search
 
+@pytest.mark.skipif(not HAS_SPACY, reason="spaCy not installed")
 def test_spacy_sentencizer_abbreviations():
     """Verify that the shared spaCy sentencizer doesn't split sentences on common abbreviations."""
     from backend.services.nlp import get_spacy_sentencizer
