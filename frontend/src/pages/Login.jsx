@@ -201,14 +201,20 @@ export default function Login() {
 
   // TWA auto-login: runs when Login page mounts inside Telegram
   useEffect(() => {
-    const initData = window.Telegram?.WebApp?.initData;
+    const tg = window.Telegram?.WebApp;
+    if (!tg) return; // not inside Telegram at all
+
+    const initData = tg.initData;
     if (!initData) {
-      // Not in Telegram or initData empty
-      if (window.Telegram?.WebApp) {
-        setTwaDebug({ step: 'initData empty', detail: 'Telegram detected but initData is empty string' });
-      }
+      // Desktop Telegram menu button doesn't always provide initData.
+      // Guide the user to use the /start inline button which always works.
+      setTwaDebug({
+        step: 'initData empty',
+        detail: 'Desktop menu button limitation — send /start to the bot and tap "Open Atrium 🧠"'
+      });
       return;
     }
+
     setTwaDebug({ step: 'attempting login', detail: `initData length: ${initData.length}` });
     fetch('/auth/me')
       .then(async res => {
