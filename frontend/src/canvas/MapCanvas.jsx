@@ -51,11 +51,14 @@ export default function MapCanvas({
   gapsMode = false,
   burstHubId = null,
   onNodeClick,
+  initialCamera = null,
+  onCameraChange = null,
+  isVisible = true,
 }) {
   const canvasRef = useRef(null);
   const s = useRef({
     simNodes: [], simLinks: [],
-    hovered: null, transform: { x: 0, y: 0, k: 1 },
+    hovered: null, transform: initialCamera || { x: 0, y: 0, k: 1 },
     isDragging: false, dragNode: null, panStart: null,
     rafId: null, filterType: 'all',
     selectedNodeId: null, selectedHubId: null, flareNodeId: null,
@@ -115,10 +118,10 @@ export default function MapCanvas({
   useEffect(() => {
     s.current.physicsFrozen = physicsFrozen;
     if (s.current.sim) {
-      if (physicsFrozen) s.current.sim.stop();
+      if (physicsFrozen || !isVisible) s.current.sim.stop();
       else s.current.sim.alpha(0.08).restart();
     }
-  }, [physicsFrozen]);
+  }, [physicsFrozen, isVisible]);
 
   /* ── Auto-Fit Camera Event Listener ─────────────────────────────────── */
   useEffect(() => {
@@ -158,6 +161,18 @@ export default function MapCanvas({
         if (!canvas) return;
         const W = canvas.offsetWidth || window.innerWidth;
         const H = canvas.offsetHeight || window.innerHeight;
+        
+        // Project current coordinates to screen space
+        const { x: tx0, y: ty0, k: k0 } = s.current.transform;
+        const screenX = node.x * k0 + tx0;
+        const screenY = node.y * k0 + ty0;
+        
+        // If node is already visible on screen, don't fly the camera
+        const margin = 80; // safe area margin from edges
+        if (screenX >= margin && screenX <= W - margin && screenY >= margin && screenY <= H - margin) {
+          return;
+        }
+
         const k = 1.35;
         const tx = W / 2 - k * node.x;
         const ty = H / 2 - k * node.y;
@@ -170,6 +185,18 @@ export default function MapCanvas({
     return () => {
       window.removeEventListener('map-autofit', handleAutoFit);
       window.removeEventListener('map-canvas-focus', handleFocusNode);
+    };
+  }, []);
+
+  // Save camera coordinates in parent on unmount
+  const onCameraChangeRef = useRef(onCameraChange);
+  useEffect(() => {
+    onCameraChangeRef.current = onCameraChange;
+  }, [onCameraChange]);
+
+  useEffect(() => {
+    return () => {
+      onCameraChangeRef.current?.(s.current.transform);
     };
   }, []);
 
@@ -284,13 +311,13 @@ export default function MapCanvas({
   /* ── Draw loop ───────────────────────────────────────────────────────── */
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || !isVisible) return;
     const ctx = canvas.getContext('2d');
     const st  = s.current;
     st.alive  = true;
 
     function draw() {
-      if (!st.alive) return;
+      if (!st.alive || !isVisible) return;
       st.rafId = requestAnimationFrame(draw);
 
       const W  = canvas.width;
@@ -814,7 +841,7 @@ export default function MapCanvas({
 
     draw();
     return () => { st.alive = false; if (st.rafId) cancelAnimationFrame(st.rafId); };
-  }, []);
+  }, [isVisible]);
 
   /* ── Pointer helpers ─────────────────────────────────────────────────── */
   function getMouse(e) {
@@ -918,6 +945,8 @@ export default function MapCanvas({
             AudioEngine.playClick();
           }
           onNodeClick?.(hit);
+        } else {
+          onNodeClick?.(null);
         }
       }
       st.panStart = null;
@@ -1047,6 +1076,8 @@ export default function MapCanvas({
               AudioEngine.playClick();
             }
             onNodeClick?.(hit);
+          } else {
+            onNodeClick?.(null);
           }
         }
       }
@@ -1061,7 +1092,10 @@ export default function MapCanvas({
       onMouseMove={handleMouseMove}
       onMouseDown={handleMouseDown}
       onMouseUp={handleMouseUp}
-      onTouchEnd={handleTouchEnd}
+      onTouchEnd={(e) => {
+        if (e.cancelable) e.preventDefault();
+        handleTouchEnd(e);
+      }}
       style={{ width:'100%', height:'100%', display:'block', cursor:'grab', background:'transparent', touchAction:'none' }}
     />
   );

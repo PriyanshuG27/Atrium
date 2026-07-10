@@ -106,8 +106,8 @@ def test_webhook_duplicate_update(client):
     assert res.json()["detail"] == "duplicate"
 
 def test_webhook_security_missing_secret(client, monkeypatch):
-    from backend.config import settings
-    monkeypatch.setattr(settings, "TELEGRAM_WEBHOOK_SECRET", "super-secret-token")
+    import backend.routes.webhook as webhook_route
+    monkeypatch.setattr(webhook_route.settings, "TELEGRAM_WEBHOOK_SECRET", "super-secret-token")
     
     payload = {"update_id": 999995, "message": {"chat": {"id": 12345}, "text": "Hello"}}
     # No header -> should be 403
@@ -116,8 +116,8 @@ def test_webhook_security_missing_secret(client, monkeypatch):
     assert res.json()["detail"] == "Unauthorized"
 
 def test_webhook_security_invalid_secret(client, monkeypatch):
-    from backend.config import settings
-    monkeypatch.setattr(settings, "TELEGRAM_WEBHOOK_SECRET", "super-secret-token")
+    import backend.routes.webhook as webhook_route
+    monkeypatch.setattr(webhook_route.settings, "TELEGRAM_WEBHOOK_SECRET", "super-secret-token")
     
     payload = {"update_id": 999992, "message": {"chat": {"id": 12345}, "text": "Hello"}}
     headers = {"X-Telegram-Bot-Api-Secret-Token": "wrong-token"}
@@ -127,8 +127,8 @@ def test_webhook_security_invalid_secret(client, monkeypatch):
     assert res.json()["detail"] == "Unauthorized"
 
 def test_webhook_security_valid_secret(client, monkeypatch):
-    from backend.config import settings
-    monkeypatch.setattr(settings, "TELEGRAM_WEBHOOK_SECRET", "super-secret-token")
+    import backend.routes.webhook as webhook_route
+    monkeypatch.setattr(webhook_route.settings, "TELEGRAM_WEBHOOK_SECRET", "super-secret-token")
     
     payload = {"update_id": 999993, "message": {"chat": {"id": 12345}, "text": "Hello"}}
     headers = {"X-Telegram-Bot-Api-Secret-Token": "super-secret-token"}

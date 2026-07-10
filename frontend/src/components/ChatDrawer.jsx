@@ -118,6 +118,8 @@ function LiquidOrb({ onClick }) {
       });
     }
 
+    const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768;
+
     // Keep track of current mouse coordinates relative to canvas center
     const onMouseMove = (e) => {
       const rect = canvas.getBoundingClientRect();
@@ -130,7 +132,9 @@ function LiquidOrb({ onClick }) {
       hoverRef.current = dist < baseRadius * 1.5;
     };
 
-    window.addEventListener('mousemove', onMouseMove);
+    if (!isMobile) {
+      window.addEventListener('mousemove', onMouseMove);
+    }
 
     const render = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -140,7 +144,7 @@ function LiquidOrb({ onClick }) {
       // Mouse interactive variables
       const mx = mouseRef.current.x;
       const my = mouseRef.current.y;
-      const mDist = Math.hypot(mx, my);
+      const mDist = isMobile ? 999999 : Math.hypot(mx, my);
 
       // Slow organic warping base timer
       const time = Date.now() * 0.002;
@@ -150,7 +154,7 @@ function LiquidOrb({ onClick }) {
         const p = points[i];
         
         // Organic breathing warping
-        const wave = Math.sin(time + p.angle * 2) * 2;
+        const wave = isMobile ? 0 : Math.sin(time + p.angle * 2) * 2;
         const targetRadius = baseRadius + wave;
         
         const tx = Math.cos(p.angle) * targetRadius;
@@ -161,7 +165,7 @@ function LiquidOrb({ onClick }) {
         let fy = (ty - p.y) * 0.12;
 
         // Mouse gravity pull: pull vertices toward mouse if mouse is close
-        if (mDist < 80) {
+        if (!isMobile && mDist < 80) {
           const force = (80 - mDist) * 0.15;
           const angleToMouse = Math.atan2(my - p.y, mx - p.x);
           
@@ -210,7 +214,7 @@ function LiquidOrb({ onClick }) {
       // Calculate dynamic attraction shift for the "A" monogram
       let shiftX = 0;
       let shiftY = 0;
-      if (mDist < 80) {
+      if (!isMobile && mDist < 80) {
         const shiftRatio = (80 - mDist) * 0.08;
         const angle = Math.atan2(my, mx);
         shiftX = Math.cos(angle) * shiftRatio;
@@ -234,13 +238,17 @@ function LiquidOrb({ onClick }) {
       
       ctx.stroke();
 
-      animationFrameId = requestAnimationFrame(render);
+      if (!isMobile) {
+        animationFrameId = requestAnimationFrame(render);
+      }
     };
 
     render();
 
     return () => {
-      window.removeEventListener('mousemove', onMouseMove);
+      if (!isMobile) {
+        window.removeEventListener('mousemove', onMouseMove);
+      }
       cancelAnimationFrame(animationFrameId);
     };
   }, []);

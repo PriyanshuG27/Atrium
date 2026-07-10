@@ -181,20 +181,69 @@ export default function SearchOverlay({ onClose, onItemSelect, dueCount = 0 }) {
       .catch(err => console.error('Failed to fetch top tags:', err));
   }, []);
 
+  // Local visualViewport height listener with RAF scheduling
+  useEffect(() => {
+    if (!window.visualViewport) return;
+    let rafId = null;
+    const handleResize = () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        const height = window.visualViewport.height;
+        panelRef.current?.style.setProperty('max-height', `calc(${height}px - 20px)`, 'important');
+      });
+    };
+    window.visualViewport.addEventListener('resize', handleResize);
+    window.visualViewport.addEventListener('scroll', handleResize);
+    handleResize();
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      window.visualViewport.removeEventListener('resize', handleResize);
+      window.visualViewport.removeEventListener('scroll', handleResize);
+      panelRef.current?.style.removeProperty('max-height');
+    };
+  }, [panelRef]);
+
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  // Lock body scroll only while search overlay is active
+  useEffect(() => {
+    document.body.classList.add('body-lock-scroll');
+    return () => {
+      document.body.classList.remove('body-lock-scroll');
+    };
+  }, []);
+
   /* ── Entrance animation ── */
   useEffect(() => {
-    inputRef.current?.focus();
+    // Small delay so CSS classes are applied before animating
+    const timer = setTimeout(() => inputRef.current?.focus(), 50);
+    const isMobile = window.matchMedia('(max-width: 640px)').matches;
     if (panelRef.current) {
-      panelRef.current.style.opacity = '0';
-      panelRef.current.style.transform = 'scale(0.96) translateY(-8px)';
-      requestAnimationFrame(() => {
-        if (panelRef.current) {
-          panelRef.current.style.transition = 'opacity 0.2s ease, transform 0.2s cubic-bezier(0.16,1,0.3,1)';
-          panelRef.current.style.opacity = '1';
-          panelRef.current.style.transform = 'scale(1) translateY(0)';
-        }
-      });
+      if (isMobile) {
+        panelRef.current.style.transform = 'translateY(100%)';
+        panelRef.current.style.opacity = '1';
+        requestAnimationFrame(() => {
+          if (panelRef.current) {
+            panelRef.current.style.transition = 'transform 0.32s cubic-bezier(0.16,1,0.3,1)';
+            panelRef.current.style.transform = 'translateY(0)';
+          }
+        });
+      } else {
+        panelRef.current.style.opacity = '0';
+        panelRef.current.style.transform = 'translateX(-50%) scale(0.96) translateY(-8px)';
+        requestAnimationFrame(() => {
+          if (panelRef.current) {
+            panelRef.current.style.transition = 'opacity 0.2s ease, transform 0.2s cubic-bezier(0.16,1,0.3,1)';
+            panelRef.current.style.opacity = '1';
+            panelRef.current.style.transform = 'translateX(-50%) scale(1) translateY(0)';
+          }
+        });
+      }
     }
+    return () => clearTimeout(timer);
   }, [activeView]);
 
   /* ── Save recent searches ── */
@@ -262,35 +311,6 @@ export default function SearchOverlay({ onClose, onItemSelect, dueCount = 0 }) {
 
   const totalItems = query.startsWith('/') ? filteredActions.length : filteredResults.length;
 
-  /* ── Keyboard navigation ── */
-  useEffect(() => {
-    if (activeView !== 'search') return;
-    const onKey = (e) => {
-      if (e.key === 'Escape') { onClose(); return; }
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setSelectedIdx(i => Math.min(i + 1, totalItems - 1));
-      }
-      if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setSelectedIdx(i => Math.max(i - 1, 0));
-      }
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        if (query.startsWith('/')) {
-          const act = filteredActions[selectedIdx];
-          if (act) executeAction(act.cmd);
-        } else if (filteredResults[selectedIdx]) {
-          saveSearch(query);
-          onItemSelect?.(filteredResults[selectedIdx]);
-          onClose();
-        }
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [filteredResults, filteredActions, selectedIdx, onClose, onItemSelect, query, totalItems, activeView, saveSearch]);
-
   const handleItemClick = useCallback((item) => {
     saveSearch(query);
     onItemSelect?.(item);
@@ -328,7 +348,7 @@ export default function SearchOverlay({ onClose, onItemSelect, dueCount = 0 }) {
   };
 
   /* ── Export signals backup ── */
-  const handleExportBackup = async () => {
+  const handleExportBackup = useCallback(async () => {
     try {
       const res = await fetch('/api/items?limit=500');
       const data = await res.json();
@@ -345,10 +365,10 @@ export default function SearchOverlay({ onClose, onItemSelect, dueCount = 0 }) {
       console.error(err);
       addToast?.('Failed to export signals', 'error');
     }
-  };
+  }, [addToast]);
 
   /* ── Execute Command Actions ── */
-  const executeAction = (cmd) => {
+  const executeAction = useCallback((cmd) => {
     if (cmd === '/drill') {
       onItemSelect?.({ type: 'drill' });
       onClose();
@@ -363,7 +383,36 @@ export default function SearchOverlay({ onClose, onItemSelect, dueCount = 0 }) {
       addToast?.('Select a signal in the list to delete it.', 'warning');
       onClose();
     }
-  };
+  }, [onItemSelect, onClose, handleExportBackup, addToast]);
+
+  /* ── Keyboard navigation ── */
+  useEffect(() => {
+    if (activeView !== 'search') return;
+    const onKey = (e) => {
+      if (e.key === 'Escape') { onClose(); return; }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedIdx(i => Math.min(i + 1, totalItems - 1));
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedIdx(i => Math.max(i - 1, 0));
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (query.startsWith('/')) {
+          const act = filteredActions[selectedIdx];
+          if (act) executeAction(act.cmd);
+        } else if (filteredResults[selectedIdx]) {
+          saveSearch(query);
+          onItemSelect?.(filteredResults[selectedIdx]);
+          onClose();
+        }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [filteredResults, filteredActions, selectedIdx, onClose, onItemSelect, query, totalItems, activeView, saveSearch, executeAction]);
 
   return (
     <>
@@ -372,42 +421,30 @@ export default function SearchOverlay({ onClose, onItemSelect, dueCount = 0 }) {
         onClick={onClose}
         style={{
           position: 'fixed', inset: 0,
-          background: 'rgba(8,7,10,0.7)',
-          backdropFilter: 'blur(4px)',
-          WebkitBackdropFilter: 'blur(4px)',
-          zIndex: 300,
+          background: 'rgba(8,7,10,0.75)',
+          backdropFilter: 'blur(6px)',
+          WebkitBackdropFilter: 'blur(6px)',
+          zIndex: 10002,
         }}
       />
 
-      {/* Panel */}
+      {/* Panel — bottom sheet on mobile, floating on desktop */}
       <div
         ref={panelRef}
         role="dialog"
         aria-label="Search"
         aria-modal="true"
-        style={{
-          position: 'fixed',
-          top: '12vh',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          width: 'min(640px, 90vw)',
-          maxHeight: '70vh',
-          background: 'rgba(17,15,20,0.97)',
-          border: '1px solid rgba(207,163,101,0.15)',
-          borderRadius: 12,
-          backdropFilter: 'blur(24px)',
-          WebkitBackdropFilter: 'blur(24px)',
-          zIndex: 301,
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-          boxShadow: '0 32px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(207,163,101,0.08)',
-        }}
+        className="search-overlay-panel"
       >
+        {/* Mobile drag handle */}
+        <div className="search-drag-handle-wrap" aria-hidden="true">
+          <div className="search-drag-handle" />
+        </div>
+
         {activeView === 'search' ? (
           <>
             {/* Search input row */}
-            <div style={{
+            <div className="search-input-row" style={{
               display: 'flex',
               alignItems: 'center',
               gap: '0.75rem',
@@ -426,6 +463,7 @@ export default function SearchOverlay({ onClose, onItemSelect, dueCount = 0 }) {
                 value={query}
                 onChange={e => setQuery(e.target.value)}
                 placeholder="Search signals or type '/' for actions..."
+                className="search-input-field"
                 style={{
                   flex: 1,
                   background: 'transparent',
@@ -474,7 +512,7 @@ export default function SearchOverlay({ onClose, onItemSelect, dueCount = 0 }) {
 
             {/* Filter chips (hidden in Action Mode) */}
             {!query.startsWith('/') && query.trim() && (
-              <div style={{
+              <div className="search-filter-chips" style={{
                 display: 'flex',
                 gap: '0.375rem',
                 padding: '0.625rem 1.25rem',
@@ -757,13 +795,16 @@ export default function SearchOverlay({ onClose, onItemSelect, dueCount = 0 }) {
 
             {/* Footer hints */}
             {totalItems > 0 && (
-              <div style={{
-                padding: '0.625rem 1.25rem',
-                borderTop: '1px solid rgba(244,239,235,0.05)',
-                display: 'flex',
-                gap: '1.25rem',
-                flexShrink: 0,
-              }}>
+              <div 
+                className="search-footer-hints"
+                style={{
+                  padding: '0.625rem 1.25rem',
+                  borderTop: '1px solid rgba(244,239,235,0.05)',
+                  display: 'flex',
+                  gap: '1.25rem',
+                  flexShrink: 0,
+                }}
+              >
                 {[['↑↓', 'Navigate'], ['↵', 'Execute'], ['Esc', 'Close']].map(([key, label]) => (
                   <span key={key} style={{
                     fontFamily: 'var(--font-mono)',

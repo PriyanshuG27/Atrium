@@ -242,7 +242,7 @@ export default function Login() {
   return (
     <div style={{
       width: '100%',
-      height: '100vh',
+      height: '100dvh',
       display: 'flex',
       background: '#09080C',
       overflow: 'hidden',

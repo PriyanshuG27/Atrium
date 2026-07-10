@@ -8,7 +8,7 @@ Security is an integral design requirement of **Recall**. This guide documents t
 
 | Threat Vector | Potential Impact | Defense Implementation |
 |---|---|---|
-| **SQL Injection** | Unauthorized data access / manipulation | 100% Parameterized queries using `asyncpg` (`$1, $2`). Zero string interpolation. |
+| **SQL Injection** | Unauthorized data access / manipulation | 100% Parameterized queries using `psycopg3` (`%s`). Zero string interpolation. |
 | **Data Breach at Rest** | Exposure of raw user text / OAuth tokens | Fernet AES-128 encryption prior to DB write (`encryption.py`). |
 | **Telegram Authentication Forgery** | Account takeover via spoofed WebApp | HMAC-SHA256 signature verification (`twa_auth.py`) using `hmac.compare_digest()`. |
 | **Adversarial Prompt Injection** | LLM jailbreak / system prompt override | `check_prompt_injection()` filtering XML breakouts and override phrases. |

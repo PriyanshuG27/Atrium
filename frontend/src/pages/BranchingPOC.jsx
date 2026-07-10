@@ -2761,6 +2761,7 @@ export default function BranchingPOCViewport({ externalScore, hearthMode, onRepl
   useEffect(() => {
     if (!hearthMode || externalScore == null) return;
 
+    let timer = null;
     if (!hearthInitDone.current) {
       // First mount: snap to lastSeen, animate delta, save checkpoint
       hearthInitDone.current = true;
@@ -2771,7 +2772,7 @@ export default function BranchingPOCViewport({ externalScore, hearthMode, onRepl
       snapToScore(lastSeen);
       localStorage.setItem(STORAGE_KEY, String(externalScore));
       // Small delay so the snapshot renders before animation starts
-      setTimeout(() => playDelta(lastSeen, externalScore, 0), 120);
+      timer = setTimeout(() => playDelta(lastSeen, externalScore, 0), 120);
     } else {
       // Mid-session score increase: animate only newly earned blocks
       const prev = score;
@@ -2780,10 +2781,14 @@ export default function BranchingPOCViewport({ externalScore, hearthMode, onRepl
         playDelta(prev, externalScore, 400);
       }
     }
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [externalScore, hearthMode]);
 
   // ── Expose replay-from-start callback to parent ─────────────────────────
+  const replayTimerRef = useRef(null);
   useEffect(() => {
     if (!onReplayReady || !hearthMode) return;
     onReplayReady(() => {
@@ -2792,10 +2797,14 @@ export default function BranchingPOCViewport({ externalScore, hearthMode, onRepl
       // Reset everything to score 0
       snapToScore(0);
       // Queue all blocks up to current externalScore
-      setTimeout(() => playDelta(0, externalScore ?? 0, 600), 150);
+      if (replayTimerRef.current) clearTimeout(replayTimerRef.current);
+      replayTimerRef.current = setTimeout(() => playDelta(0, externalScore ?? 0, 600), 150);
     });
+    return () => {
+      if (replayTimerRef.current) clearTimeout(replayTimerRef.current);
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onReplayReady, hearthMode]);
+  }, [onReplayReady, hearthMode, externalScore]);
 
 
   // Retire old-stage blocks when stage advances — permanent blocks always stay

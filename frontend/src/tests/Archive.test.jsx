@@ -3,6 +3,17 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import Archive from '../pages/Archive';
 
+// Mock useRoomState hook
+vi.mock('../context/RoomStateContext', () => ({
+  useRoomState: () => ({
+    roomStates: {
+      archive: { scrollTop: 0, expandedId: null },
+      search: { query: '', filters: {} }
+    },
+    updateRoomState: vi.fn()
+  })
+}));
+
 vi.mock('../canvas/ArchiveCylinder', () => {
   return {
     default: ({ items }) => (

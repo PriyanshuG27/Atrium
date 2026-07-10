@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from './Toast';
 import axios from '../api/client';
@@ -45,7 +45,7 @@ export default function SettingsPanel({ isOpen, onClose }) {
   const [showDeleteZone, setShowDeleteZone] = useState(false);
 
   // Fetch settings & stats
-  const fetchSettings = async () => {
+  const fetchSettings = useCallback(async () => {
     setLoading(true);
     try {
       const res = await axios.get('/api/me');
@@ -81,10 +81,10 @@ export default function SettingsPanel({ isOpen, onClose }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [addToast]);
 
   // Fetch active scheduled reminders
-  const fetchReminders = async () => {
+  const fetchReminders = useCallback(async () => {
     setRemindersLoading(true);
     try {
       const res = await axios.get('/api/reminders');
@@ -94,14 +94,14 @@ export default function SettingsPanel({ isOpen, onClose }) {
     } finally {
       setRemindersLoading(false);
     }
-  };
+  }, []);
 
   // Fetch initial data on open
   useEffect(() => {
     if (!isOpen) return;
     fetchSettings();
     fetchReminders();
-  }, [isOpen]);
+  }, [isOpen, fetchSettings, fetchReminders]);
 
   // Sync mute state via window event
   useEffect(() => {

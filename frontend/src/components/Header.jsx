@@ -80,12 +80,14 @@ export default function Header({ onSearch, dueQuizCount, viewMode = 'graph', onV
   }, [checkAuth]);
 
   // Synchronize with external search query clearing
-  useEffect(() => {
+  const [prevSearchQuery, setPrevSearchQuery] = useState(searchQuery);
+  if (searchQuery !== prevSearchQuery) {
+    setPrevSearchQuery(searchQuery);
     if (searchQuery === '') {
       setSearchVal('');
       setIsSearchExpanded(false);
     }
-  }, [searchQuery]);
+  }
 
   // Close dropdown on clicking outside
 
@@ -97,7 +99,7 @@ export default function Header({ onSearch, dueQuizCount, viewMode = 'graph', onV
       }
     }
     document.addEventListener('mousedown', handleClickOutside);
-    document.addEventListener('touchstart', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside, { passive: true });
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('touchstart', handleClickOutside);
@@ -131,7 +133,7 @@ export default function Header({ onSearch, dueQuizCount, viewMode = 'graph', onV
     if (isSearchExpanded && searchInputRef.current) {
       searchInputRef.current.focus();
     }
-  }, [isSearchExpanded]);
+  }, [isSearchExpanded, searchInputRef]);
 
   const handleSearchContainerClick = () => {
     if (!isSearchExpanded) {

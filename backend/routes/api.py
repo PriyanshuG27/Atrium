@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 import psycopg
 
 from backend.middleware.twa_auth import get_current_user, UserContext
-from backend.db.connection import get_db
+from backend.db.connection import get_db, get_db_or_none, transaction_context
 from backend.services.sm2 import update_sm2
 from backend.services.rate_limiter import rate_limit, rate_limit_by_route
 from backend.models.schemas import (
@@ -168,13 +168,14 @@ async def create_item(
     req: ItemCreateRequest,
     response: Response,
     user: UserContext = Depends(get_current_user),
-    db: psycopg.AsyncConnection = Depends(get_db),
+    db: psycopg.AsyncConnection | None = Depends(get_db_or_none),
 ):
     """Save a new item and auto-generate summary and tags."""
     from datetime import datetime, timezone
     from backend.services.ai_cascade import AICascade, ai_cascade
     from backend.services.search_service import embed_text
     from backend.services.encryption import encrypt
+    from backend.db.connection import get_db_scope, get_db_or_none, transaction_context
 
     if req.source_type == "text" or not req.url:
         source_type = "text"
@@ -191,24 +192,25 @@ async def create_item(
     if req.url and source_type == "url":
         from backend.config import settings
         if settings.ENV != "test" or req.url == "https://existing.com":
-            async with db.cursor() as cur:
-                await cur.execute(
-                    "SELECT id, user_id, source_type, source_url, summary, title, tags, created_at FROM items WHERE user_id = %s AND source_url = %s LIMIT 1",
-                    (user.id, req.url)
-                )
-                row = await cur.fetchone()
-                if row:
-                    response.status_code = status.HTTP_200_OK
-                    return ItemResponse(
-                        id=row[0],
-                        user_id=row[1],
-                        source_type=row[2],
-                        source_url=row[3],
-                        summary=row[4],
-                        title=row[5],
-                        tags=row[6],
-                        created_at=row[7]
+            async with get_db_scope(db) as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        "SELECT id, user_id, source_type, source_url, summary, title, tags, created_at FROM items WHERE user_id = %s AND source_url = %s LIMIT 1",
+                        (user.id, req.url)
                     )
+                    row = await cur.fetchone()
+                    if row:
+                        response.status_code = status.HTTP_200_OK
+                        return ItemResponse(
+                            id=row[0],
+                            user_id=row[1],
+                            source_type=row[2],
+                            source_url=row[3],
+                            summary=row[4],
+                            title=row[5],
+                            tags=row[6],
+                            created_at=row[7]
+                        )
 
     # Generate summary & tags via AI cascade (non-blocking)
     cascade = AICascade()
@@ -226,38 +228,39 @@ async def create_item(
     embedding = await embed_text(raw_text)
     encrypted_raw_text = encrypt(raw_text)
 
-    async with db.cursor() as cur:
-        if source_type == "url":
-            await cur.execute(
-                """
-                INSERT INTO items (user_id, source_type, source_url, raw_text, summary, title, embedding, tags)
-                VALUES (%s, 'url', %s, %s, %s, %s, %s::vector, %s)
-                RETURNING id, created_at;
-                """,
-                (user.id, req.url, encrypted_raw_text, summary, title, embedding, normalized_tags)
-            )
-        else:
-            await cur.execute(
-                """
-                INSERT INTO items (user_id, source_type, source_url, raw_text, summary, title, embedding, tags)
-                VALUES (%s, 'text', NULL, %s, %s, %s, %s::vector, %s)
-                RETURNING id, created_at;
-                """,
-                (user.id, encrypted_raw_text, summary, title, embedding, normalized_tags)
-            )
-        row = await cur.fetchone()
-        if not row:
-            raise HTTPException(status_code=500, detail="Failed to save item to database")
-        item_id = row[0]
-        created_at = row[1]
+    async with get_db_scope(db) as conn:
+        async with transaction_context(conn):
+            async with conn.cursor() as cur:
+                if source_type == "url":
+                    await cur.execute(
+                        """
+                        INSERT INTO items (user_id, source_type, source_url, raw_text, summary, title, embedding, tags)
+                        VALUES (%s, 'url', %s, %s, %s, %s, %s::vector, %s)
+                        RETURNING id, created_at;
+                        """,
+                        (user.id, req.url, encrypted_raw_text, summary, title, embedding, normalized_tags)
+                    )
+                else:
+                    await cur.execute(
+                        """
+                        INSERT INTO items (user_id, source_type, source_url, raw_text, summary, title, embedding, tags)
+                        VALUES (%s, 'text', NULL, %s, %s, %s, %s::vector, %s)
+                        RETURNING id, created_at;
+                        """,
+                        (user.id, encrypted_raw_text, summary, title, embedding, normalized_tags)
+                    )
+                row = await cur.fetchone()
+                if not row:
+                    raise HTTPException(status_code=500, detail="Failed to save item to database")
+                item_id = row[0]
+                created_at = row[1]
 
-        from backend.config import settings
-        if settings.ENV != "test":
-            from backend.services.user_service import get_and_update_user_streak
-            await get_and_update_user_streak(cur, user.id)
-            from backend.services.pulse_service import update_user_pulse
-            await update_user_pulse(cur, user.id)
-        await db.commit()
+                from backend.config import settings
+                if settings.ENV != "test":
+                    from backend.services.user_service import get_and_update_user_streak
+                    await get_and_update_user_streak(cur, user.id)
+                    from backend.services.pulse_service import update_user_pulse
+                    await update_user_pulse(cur, user.id)
 
     # Invalidate graph cache
     from backend.services.redis_client import redis
@@ -350,9 +353,10 @@ async def extension_suggest_tags(
     title: Optional[str] = Query(None, description="The title of the page."),
     text: Optional[str] = Query(None, description="The page content/selection text."),
     user: UserContext = Depends(get_current_user),
-    db: psycopg.AsyncConnection = Depends(get_db),
+    db: psycopg.AsyncConnection | None = Depends(get_db_or_none),
 ):
     from backend.services.ai_cascade import AICascade, ai_cascade
+    from backend.db.connection import get_db_scope, get_db_or_none
     cascade = AICascade()
     content = text or title or ""
     
@@ -370,39 +374,40 @@ async def extension_suggest_tags(
     # 2. Extract existing user tags to match against the title/text,
     # or fallback to user's top tags if AI failed/returned empty.
     try:
-        async with db.cursor() as cur:
-            await cur.execute(
-                """
-                SELECT DISTINCT unnest(tags) AS tag, COUNT(*) AS count
-                FROM items
-                WHERE user_id = %s
-                GROUP BY tag
-                ORDER BY count DESC
-                LIMIT 50;
-                """,
-                (user.id,)
-            )
-            rows = await cur.fetchall()
-            user_tags = [row[0] for row in rows]
-            
-            # Match keywords from title/text/url with user's top tags
-            normalized_content = content.lower()
-            url_lower = url.lower() if url else ""
-            
-            matched_tags = []
-            for t in user_tags:
-                t_lower = t.lower()
-                if t_lower in normalized_content or t_lower in url_lower:
-                    matched_tags.append(t)
-            
-            # Add matches to suggested
-            for mt in matched_tags:
-                if mt not in suggested:
-                    suggested.append(mt)
-            
-            # If still empty, supply the user's top 3 tags as general fallback options
-            if not suggested and user_tags:
-                suggested.extend(user_tags[:3])
+        async with get_db_scope(db) as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    SELECT DISTINCT unnest(tags) AS tag, COUNT(*) AS count
+                    FROM items
+                    WHERE user_id = %s
+                    GROUP BY tag
+                    ORDER BY count DESC
+                    LIMIT 50;
+                    """,
+                    (user.id,)
+                )
+                rows = await cur.fetchall()
+                user_tags = [row[0] for row in rows]
+                
+                # Match keywords from title/text/url with user's top tags
+                normalized_content = content.lower()
+                url_lower = url.lower() if url else ""
+                
+                matched_tags = []
+                for t in user_tags:
+                    t_lower = t.lower()
+                    if t_lower in normalized_content or t_lower in url_lower:
+                        matched_tags.append(t)
+                
+                # Add matches to suggested
+                for mt in matched_tags:
+                    if mt not in suggested:
+                        suggested.append(mt)
+                
+                # If still empty, supply the user's top 3 tags as general fallback options
+                if not suggested and user_tags:
+                    suggested.extend(user_tags[:3])
     except Exception as db_err:
         logger.error("Failed to fetch fallback tags from DB: %s", db_err)
 
@@ -430,12 +435,13 @@ async def extension_save(
     req: ExtensionSaveRequest,
     response: Response,
     user: UserContext = Depends(get_current_user),
-    db: psycopg.AsyncConnection = Depends(get_db),
+    db: psycopg.AsyncConnection | None = Depends(get_db_or_none),
 ):
     from datetime import datetime, timezone
     from backend.services.ai_cascade import AICascade, ai_cascade
     from backend.services.search_service import embed_text
     from backend.services.encryption import encrypt
+    from backend.db.connection import get_db_scope, get_db_or_none, transaction_context
 
     if req.text and req.text.strip():
         source_type = "text"
@@ -450,24 +456,25 @@ async def extension_save(
     if req.url and source_type == "url":
         from backend.config import settings
         if settings.ENV != "test" or req.url == "https://existing.com":
-            async with db.cursor() as cur:
-                await cur.execute(
-                    "SELECT id, user_id, source_type, source_url, summary, title, tags, created_at FROM items WHERE user_id = %s AND source_url = %s LIMIT 1",
-                    (user.id, req.url)
-                )
-                row = await cur.fetchone()
-                if row:
-                    response.status_code = status.HTTP_200_OK
-                    return ItemResponse(
-                        id=row[0],
-                        user_id=row[1],
-                        source_type=row[2],
-                        source_url=row[3],
-                        summary=row[4],
-                        title=row[5],
-                        tags=row[6],
-                        created_at=row[7]
+            async with get_db_scope(db) as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        "SELECT id, user_id, source_type, source_url, summary, title, tags, created_at FROM items WHERE user_id = %s AND source_url = %s LIMIT 1",
+                        (user.id, req.url)
                     )
+                    row = await cur.fetchone()
+                    if row:
+                        response.status_code = status.HTTP_200_OK
+                        return ItemResponse(
+                            id=row[0],
+                            user_id=row[1],
+                            source_type=row[2],
+                            source_url=row[3],
+                            summary=row[4],
+                            title=row[5],
+                            tags=row[6],
+                            created_at=row[7]
+                        )
 
     # Generate summary & tags via AI cascade (non-blocking)
     cascade = AICascade()
@@ -485,38 +492,39 @@ async def extension_save(
     embedding = await embed_text(raw_text)
     encrypted_raw_text = encrypt(raw_text)
 
-    async with db.cursor() as cur:
-        await cur.execute(
-            """
-            INSERT INTO items (user_id, source_type, source_url, raw_text, summary, title, embedding, tags, context_note)
-            VALUES (%s, %s, %s, %s, %s, %s, %s::vector, %s, %s)
-            RETURNING id, created_at;
-            """,
-            (
-                user.id,
-                source_type,
-                req.url if req.url else None,
-                encrypted_raw_text,
-                summary,
-                title,
-                embedding,
-                normalized_tags,
-                req.context_note
-            )
-        )
-        row = await cur.fetchone()
-        if not row:
-            raise HTTPException(status_code=500, detail="Failed to save item to database")
-        item_id = row[0]
-        created_at = row[1]
-            
-        from backend.config import settings
-        if settings.ENV != "test":
-            from backend.services.user_service import get_and_update_user_streak
-            await get_and_update_user_streak(cur, user.id)
-            from backend.services.pulse_service import update_user_pulse
-            await update_user_pulse(cur, user.id)
-        await db.commit()
+    async with get_db_scope(db) as conn:
+        async with transaction_context(conn):
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    INSERT INTO items (user_id, source_type, source_url, raw_text, summary, title, embedding, tags, context_note)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s::vector, %s, %s)
+                    RETURNING id, created_at;
+                    """,
+                    (
+                        user.id,
+                        source_type,
+                        req.url if req.url else None,
+                        encrypted_raw_text,
+                        summary,
+                        title,
+                        embedding,
+                        normalized_tags,
+                        req.context_note
+                    )
+                )
+                row = await cur.fetchone()
+                if not row:
+                    raise HTTPException(status_code=500, detail="Failed to save item to database")
+                item_id = row[0]
+                created_at = row[1]
+                    
+                from backend.config import settings
+                if settings.ENV != "test":
+                    from backend.services.user_service import get_and_update_user_streak
+                    await get_and_update_user_streak(cur, user.id)
+                    from backend.services.pulse_service import update_user_pulse
+                    await update_user_pulse(cur, user.id)
 
     # Invalidate graph cache
     from backend.services.redis_client import redis
@@ -664,51 +672,63 @@ async def delete_item(
 ):
     """Delete an item and its associated quizzes."""
     try:
-        async with db.cursor() as cur:
-            # 1. Delete associated quizzes, item_chunks, reminders, and insight candidates in the same transaction
-            await cur.execute(
-                "DELETE FROM quizzes WHERE item_id = %s AND user_id = %s;",
-                (item_id, user.id)
-            )
-            await cur.execute(
-                "DELETE FROM item_chunks WHERE item_id = %s AND user_id = %s;",
-                (item_id, user.id)
-            )
-            await cur.execute(
-                "DELETE FROM reminders WHERE item_id = %s AND user_id = %s;",
-                (item_id, user.id)
-            )
-            await cur.execute(
-                "DELETE FROM insight_candidates WHERE (item_id_a = %s OR item_id_b = %s) AND user_id = %s;",
-                (item_id, item_id, user.id)
-            )
-            
-            # 2. Delete item with strict IDOR protection (must include user_id filter)
-            await cur.execute(
-                "DELETE FROM items WHERE id = %s AND user_id = %s RETURNING id, source_type;",
-                (item_id, user.id)
-            )
-            row = await cur.fetchone()
-            
-            if row is None:
-                await db.rollback()
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Item not found"
+        async with transaction_context(db):
+            async with db.cursor() as cur:
+                # 1. Delete associated entities mentions, relationships, quizzes, item_chunks, reminders, and insight candidates in the same transaction
+                await cur.execute(
+                    "DELETE FROM quizzes WHERE item_id = %s AND user_id = %s;",
+                    (item_id, user.id)
+                )
+                await cur.execute(
+                    "DELETE FROM item_chunks WHERE item_id = %s AND user_id = %s;",
+                    (item_id, user.id)
+                )
+                await cur.execute(
+                    "DELETE FROM reminders WHERE item_id = %s AND user_id = %s;",
+                    (item_id, user.id)
+                )
+                await cur.execute(
+                    "DELETE FROM insight_candidates WHERE (item_id_a = %s OR item_id_b = %s) AND user_id = %s;",
+                    (item_id, item_id, user.id)
+                )
+                await cur.execute(
+                    "DELETE FROM entity_mentions WHERE item_id = %s AND user_id = %s;",
+                    (item_id, user.id)
+                )
+                await cur.execute(
+                    """
+                    DELETE FROM relationships 
+                    WHERE ((source_type = 'item' AND source_id = %s) 
+                       OR (target_type = 'item' AND target_id = %s) 
+                       OR (item_id = %s)) 
+                      AND user_id = %s;
+                    """,
+                    (item_id, item_id, item_id, user.id)
                 )
                 
-            # Log deletion audit event in the same transaction
-            from backend.services.audit_service import log_audit
-            req_id = request.headers.get("x-request-id") or request.headers.get("request-id")
-            await log_audit(
-                db=db,
-                user_id=user.id,
-                action="delete_item",
-                details={"item_id": item_id, "source_type": row[1]},
-                request_id=req_id
-            )
-            
-            await db.commit()
+                # 2. Delete item with strict IDOR protection (must include user_id filter)
+                await cur.execute(
+                    "DELETE FROM items WHERE id = %s AND user_id = %s RETURNING id, source_type;",
+                    (item_id, user.id)
+                )
+                row = await cur.fetchone()
+                
+                if row is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Item not found"
+                    )
+                    
+                # Log deletion audit event in the same transaction
+                from backend.services.audit_service import log_audit
+                req_id = request.headers.get("x-request-id") or request.headers.get("request-id")
+                await log_audit(
+                    db=db,
+                    user_id=user.id,
+                    action="delete_item",
+                    details={"item_id": item_id, "source_type": row[1]},
+                    request_id=req_id
+                )
             
             # Invalidate graph cache
             from backend.services.redis_client import redis
@@ -750,11 +770,12 @@ from datetime import datetime, timezone
 async def search_items(
     req: SearchRequest,
     user: UserContext = Depends(get_current_user),
-    db: psycopg.AsyncConnection = Depends(get_db),
+    db: psycopg.AsyncConnection | None = Depends(get_db_or_none),
 ):
     """Search items and run Map-Reduce RAG if applicable."""
     from backend.services.search_service import hybrid_search
     from backend.services.ai_cascade import AICascade, ai_cascade, check_prompt_injection
+    from backend.db.connection import get_db_scope, get_db_or_none
 
     injection_warning = check_prompt_injection(req.query)
     if injection_warning:
@@ -764,16 +785,17 @@ async def search_items(
             query=req.query
         )
 
-    results = await hybrid_search(
-        req.query,
-        user.id,
-        db,
-        source_types=req.source_types,
-        tags=req.tags,
-        start_date=req.start_date,
-        end_date=req.end_date,
-        bypass_rewrite=req.rag
-    )
+    async with get_db_scope(db) as conn:
+        results = await hybrid_search(
+            req.query,
+            user.id,
+            conn,
+            source_types=req.source_types,
+            tags=req.tags,
+            start_date=req.start_date,
+            end_date=req.end_date,
+            bypass_rewrite=req.rag
+        )
     
     # Limit results as requested (up to 5 for summaries mapping)
     results_limited = results[:req.limit]
@@ -1606,10 +1628,11 @@ async def delete_reminder(
 )
 async def sync_drive(
     user: UserContext = Depends(get_current_user),
-    db: psycopg.AsyncConnection = Depends(get_db)
+    db: psycopg.AsyncConnection | None = Depends(get_db_or_none),
 ):
     """Sync items to Google Drive."""
     from backend.services.drive_sync import sync_user_to_drive
+    from backend.db.connection import get_db_or_none
     await sync_user_to_drive(user.id, db)
     return {"status": "ok", "message": "Google Drive synchronization completed successfully."}
 
@@ -2384,82 +2407,90 @@ async def post_self_description(
 )
 async def get_user_profile(
     user: UserContext = Depends(get_current_user),
-    db: psycopg.AsyncConnection = Depends(get_db),
+    db: psycopg.AsyncConnection | None = Depends(get_db_or_none),
 ):
-    async with db.cursor() as cur:
-        await cur.execute(
-            "SELECT self_description, mind_type, mind_type_summary, mind_type_trajectory, pulse_score FROM users WHERE id = %s;",
-            (user.id,)
-        )
-        row = await cur.fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="User not found")
+    from backend.db.connection import get_db_scope, get_db_or_none
+    async with get_db_scope(db) as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT self_description, mind_type, mind_type_summary, mind_type_trajectory, pulse_score FROM users WHERE id = %s;",
+                (user.id,)
+            )
+            row = await cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="User not found")
+            
+            self_desc, mind_type, summary, traj, pulse_score = row
+            
+            # Check node count to see if we should unlock and lazy-calculate
+            await cur.execute("SELECT COUNT(*) FROM items WHERE user_id = %s;", (user.id,))
+            count_row = await cur.fetchone()
+            node_count = count_row[0] if count_row else 0
         
-        self_desc, mind_type, summary, traj, pulse_score = row
-        
-        # Check node count to see if we should unlock and lazy-calculate
-        await cur.execute("SELECT COUNT(*) FROM items WHERE user_id = %s;", (user.id,))
-        count_row = await cur.fetchone()
-        node_count = count_row[0] if count_row else 0
-        
-        if node_count >= 15 and not summary:
-            try:
-                from backend.scheduler.scheduler import run_nightly_mind_type_for_user, get_pool
-                pool = await get_pool()
-                await run_nightly_mind_type_for_user(user.id, pool)
+    if node_count >= 15 and not summary:
+        try:
+            from backend.scheduler.scheduler import run_nightly_mind_type_for_user, get_pool
+            pool = await get_pool()
+            await run_nightly_mind_type_for_user(user.id, pool)
+            
+            async with get_db_scope(db) as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("SELECT mind_type FROM users WHERE id = %s;", (user.id,))
+                    mt_row = await cur.fetchone()
+                    mind_type = mt_row[0] if mt_row else None
+            
+            if mind_type:
+                async with get_db_scope(db) as conn:
+                    async with conn.cursor() as cur:
+                        await cur.execute(
+                            "SELECT label FROM semantic_hubs WHERE user_id = %s ORDER BY array_length(member_ids, 1) DESC LIMIT 3;",
+                            (user.id,)
+                        )
+                        hubs = [r[0] for r in await cur.fetchall()]
+                hubs_str = ", ".join(hubs) if hubs else "general topics"
                 
-                await cur.execute("SELECT mind_type FROM users WHERE id = %s;", (user.id,))
-                mt_row = await cur.fetchone()
-                mind_type = mt_row[0] if mt_row else None
-                
-                if mind_type:
-                    await cur.execute(
-                        "SELECT label FROM semantic_hubs WHERE user_id = %s ORDER BY array_length(member_ids, 1) DESC LIMIT 3;",
-                        (user.id,)
-                    )
-                    hubs = [r[0] for r in await cur.fetchall()]
-                    hubs_str = ", ".join(hubs) if hubs else "general topics"
+                from backend.services.ai_cascade import AICascade, ai_cascade
+                cascade = AICascade()
+                prompt = (
+                    f"You are a Cognitive Graph Profiler. The user has been classified as {mind_type} (MBTI-style Mind Type).\n"
+                    f"Their top 3 active clusters are: {hubs_str}.\n"
+                    f"This is their first classification. Focus on explaining the primary cognitive driver of their signature.\n\n"
+                    f"Write a highly personalized, analytical, and engaging 4-sentence profile summary explaining their cognitive style based on these topics.\n"
+                    f"Constraint: Do not use clinical jargon, do not use template words, and connect the topics explicitly."
+                )
+                summary = await cascade.call_llm(prompt)
+                if not summary or len(summary) < 10:
+                    summary = f"You are actively building a graph of ideas under {hubs_str}. Your current Mind Type is {mind_type}."
                     
-                    from backend.services.ai_cascade import AICascade, ai_cascade
-                    cascade = AICascade()
-                    prompt = (
-                        f"You are a Cognitive Graph Profiler. The user has been classified as {mind_type} (MBTI-style Mind Type).\n"
-                        f"Their top 3 active clusters are: {hubs_str}.\n"
-                        f"This is their first classification. Focus on explaining the primary cognitive driver of their signature.\n\n"
-                        f"Write a highly personalized, analytical, and engaging 4-sentence profile summary explaining their cognitive style based on these topics.\n"
-                        f"Constraint: Do not use clinical jargon, do not use template words, and connect the topics explicitly."
-                    )
-                    summary = await cascade.call_llm(prompt)
-                    if not summary or len(summary) < 10:
-                        summary = f"You are actively building a graph of ideas under {hubs_str}. Your current Mind Type is {mind_type}."
-                        
-                    await cur.execute(
-                        "UPDATE users SET mind_type_summary = %s, mind_type_detailed = NULL WHERE id = %s;",
-                        (summary, user.id)
-                    )
-                    await db.commit()
-                    
-                    # Reload trajectory list
-                    await cur.execute("SELECT mind_type_trajectory FROM users WHERE id = %s;", (user.id,))
-                    t_row = await cur.fetchone()
-                    traj = t_row[0] if t_row else []
-            except Exception as lazy_err:
-                logger.error("Failed to lazy generate initial mind type profile: %s", lazy_err)
+                async with get_db_scope(db) as conn:
+                    async with transaction_context(conn):
+                        async with conn.cursor() as cur:
+                            await cur.execute(
+                                "UPDATE users SET mind_type_summary = %s, mind_type_detailed = NULL WHERE id = %s;",
+                                (summary, user.id)
+                            )
+                            
+                            # Reload trajectory list
+                            await cur.execute("SELECT mind_type_trajectory FROM users WHERE id = %s;", (user.id,))
+                            t_row = await cur.fetchone()
+                            traj = t_row[0] if t_row else []
+        except Exception as lazy_err:
+            logger.error("Failed to lazy generate initial mind type profile: %s", lazy_err)
 
-        traj_list = traj if traj else []
-        if isinstance(traj_list, str):
-            try:
-                traj_list = json.loads(traj_list)
-            except Exception:
-                traj_list = []
-                
-        return {
-            "self_description": self_desc,
-            "mind_type": mind_type,
-            "mind_type_summary": summary,
-            "mind_type_trajectory": traj_list,
-            "pulse_score": int(pulse_score) if pulse_score is not None else 0
-        }
+    traj_list = traj if traj else []
+    if isinstance(traj_list, str):
+        try:
+            traj_list = json.loads(traj_list)
+        except Exception:
+            traj_list = []
+            
+    return {
+        "self_description": self_desc,
+        "mind_type": mind_type,
+        "mind_type_summary": summary,
+        "mind_type_trajectory": traj_list,
+        "pulse_score": int(pulse_score) if pulse_score is not None else 0
+    }
 
 @router.get(
     "/pulse",
@@ -2507,187 +2538,191 @@ async def get_user_pulse(
 )
 async def get_detailed_profile(
     user: UserContext = Depends(get_current_user),
-    db: psycopg.AsyncConnection = Depends(get_db),
+    db: psycopg.AsyncConnection | None = Depends(get_db_or_none),
 ):
-    async with db.cursor() as cur:
-        # Check node count
-        await cur.execute("SELECT COUNT(*) FROM items WHERE user_id = %s;", (user.id,))
-        count_row = await cur.fetchone()
-        node_count = count_row[0] if count_row else 0
-        if node_count < 15:
-            raise HTTPException(status_code=403, detail="Detailed profile unlocks at 15 nodes.")
+    from backend.db.connection import get_db_scope, get_db_or_none
+    async with get_db_scope(db) as conn:
+        async with conn.cursor() as cur:
+            # Check node count
+            await cur.execute("SELECT COUNT(*) FROM items WHERE user_id = %s;", (user.id,))
+            count_row = await cur.fetchone()
+            node_count = count_row[0] if count_row else 0
+            if node_count < 15:
+                raise HTTPException(status_code=403, detail="Detailed profile unlocks at 15 nodes.")
 
-        # 1. Breadth (Entropy of hubs)
-        await cur.execute("SELECT id, member_ids, label FROM semantic_hubs WHERE user_id = %s;", (user.id,))
-        hubs = await cur.fetchall()
-        hub_labels = [h[2] for h in hubs]
-        
-        total_items_in_hubs = 0
-        hub_sizes = []
-        item_to_hub = {}
-        for h_id, member_ids, label in hubs:
-            size = len(member_ids) if member_ids else 0
-            hub_sizes.append(size)
-            total_items_in_hubs += size
-            if member_ids:
-                for item_id in member_ids:
-                    item_to_hub[item_id] = h_id
-
-        entropy = 0.0
-        if total_items_in_hubs > 0:
-            import math
-            for size in hub_sizes:
-                if size > 0:
-                    p = size / total_items_in_hubs
-                    entropy -= p * math.log(p)
-
-        # 2. Linkage (Cross-hub confirmed candidates ratio)
-        await cur.execute(
-            "SELECT item_id_a, item_id_b FROM insight_candidates WHERE user_id = %s AND status = 'confirmed';",
-            (user.id,)
-        )
-        edges = await cur.fetchall()
-        cross_hub_count = 0
-        total_edges = len(edges)
-        for a, b in edges:
-            hub_a = item_to_hub.get(a)
-            hub_b = item_to_hub.get(b)
-            if hub_a is not None and hub_b is not None and hub_a != hub_b:
-                cross_hub_count += 1
-        linkage_ratio = (cross_hub_count / total_edges) if total_edges > 0 else 0.0
-
-        # 3. Velocity (Nodes saved in last 7 days)
-        await cur.execute(
-            "SELECT COUNT(*) FROM items WHERE user_id = %s AND created_at >= NOW() - INTERVAL '7 days';",
-            (user.id,)
-        )
-        vel_row = await cur.fetchone()
-        velocity = vel_row[0] if vel_row else 0
-
-        # 4. Novelty (Average distance of new saves to old saves)
-        await cur.execute(
-            "SELECT embedding FROM items WHERE user_id = %s AND created_at >= NOW() - INTERVAL '7 days' AND embedding IS NOT NULL;",
-            (user.id,)
-        )
-        new_items = await cur.fetchall()
-        
-        await cur.execute(
-            "SELECT embedding FROM items WHERE user_id = %s AND created_at < NOW() - INTERVAL '7 days' AND embedding IS NOT NULL;",
-            (user.id,)
-        )
-        old_items = await cur.fetchall()
-
-        novelty = 0.0
-        if new_items and old_items:
-            def parse_vector(emb):
-                if isinstance(emb, str):
-                    try:
-                        return [float(x) for x in emb.strip("[]").split(",")]
-                    except Exception:
-                        return [0.0] * 384
-                return list(emb)
-
-            new_vecs = [parse_vector(n[0]) for n in new_items]
-            old_vecs = [parse_vector(o[0]) for o in old_items]
-
-            total_dist = 0.0
-            pair_count = 0
-            for nv in new_vecs:
-                for ov in old_vecs:
-                    sim = sum(x * y for x, y in zip(nv, ov))
-                    dist = 1.0 - sim
-                    total_dist += dist
-                    pair_count += 1
-            if pair_count > 0:
-                novelty = total_dist / pair_count
-
-        # Check if we have cached explanations in the db
-        await cur.execute("SELECT mind_type_detailed FROM users WHERE id = %s;", (user.id,))
-        row = await cur.fetchone()
-        cached_detailed = row[0] if row else None
-        
-        explanations = {}
-        if cached_detailed:
-            if isinstance(cached_detailed, str):
-                try:
-                    explanations = json.loads(cached_detailed)
-                except Exception:
-                    pass
-            elif isinstance(cached_detailed, dict):
-                explanations = cached_detailed
-
-        # Call LLM to generate the explanations only on cache miss
-        if not explanations:
-            from backend.services.ai_cascade import AICascade, ai_cascade
-            cascade = AICascade()
+            # 1. Breadth (Entropy of hubs)
+            await cur.execute("SELECT id, member_ids, label FROM semantic_hubs WHERE user_id = %s;", (user.id,))
+            hubs = await cur.fetchall()
+            hub_labels = [h[2] for h in hubs]
             
-            hubs_str = ", ".join(hub_labels) if hub_labels else "None"
-            b_label = "Breadth" if entropy >= 1.20 else "Focus"
-            l_label = "Linkage" if linkage_ratio >= 0.20 else "Isolation"
-            v_label = "Velocity" if velocity >= 10 else "Stability"
-            n_label = "Novelty" if novelty >= 0.35 else "Routine"
+            total_items_in_hubs = 0
+            hub_sizes = []
+            item_to_hub = {}
+            for h_id, member_ids, label in hubs:
+                size = len(member_ids) if member_ids else 0
+                hub_sizes.append(size)
+                total_items_in_hubs += size
+                if member_ids:
+                    for item_id in member_ids:
+                        item_to_hub[item_id] = h_id
 
-            prompt = (
-                "You are an expert Cognitive Graph Profiler analyzing a developer/knowledge worker's personal memory network.\n"
-                f"The user's top active topic clusters (hubs) are: [{hubs_str}].\n\n"
-                "Analyze the following 4 structural dimensions of their graph and write exactly one deeply analytical, personalized, and engaging sentence explanation for each, explaining what their score means for their cognitive habits.\n\n"
-                "DIMENSION DEFINITIONS:\n"
-                "1. Breadth (B/F): Shannon Entropy of topic clusters. High breadth (B) means wide curiosity across multiple domains. Low focus (F) means deep, concentrated focus on a few key areas.\n"
-                "2. Linkage (L/I): Ratio of cross-hub connections. High linkage (L) means active synthesis and connecting ideas between different domains. Low independence (I) means topics are kept clean, modular, and separate.\n"
-                "3. Velocity (V/S): Ingestion frequency of new items this week. High velocity (V) represents rapid information gathering. Low stability (S) indicates a slow, highly curated, and meditative pacing.\n"
-                "4. Novelty (N/R): Cosine distance of new saves to historical baseline. High novelty (N) means actively exploring fresh, unfamiliar territories. Low routine (R) means reinforcing and expanding current expertise.\n\n"
-                "USER PERFORMANCE STATS:\n"
-                f"- Breadth: Entropy is {entropy:.2f} (Benchmark: 1.20). Category: {b_label}.\n"
-                f"- Linkage: Cross-hub ratio is {linkage_ratio:.2f} (Benchmark: 0.20). Category: {l_label}.\n"
-                f"- Velocity: Ingestion count is {velocity} items (Benchmark: 10). Category: {v_label}.\n"
-                f"- Novelty: Distance is {novelty:.2f} (Benchmark: 0.35). Category: {n_label}.\n\n"
-                "CONSTRAINTS:\n"
-                "- Write exactly one concise sentence per dimension.\n"
-                "- Speak directly to the user (use 'you' and 'your').\n"
-                "- Avoid repeating the raw numerical values or benchmarks in the text. Focus entirely on the qualitative meaning (e.g., use phrases like 'exceeding the target baseline', 'falling short of the synthesis threshold', 'concentrating your energy', 'exploring highly unfamiliar ground').\n"
-                "- Connect the explanations back to their active topic clusters if possible.\n"
-                "- Keep the tone intellectual, precise, and highly insightful.\n\n"
-                "Format your response as a valid JSON object with keys: \"breadth\", \"linkage\", \"velocity\", \"novelty\"."
+            entropy = 0.0
+            if total_items_in_hubs > 0:
+                import math
+                for size in hub_sizes:
+                    if size > 0:
+                        p = size / total_items_in_hubs
+                        entropy -= p * math.log(p)
+
+            # 2. Linkage (Cross-hub confirmed candidates ratio)
+            await cur.execute(
+                "SELECT item_id_a, item_id_b FROM insight_candidates WHERE user_id = %s AND status = 'confirmed';",
+                (user.id,)
             )
+            edges = await cur.fetchall()
+            cross_hub_count = 0
+            total_edges = len(edges)
+            for a, b in edges:
+                hub_a = item_to_hub.get(a)
+                hub_b = item_to_hub.get(b)
+                if hub_a is not None and hub_b is not None and hub_a != hub_b:
+                    cross_hub_count += 1
+            linkage_ratio = (cross_hub_count / total_edges) if total_edges > 0 else 0.0
 
-            res = await cascade.call_llm(prompt)
-            if res:
-                try:
-                    import re
-                    match = re.search(r"\{.*\}", res, re.DOTALL)
-                    if match:
-                        explanations = json.loads(match.group(0))
-                        await cur.execute(
-                            "UPDATE users SET mind_type_detailed = %s WHERE id = %s;",
-                            (json.dumps(explanations), user.id)
-                        )
-                        await db.commit()
-                except Exception as e:
-                    logger.error("Failed to parse and cache detailed profile JSON: %s", e)
+            # 3. Velocity (Nodes saved in last 7 days)
+            await cur.execute(
+                "SELECT COUNT(*) FROM items WHERE user_id = %s AND created_at >= NOW() - INTERVAL '7 days';",
+                (user.id,)
+            )
+            vel_row = await cur.fetchone()
+            velocity = vel_row[0] if vel_row else 0
 
-        b_exp = explanations.get("breadth") or (
-            f"Your entropy is {entropy:.2f} (Threshold: 1.20). You maintain "
-            + ("a wide breadth across multiple hubs." if entropy >= 1.20 else "a tight focus on a few core hubs.")
-        )
-        l_exp = explanations.get("linkage") or (
-            f"Your cross-hub linkage ratio is {linkage_ratio:.2f} (Threshold: 0.20). You tend to "
-            + ("actively connect ideas across hubs." if linkage_ratio >= 0.20 else "keep your clusters relatively isolated.")
-        )
-        v_exp = explanations.get("velocity") or (
-            f"You saved {velocity} items this week (Threshold: 10). Your graph growth is "
-            + ("expanding rapidly." if velocity >= 10 else "stable and steady.")
-        )
-        n_exp = explanations.get("novelty") or (
-            f"Your new-concept distance is {novelty:.2f} (Threshold: 0.35). You are "
-            + ("frequently exploring novel directions." if novelty >= 0.35 else "reinforcing routine concepts.")
+            # 4. Novelty (Average distance of new saves to old saves)
+            await cur.execute(
+                "SELECT embedding FROM items WHERE user_id = %s AND created_at >= NOW() - INTERVAL '7 days' AND embedding IS NOT NULL;",
+                (user.id,)
+            )
+            new_items = await cur.fetchall()
+            
+            await cur.execute(
+                "SELECT embedding FROM items WHERE user_id = %s AND created_at < NOW() - INTERVAL '7 days' AND embedding IS NOT NULL;",
+                (user.id,)
+            )
+            old_items = await cur.fetchall()
+
+            novelty = 0.0
+            if new_items and old_items:
+                def parse_vector(emb):
+                    if isinstance(emb, str):
+                        try:
+                            return [float(x) for x in emb.strip("[]").split(",")]
+                        except Exception:
+                            return [0.0] * 384
+                    return list(emb)
+
+                new_vecs = [parse_vector(n[0]) for n in new_items]
+                old_vecs = [parse_vector(o[0]) for o in old_items]
+
+                total_dist = 0.0
+                pair_count = 0
+                for nv in new_vecs:
+                    for ov in old_vecs:
+                        sim = sum(x * y for x, y in zip(nv, ov))
+                        dist = 1.0 - sim
+                        total_dist += dist
+                        pair_count += 1
+                if pair_count > 0:
+                    novelty = total_dist / pair_count
+
+            # Check if we have cached explanations in the db
+            await cur.execute("SELECT mind_type_detailed FROM users WHERE id = %s;", (user.id,))
+            row = await cur.fetchone()
+            cached_detailed = row[0] if row else None
+            
+            explanations = {}
+            if cached_detailed:
+                if isinstance(cached_detailed, str):
+                    try:
+                        explanations = json.loads(cached_detailed)
+                    except Exception:
+                        pass
+                elif isinstance(cached_detailed, dict):
+                    explanations = cached_detailed
+
+    # Call LLM to generate the explanations only on cache miss
+    if not explanations:
+        from backend.services.ai_cascade import AICascade, ai_cascade
+        cascade = AICascade()
+        
+        hubs_str = ", ".join(hub_labels) if hub_labels else "None"
+        b_label = "Breadth" if entropy >= 1.20 else "Focus"
+        l_label = "Linkage" if linkage_ratio >= 0.20 else "Isolation"
+        v_label = "Velocity" if velocity >= 10 else "Stability"
+        n_label = "Novelty" if novelty >= 0.35 else "Routine"
+
+        prompt = (
+            "You are an expert Cognitive Graph Profiler analyzing a developer/knowledge worker's personal memory network.\n"
+            f"The user's top active topic clusters (hubs) are: [{hubs_str}].\n\n"
+            "Analyze the following 4 structural dimensions of their graph and write exactly one deeply analytical, personalized, and engaging sentence explanation for each, explaining what their score means for their cognitive habits.\n\n"
+            "DIMENSION DEFINITIONS:\n"
+            "1. Breadth (B/F): Shannon Entropy of topic clusters. High breadth (B) means wide curiosity across multiple domains. Low focus (F) means deep, concentrated focus on a few key areas.\n"
+            "2. Linkage (L/I): Ratio of cross-hub connections. High linkage (L) means active synthesis and connecting ideas between different domains. Low independence (I) means topics are kept clean, modular, and separate.\n"
+            "3. Velocity (V/S): Ingestion frequency of new items this week. High velocity (V) represents rapid information gathering. Low stability (S) indicates a slow, highly curated, and meditative pacing.\n"
+            "4. Novelty (N/R): Cosine distance of new saves to historical baseline. High novelty (N) means actively exploring fresh, unfamiliar territories. Low routine (R) means reinforcing and expanding current expertise.\n\n"
+            "USER PERFORMANCE STATS:\n"
+            f"- Breadth: Entropy is {entropy:.2f} (Benchmark: 1.20). Category: {b_label}.\n"
+            f"- Linkage: Cross-hub ratio is {linkage_ratio:.2f} (Benchmark: 0.20). Category: {l_label}.\n"
+            f"- Velocity: Ingestion count is {velocity} items (Benchmark: 10). Category: {v_label}.\n"
+            f"- Novelty: Distance is {novelty:.2f} (Benchmark: 0.35). Category: {n_label}.\n\n"
+            "CONSTRAINTS:\n"
+            "- Write exactly one concise sentence per dimension.\n"
+            "- Speak directly to the user (use 'you' and 'your').\n"
+            "- Avoid repeating the raw numerical values or benchmarks in the text. Focus entirely on the qualitative meaning (e.g., use phrases like 'exceeding the target baseline', 'falling short of the synthesis threshold', 'concentrating your energy', 'exploring highly unfamiliar ground').\n"
+            "- Connect the explanations back to their active topic clusters if possible.\n"
+            "- Keep the tone intellectual, precise, and highly insightful.\n\n"
+            "Format your response as a valid JSON object with keys: \"breadth\", \"linkage\", \"velocity\", \"novelty\"."
         )
 
-        return {
-            "breadth": {"score": float(entropy), "threshold": 1.20, "explanation": b_exp},
-            "linkage": {"score": float(linkage_ratio), "threshold": 0.20, "explanation": l_exp},
-            "velocity": {"score": float(velocity), "threshold": 10.0, "explanation": v_exp},
-            "novelty": {"score": float(novelty), "threshold": 0.35, "explanation": n_exp}
-        }
+        res = await cascade.call_llm(prompt)
+        if res:
+            try:
+                import re
+                match = re.search(r"\{.*\}", res, re.DOTALL)
+                if match:
+                    explanations = json.loads(match.group(0))
+                    async with get_db_scope(db) as conn:
+                        async with transaction_context(conn):
+                            async with conn.cursor() as cur:
+                                await cur.execute(
+                                    "UPDATE users SET mind_type_detailed = %s WHERE id = %s;",
+                                    (json.dumps(explanations), user.id)
+                                )
+            except Exception as e:
+                logger.error("Failed to parse and cache detailed profile JSON: %s", e)
+
+    b_exp = explanations.get("breadth") or (
+        f"Your entropy is {entropy:.2f} (Threshold: 1.20). You maintain "
+        + ("a wide breadth across multiple hubs." if entropy >= 1.20 else "a tight focus on a few core hubs.")
+    )
+    l_exp = explanations.get("linkage") or (
+        f"Your cross-hub linkage ratio is {linkage_ratio:.2f} (Threshold: 0.20). You tend to "
+        + ("actively connect ideas across hubs." if linkage_ratio >= 0.20 else "keep your clusters relatively isolated.")
+    )
+    v_exp = explanations.get("velocity") or (
+        f"You saved {velocity} items this week (Threshold: 10). Your graph growth is "
+        + ("expanding rapidly." if velocity >= 10 else "stable and steady.")
+    )
+    n_exp = explanations.get("novelty") or (
+        f"Your new-concept distance is {novelty:.2f} (Threshold: 0.35). You are "
+        + ("frequently exploring novel directions." if novelty >= 0.35 else "reinforcing routine concepts.")
+    )
+
+    return {
+        "breadth": {"score": float(entropy), "threshold": 1.20, "explanation": b_exp},
+        "linkage": {"score": float(linkage_ratio), "threshold": 0.20, "explanation": l_exp},
+        "velocity": {"score": float(velocity), "threshold": 10.0, "explanation": v_exp},
+        "novelty": {"score": float(novelty), "threshold": 0.35, "explanation": n_exp}
+    }
 
 
 @router.get(

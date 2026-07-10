@@ -2,6 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useToast } from './Toast';
 import { X, Trophy, ChartBar, Hourglass, Percent, Compass } from '@phosphor-icons/react';
 
+/**
+ * @deprecated This component is currently unused in the application but kept for test coverage.
+ */
 export default function QuizStatsPanel({ isOpen, onClose }) {
   const { addToast } = useToast();
   const panelRef = useRef(null);

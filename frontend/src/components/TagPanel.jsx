@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useCallback } from 'react';
 import gsap from 'gsap';
 import ArchiveCard from './ArchiveCard';
 
@@ -21,7 +21,7 @@ export default function TagPanel({ tag, onClose }) {
   }, [tag]);
 
   /* ── Slide-out on close ── */
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     if (!panelRef.current) {
       onClose();
       return;
@@ -33,14 +33,14 @@ export default function TagPanel({ tag, onClose }) {
       ease: 'power2.in',
       onComplete: onClose,
     });
-  };
+  }, [onClose]);
 
   /* ── Close on Escape ── */
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') handleClose(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [handleClose]);
 
   const items = tag?.items || [];
 
@@ -65,7 +65,7 @@ export default function TagPanel({ tag, onClose }) {
           top: 0,
           right: 0,
           width: 'min(560px, 90vw)',
-          height: '100vh',
+          height: '100dvh',
           background: 'rgba(17, 15, 20, 0.97)',
           borderLeft: '1px solid rgba(207, 163, 101, 0.12)',
           backdropFilter: 'blur(20px)',

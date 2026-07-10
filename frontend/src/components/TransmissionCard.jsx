@@ -9,6 +9,26 @@ import GlitchText from './GlitchText';
    Uses CRT-inspired styling: phosphor glow, scanlines,
    monospace typography, and 3D card flip.
    ============================================================ */
+// CRT corner decorator component
+const CornerDecorators = () => (
+  <>
+    {['top-left', 'top-right', 'bottom-left', 'bottom-right'].map(corner => (
+      <div key={corner} style={{
+        position: 'absolute',
+        width: 12,
+        height: 12,
+        border: '1px solid rgba(143, 163, 130, 0.4)',
+        ...(corner.includes('top') ? { top: 8 } : { bottom: 8 }),
+        ...(corner.includes('left') ? { left: 8 } : { right: 8 }),
+        ...(corner.includes('top') && corner.includes('left') ? { borderRight: 'none', borderBottom: 'none' } : {}),
+        ...(corner.includes('top') && corner.includes('right') ? { borderLeft: 'none', borderBottom: 'none' } : {}),
+        ...(corner.includes('bottom') && corner.includes('left') ? { borderRight: 'none', borderTop: 'none' } : {}),
+        ...(corner.includes('bottom') && corner.includes('right') ? { borderLeft: 'none', borderTop: 'none' } : {}),
+      }} />
+    ))}
+  </>
+);
+
 export default function TransmissionCard({
   card,
   cardNumber,
@@ -32,26 +52,6 @@ export default function TransmissionCard({
     : null;
 
   const answer = card.answer || card.back || formattedAnswer || card.raw_text || 'No answer';
-
-  // CRT corner decorator component
-  const CornerDecorators = () => (
-    <>
-      {['top-left', 'top-right', 'bottom-left', 'bottom-right'].map(corner => (
-        <div key={corner} style={{
-          position: 'absolute',
-          width: 12,
-          height: 12,
-          border: '1px solid rgba(143, 163, 130, 0.4)',
-          ...(corner.includes('top') ? { top: 8 } : { bottom: 8 }),
-          ...(corner.includes('left') ? { left: 8 } : { right: 8 }),
-          ...(corner.includes('top') && corner.includes('left') ? { borderRight: 'none', borderBottom: 'none' } : {}),
-          ...(corner.includes('top') && corner.includes('right') ? { borderLeft: 'none', borderBottom: 'none' } : {}),
-          ...(corner.includes('bottom') && corner.includes('left') ? { borderRight: 'none', borderTop: 'none' } : {}),
-          ...(corner.includes('bottom') && corner.includes('right') ? { borderLeft: 'none', borderTop: 'none' } : {}),
-        }} />
-      ))}
-    </>
-  );
 
   return (
     <div className="transmission-card-container" style={{

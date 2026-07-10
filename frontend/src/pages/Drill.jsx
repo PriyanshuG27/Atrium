@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import axios from '../api/client';
+import { apiFetch } from '../api/client';
 import TransmissionCard from '../components/TransmissionCard';
 import DrillProgress from '../components/DrillProgress';
 import DrillSummary from '../components/DrillSummary';
@@ -30,6 +30,7 @@ export default function Drill() {
   const [nextReviewAt, setNextReviewAt] = useState(null);
   const [streak, setStreak] = useState(0);
   const [cardExiting, setCardExiting] = useState(false);
+  const [remainingCount, setRemainingCount] = useState(0);
 
   const feedbackTimer = useRef(null);
   const revealedTimeRef = useRef(0);
@@ -47,7 +48,7 @@ export default function Drill() {
   useEffect(() => {
     const fetchStreak = async () => {
       try {
-        const res = await fetch('/api/me');
+        const res = await apiFetch('/api/me');
         if (res.ok) {
           const data = await res.json();
           setStreak(data.streak_count || 0);
@@ -63,11 +64,17 @@ export default function Drill() {
   const fetchCards = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/quizzes/due');
+      const res = await apiFetch('/api/quizzes/due');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const due = data.quizzes || data || [];
       setCards(due);
+
+      const statsRes = await apiFetch('/api/quizzes/stats');
+      if (statsRes && statsRes.ok && typeof statsRes.json === 'function') {
+        const statsData = await statsRes.json();
+        setRemainingCount(statsData.due_today || 0);
+      }
       setError(null);
     } catch (err) {
       setError(err.message);
@@ -77,6 +84,34 @@ export default function Drill() {
   }, []);
 
   useEffect(() => { fetchCards(); }, [fetchCards]);
+
+  useEffect(() => {
+    if (sessionDone) {
+      const fetchRemaining = async () => {
+        try {
+          const statsRes = await apiFetch('/api/quizzes/stats');
+          if (statsRes && statsRes.ok && typeof statsRes.json === 'function') {
+            const statsData = await statsRes.json();
+            setRemainingCount(statsData.due_today || 0);
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      };
+      fetchRemaining();
+    }
+  }, [sessionDone]);
+
+  const startNewSession = useCallback(() => {
+    setCurrentIndex(0);
+    setScores({ locked: 0, shaky: 0, miss: 0 });
+    setBootPhase('booting');
+    setShowBeginButton(false);
+    setShowDueText(false);
+    setBootText('');
+    setSessionDone(false);
+    fetchCards();
+  }, [fetchCards]);
 
   /* ── Typing effect for boot screen ───────────────────────────────────── */
   useEffect(() => {
@@ -131,11 +166,10 @@ export default function Drill() {
 
     // Post rating to API
     try {
-      const res = await fetch(`/api/quizzes/${card.quiz_id || card.id}/answer`, {
+      const res = await apiFetch(`/api/quizzes/${card.quiz_id || card.id}/answer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ quality: qualityVal }),
-        credentials: 'include',
       });
       if (res.ok) {
         const data = await res.json();
@@ -256,31 +290,10 @@ export default function Drill() {
   }, []);
 
   /* ── Loading ─────────────────────────────────────────────────────────── */
-  if (loading) {
-    return (
-      <div style={{ width: '100%', height: '100vh', background: 'var(--bg-void)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '1rem' }}>
-        <div style={{ width: 32, height: 32, borderRadius: '50%', border: '2px solid rgba(207,163,101,0.2)', borderTopColor: 'var(--accent-gold)', animation: 'spin 1s linear infinite' }} />
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)', letterSpacing: '0.1em' }}>LOADING TRANSMISSIONS…</span>
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-      </div>
-    );
-  }
-
-  /* ── Error ───────────────────────────────────────────────────────────── */
-  if (error) {
-    return (
-      <div style={{ width: '100%', height: '100vh', background: 'var(--bg-void)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: '#e07070', letterSpacing: '0.08em' }}>
-          TRANSMISSION ERROR — {error}
-        </div>
-      </div>
-    );
-  }
-
-  /* ── No cards due ────────────────────────────────────────────────────── */
+  /* ── Loading Skeleton & Boot Overlay inside Unified Layout ── */
   if (!loading && cards.length === 0) {
     return (
-      <div style={{ width: '100%', height: '100vh', background: 'var(--bg-void)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '1.5rem' }}>
+      <div style={{ width: '100%', height: '100%', background: 'var(--bg-void)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '1.5rem' }}>
         <div style={{ fontFamily: 'var(--font-display)', fontSize: '3rem', color: 'var(--accent-gold)', opacity: 0.4 }}>⚡</div>
         <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text-signal)', letterSpacing: '0.08em' }}>
           NO TRANSMISSIONS DUE
@@ -292,93 +305,32 @@ export default function Drill() {
     );
   }
 
-  /* ── Session done ────────────────────────────────────────────────────── */
+  if (error) {
+    return (
+      <div style={{ width: '100%', height: '100%', background: 'var(--bg-void)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: '#e07070', letterSpacing: '0.08em' }}>
+          TRANSMISSION ERROR — {error}
+        </div>
+      </div>
+    );
+  }
+
   if (sessionDone) {
     return (
-      <div style={{ width: '100%', height: '100vh', background: 'var(--bg-void)' }}>
+      <div style={{ width: '100%', height: '100%', background: 'var(--bg-void)' }}>
         <DrillSummary 
           scores={scores} 
           total={cards.length} 
           nextReviewAt={nextReviewAt} 
           streak={streak} 
+          remainingCount={remainingCount}
+          onDrillMore={startNewSession}
           onNavigate={(roomId) => {
             const paths = { archive: '/archive', map: '/map', drill: '/drill', settings: '/settings' };
             window.history.pushState({}, '', paths[roomId]);
             window.dispatchEvent(new PopStateEvent('popstate'));
           }}
         />
-      </div>
-    );
-  }
-
-  /* ── Boot screen ── */
-  if (!loading && cards.length > 0 && bootPhase === 'booting') {
-    return (
-      <div 
-        className="drill-room crt-flicker"
-        style={{ 
-          width: '100%', 
-          height: '100vh', 
-          background: 'var(--bg-void)', 
-          display: 'flex', 
-          alignItems: 'center', 
-          justifyContent: 'center', 
-          flexDirection: 'column', 
-          gap: '1.5rem',
-          position: 'relative',
-          overflow: 'hidden'
-        }}
-      >
-        {/* CRT scanline overlay */}
-        <div style={{
-          position: 'absolute',
-          inset: 0,
-          backgroundImage: 'repeating-linear-gradient(0deg, rgba(8,250,145,0.01) 0px, rgba(8,250,145,0.01) 1px, transparent 1px, transparent 3px)',
-          pointerEvents: 'none',
-          zIndex: 10,
-        }} />
-        
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--accent-gold)', letterSpacing: '0.08em', minHeight: 20 }}>
-          {bootText}
-        </div>
-        
-        <div style={{ 
-          fontFamily: 'var(--font-mono)', 
-          fontSize: 14, 
-          color: 'var(--text-signal)', 
-          letterSpacing: '0.12em',
-          opacity: showDueText ? 0.7 : 0,
-          transition: 'opacity 0.4s ease',
-          fontWeight: 'bold'
-        }}>
-          [{cards.length} TRANSMISSIONS DUE]
-        </div>
-
-        <button
-          onClick={() => {
-            AudioEngine.playClick();
-            setBootPhase('session');
-          }}
-          className="pulse-btn"
-          style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: 11,
-            color: 'var(--accent-gold)',
-            background: 'rgba(207, 163, 101, 0.06)',
-            border: '1px solid rgba(207, 163, 101, 0.2)',
-            borderRadius: 3,
-            padding: '0.625rem 1.5rem',
-            cursor: 'pointer',
-            letterSpacing: '0.12em',
-            textTransform: 'uppercase',
-            opacity: showBeginButton ? 1 : 0,
-            transform: showBeginButton ? 'translateY(0)' : 'translateY(4px)',
-            transition: 'opacity 0.4s ease, transform 0.4s ease, background 0.2s ease, border-color 0.2s ease',
-            marginTop: '1rem',
-          }}
-        >
-          Begin Session ›
-        </button>
       </div>
     );
   }
@@ -390,7 +342,7 @@ export default function Drill() {
       className={`drill-room ${feedback === 'miss' ? 'viewport-shake' : ''}`}
       style={{
         width: '100%',
-        height: '100vh',
+        height: '100%',
         background: 'var(--bg-void)',
         display: 'flex',
         flexDirection: 'column',
@@ -419,6 +371,106 @@ export default function Drill() {
         pointerEvents: 'none',
       }} />
 
+      {/* ── Loading Skeleton Overlay ── */}
+      {loading && (
+        <div style={{ position: 'absolute', inset: 0, background: 'var(--bg-void)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', padding: '2rem', zIndex: 3000 }}>
+          <div className="skeleton-drill" style={{ width: 'min(500px, 90vw)', height: 320, background: 'rgba(17,15,20,0.4)', border: '1px dashed rgba(207,163,101,0.1)', borderRadius: 8, padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.25rem', opacity: 0.5 }}>
+            <div style={{ width: '30%', height: 12, background: 'rgba(240,237,232,0.03)', borderRadius: 2 }} />
+            <div style={{ width: '80%', height: 24, background: 'rgba(240,237,232,0.05)', borderRadius: 4, marginTop: '1rem' }} />
+            <div style={{ width: '95%', height: 16, background: 'rgba(240,237,232,0.03)', borderRadius: 4 }} />
+            <div style={{ width: '70%', height: 16, background: 'rgba(240,237,232,0.03)', borderRadius: 4 }} />
+            <div style={{ width: '50%', height: 40, background: 'rgba(207,163,101,0.03)', border: '1px solid rgba(207,163,101,0.08)', borderRadius: 6, marginTop: 'auto', alignSelf: 'center' }} />
+          </div>
+        </div>
+      )}
+
+      {/* ── Boot screen overlay ── */}
+      {!loading && bootPhase === 'booting' && (
+        <div 
+          className="crt-flicker"
+          style={{ 
+            position: 'absolute',
+            inset: 0,
+            background: 'var(--bg-void)', 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center', 
+            flexDirection: 'column', 
+            gap: '1.25rem',
+            zIndex: 2000,
+            overflow: 'hidden'
+          }}
+        >
+          {/* Terminal System Readout (LCP element) */}
+          <div style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: 9,
+            color: 'rgba(207, 163, 101, 0.45)',
+            lineHeight: 1.6,
+            textAlign: 'left',
+            background: 'rgba(207, 163, 101, 0.015)',
+            border: '1px solid rgba(207, 163, 101, 0.08)',
+            borderRadius: '4px',
+            padding: '1rem 1.25rem',
+            width: 'min(420px, 80vw)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.2rem',
+            opacity: showDueText ? 0.8 : 0,
+            transition: 'opacity 0.4s ease'
+          }}>
+            <div>{`SYSTEM: SYNCHRONIZING COGNITIVE CACHE...`}</div>
+            <div>{`PROTOCOL: ACTIVE RECALL (SM-2 ALGORITHM)`}</div>
+            <div>{`MEMORY NODE INTEGRITY: VERIFIED [100%]`}</div>
+            <div>{`CONCURRENCY CAP: asyncio.Semaphore(3)`}</div>
+            <div>{`SECURITY VERIFICATION: HMAC_TWA / JWT`}</div>
+            <div>{`ESTABLISHED SECURE SESSION: ACTIVE`}</div>
+          </div>
+
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--accent-gold)', letterSpacing: '0.08em', minHeight: 20 }}>
+            {bootText}
+          </div>
+          
+          <div style={{ 
+            fontFamily: 'var(--font-mono)', 
+            fontSize: 14, 
+            color: 'var(--text-signal)', 
+            letterSpacing: '0.12em',
+            opacity: showDueText ? 0.7 : 0,
+            transition: 'opacity 0.4s ease',
+            fontWeight: 'bold'
+          }}>
+            [{cards.length} TRANSMISSIONS DUE]
+          </div>
+
+          <button
+            onClick={() => {
+              AudioEngine.playClick();
+              setBootPhase('session');
+            }}
+            className="pulse-btn"
+            style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: 11,
+              color: 'var(--accent-gold)',
+              background: 'rgba(207, 163, 101, 0.06)',
+              border: '1px solid rgba(207, 163, 101, 0.2)',
+              borderRadius: 3,
+              padding: '0.625rem 1.5rem',
+              cursor: 'pointer',
+              letterSpacing: '0.12em',
+              textTransform: 'uppercase',
+              opacity: showBeginButton ? 1 : 0,
+              transform: showBeginButton ? 'translateY(0)' : 'translateY(4px)',
+              transition: 'opacity 0.4s ease, transform 0.4s ease, background 0.2s ease, border-color 0.2s ease',
+              marginTop: '0.5rem',
+            }}
+          >
+            Begin Session ›
+          </button>
+        </div>
+      )}
+
       {/* ── Locked Full-screen flash overlay ── */}
       {feedback === 'locked' && (
         <div style={{
@@ -437,36 +489,41 @@ export default function Drill() {
       )}
 
       {/* ── Progress indicator ── */}
-      <DrillProgress current={currentIndex + 1} total={cards.length} />
+      {cards.length > 0 && <DrillProgress current={currentIndex + 1} total={cards.length} />}
 
       {/* ── Transmission card ── */}
-      <div
-        key={currentIndex}
-        style={{
-          animation: cardExiting ? 'cardExit 0.18s cubic-bezier(0.4,0,1,1) forwards' : 'cardEnter 0.22s cubic-bezier(0.16,1,0.3,1) forwards',
-        }}
-      >
-        <TransmissionCard
-          card={currentCard}
-          cardNumber={currentIndex + 1}
-          totalCards={cards.length}
-          revealed={revealed}
-          feedback={feedback}
-          onReveal={() => setRevealed(true)}
-          onRate={rateCard}
-        />
-      </div>
+      {cards.length > 0 && (
+        <div
+          key={currentIndex}
+          style={{
+            animation: cardExiting ? 'cardExit 0.18s cubic-bezier(0.4,0,1,1) forwards' : 'cardEnter 0.22s cubic-bezier(0.16,1,0.3,1) forwards',
+          }}
+        >
+          <TransmissionCard
+            card={currentCard}
+            cardNumber={currentIndex + 1}
+            totalCards={cards.length}
+            revealed={revealed}
+            feedback={feedback}
+            onReveal={() => setRevealed(true)}
+            onRate={rateCard}
+          />
+        </div>
+      )}
 
       {/* ── Keyboard Shortcut Hint Bar ── */}
-      {!feedback && (
-        <div style={{
-          position: 'absolute',
-          bottom: '2.5rem',
-          display: 'flex',
-          gap: '1.25rem',
-          opacity: 0.3,
-          zIndex: 5,
-        }}>
+      {!feedback && cards.length > 0 && (
+        <div 
+          className="drill-keyboard-hints"
+          style={{
+            position: 'absolute',
+            bottom: '2.5rem',
+            display: 'flex',
+            gap: '1.25rem',
+            opacity: 0.3,
+            zIndex: 5,
+          }}
+        >
           {[
             ['SPACE', 'reveal'],
             ['1', 'locked in'],

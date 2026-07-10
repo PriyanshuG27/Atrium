@@ -15,7 +15,10 @@ const LOW_PERF_THRESHOLD = 45;
 
 export default function useFPSMonitor() {
   const samples   = useRef([]);
-  const lastTime  = useRef(performance.now());
+  const lastTime  = useRef(null);
+  if (lastTime.current === null) {
+    lastTime.current = performance.now();
+  }
   const rafId     = useRef(null);
   const [fps, setFps] = useState(60);
 

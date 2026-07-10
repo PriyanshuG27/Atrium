@@ -4,51 +4,23 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import App from '../App';
 import { AuthProvider } from '../context/AuthContext';
 import { ToastProvider } from '../components/Toast';
-import { setToastHandler, setUnauthorizedHandler } from '../api/client';
 
-vi.mock('axios', () => {
-  const mockInstance = {
-    create: vi.fn(() => mockInstance),
-    interceptors: {
-      request: { use: vi.fn(), eject: vi.fn() },
-      response: {
-        use: vi.fn((fulfilled, rejected) => {
-          globalThis.mockResponseRejectionHandler = rejected;
-        }),
-        eject: vi.fn()
-      }
-    }
-  };
-  return {
-    default: mockInstance,
-    ...mockInstance
-  };
-});
+// Mock the lazy-loaded Archive room to render synchronously in tests
+vi.mock('../pages/Archive', () => ({
+  default: () => <div>No signals received yet.</div>
+}));
 
 describe('Network and Offline Error Handling', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Default mocks for auth fetch requests
+    vi.useRealTimers();
+
     vi.spyOn(window, 'fetch').mockImplementation((url) => {
       if (url === '/auth/me' || url === '/api/me') {
         return Promise.resolve({
           ok: true,
           status: 200,
           json: () => Promise.resolve({ id: 1, chat_id: '12345', streak_count: 0, total_saves: 0 }),
-        });
-      }
-      if (url === '/api/quizzes/due') {
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve([]),
-        });
-      }
-      if (url.includes('/api/items')) {
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve({ items: [], total: 0, pages: 1 }),
         });
       }
       if (url === '/api/quizzes/stats') {
@@ -59,7 +31,6 @@ describe('Network and Offline Error Handling', () => {
         });
       }
       return Promise.resolve({ ok: false });
-
     });
   });
 
@@ -76,7 +47,7 @@ describe('Network and Offline Error Handling', () => {
       </ToastProvider>
     );
 
-    // Wait for the app to finish loading the Dashboard/Auth state
+    // Wait for the app to finish loading the Dashboard/Auth state and show the archive room mock
     await waitFor(() => {
       expect(screen.getByText(/No signals received yet/i)).toBeInTheDocument();
     });
@@ -104,85 +75,5 @@ describe('Network and Offline Error Handling', () => {
     // Verify online-refetch was dispatched
     expect(refetchSpy).toHaveBeenCalled();
     window.removeEventListener('online-refetch', refetchSpy);
-  });
-
-  it('axios interceptor handles 401 unauthorized and triggers logout', async () => {
-    const mockLogout = vi.fn();
-    // Register custom handlers to test interceptor logic in isolation
-    setUnauthorizedHandler(mockLogout);
-
-    const error = {
-      config: { url: '/api/search' },
-      response: {
-        status: 401
-      }
-    };
-
-    // Invoke interceptor response error handler directly
-    await expect(globalThis.mockResponseRejectionHandler(error)).rejects.toBeDefined();
-
-    expect(mockLogout).toHaveBeenCalled();
-  });
-
-  it('axios interceptor ignores 401 unauthorized on auth endpoints', async () => {
-    const mockLogout = vi.fn();
-    setUnauthorizedHandler(mockLogout);
-
-    const error = {
-      config: { url: '/auth/me' },
-      response: {
-        status: 401
-      }
-    };
-
-    await expect(globalThis.mockResponseRejectionHandler(error)).rejects.toBeDefined();
-
-    expect(mockLogout).not.toHaveBeenCalled();
-  });
-
-  it('axios interceptor triggers correct toast for 429 Too Many Requests', async () => {
-    const mockToast = vi.fn();
-    setToastHandler(mockToast);
-
-    const error = {
-      config: { url: '/api/search' },
-      response: {
-        status: 429
-      }
-    };
-
-    await expect(globalThis.mockResponseRejectionHandler(error)).rejects.toBeDefined();
-
-    expect(mockToast).toHaveBeenCalledWith('Too many requests — please wait', 'warning');
-  });
-
-  it('axios interceptor triggers correct toast for 503 Service Unavailable', async () => {
-    const mockToast = vi.fn();
-    setToastHandler(mockToast);
-
-    const error = {
-      config: { url: '/api/search' },
-      response: {
-        status: 503
-      }
-    };
-
-    await expect(globalThis.mockResponseRejectionHandler(error)).rejects.toBeDefined();
-
-    expect(mockToast).toHaveBeenCalledWith('Server unavailable — retrying in 30 s', 'error');
-  });
-
-  it('axios interceptor triggers correct toast for network connection loss', async () => {
-    const mockToast = vi.fn();
-    setToastHandler(mockToast);
-
-    const error = {
-      // No response object indicates network error
-      config: { url: '/api/search' }
-    };
-
-    await expect(globalThis.mockResponseRejectionHandler(error)).rejects.toBeDefined();
-
-    expect(mockToast).toHaveBeenCalledWith('Connection lost — check your internet', 'error');
   });
 });

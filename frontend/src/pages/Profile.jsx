@@ -90,7 +90,7 @@ function CognitiveAvatar({ signature, size = 120 }) {
         cursor: 'crosshair',
         perspective: '500px',
         transformStyle: 'preserve-3d',
-        transition: 'all 0.3s ease'
+        transition: 'opacity 0.3s ease'
       }}
     >
       <div
@@ -548,6 +548,48 @@ export default function Profile() {
             grid-template-columns: 1fr;
             gap: 2.5rem;
           }
+        }
+        
+        @media (max-width: 768px) {
+          .observatory-wrapper {
+            padding: 1.5rem 1rem !important;
+          }
+          .observatory-header {
+            margin-bottom: 2.5rem !important;
+          }
+          .observatory-header h1 {
+            font-size: 2.2rem !important;
+          }
+          .profile-card {
+            padding: 1.5rem !important;
+          }
+          .grid-two-cols {
+            gap: 1.5rem !important;
+            margin-bottom: 1.5rem !important;
+          }
+          .card-subtitle {
+            margin-bottom: 1.5rem !important;
+          }
+          .cognitive-summary-card {
+            grid-template-columns: 1fr !important;
+            gap: 1.5rem !important;
+            padding: 1.25rem !important;
+          }
+          .cognitive-summary-avatar-wrap {
+            margin: 0 auto !important;
+          }
+        }
+
+        .cognitive-summary-card {
+          display: grid;
+          grid-template-columns: 1fr auto;
+          gap: 2rem;
+          padding: 2rem;
+          background: rgba(5, 4, 7, 0.4);
+          border: 1px solid rgba(255, 255, 255, 0.03);
+          border-radius: 16px;
+          position: relative;
+          overflow: hidden;
         }
         
         .profile-card {
@@ -1450,7 +1492,7 @@ export default function Profile() {
                   fontSize: '0.8rem',
                   fontWeight: 600,
                   cursor: 'pointer',
-                  transition: 'all 0.2s',
+                  transition: 'background-color 0.2s, color 0.2s, border-color 0.2s',
                 }}
               >
                 Edit Direction
@@ -1469,17 +1511,7 @@ export default function Profile() {
           <p className="card-subtitle">Weekly shifts in your graph geometry and conceptual connections.</p>
           
           <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-            <div style={{ 
-              display: 'grid', 
-              gridTemplateColumns: '1fr auto', 
-              gap: '2rem', 
-              padding: '2rem', 
-              background: 'rgba(5, 4, 7, 0.4)', 
-              border: '1px solid rgba(255, 255, 255, 0.03)', 
-              borderRadius: '16px',
-              position: 'relative',
-              overflow: 'hidden'
-            }}>
+            <div className="cognitive-summary-card">
               {/* Tactical background scanline */}
               <div className="hud-scanline" />
               
@@ -1510,7 +1542,7 @@ export default function Profile() {
               </div>
               
               {/* Avatar Frame on the Right */}
-              <div style={{ 
+              <div className="cognitive-summary-avatar-wrap" style={{ 
                 display: 'flex', 
                 alignItems: 'center', 
                 justifyContent: 'center',
@@ -1519,7 +1551,8 @@ export default function Profile() {
                 borderRadius: '12px',
                 height: '140px',
                 width: '140px',
-                position: 'relative'
+                position: 'relative',
+                flexShrink: 0
               }}>
                 <div style={{ position: 'absolute', top: 6, left: 8, fontSize: '0.5rem', fontFamily: 'var(--font-mono)', color: 'rgba(255,255,255,0.15)', letterSpacing: '0.05em' }}>
                   SCAN.V4

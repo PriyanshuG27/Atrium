@@ -3,6 +3,17 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import Map from '../pages/Map';
 
+// Mock useRoomState hook
+vi.mock('../context/RoomStateContext', () => ({
+  useRoomState: () => ({
+    roomStates: {
+      map: { camera: null },
+      search: { query: '', filters: {} }
+    },
+    updateRoomState: vi.fn()
+  })
+}));
+
 // Mock MapCanvas to avoid canvas rendering and D3 physics timer loops
 vi.mock('../canvas/MapCanvas', () => {
   return {

@@ -34,13 +34,16 @@ function CursorFlashlight() {
   return <pointLight ref={lightRef} color="#CFA365" intensity={0.6} distance={8} decay={2} position={[0, 0, 5]} />;
 }
 
-function CylinderScene({ items, matchingIds, onCardClick, hasSelection, selectedItemId, searchQuery }) {
-  const scrollProgress = useRef(0);
-  const targetScrollProgress = useRef(0);
+function CylinderScene({ items, matchingIds, onCardClick, hasSelection, selectedItemId, searchQuery, initialScrollIndex }) {
+  const scrollProgress = useRef(initialScrollIndex || 0);
+  const targetScrollProgress = useRef(initialScrollIndex || 0);
   const groupRef = useRef();
   // Use ref for active index to avoid re-renders on every frame tick
-  const activeIndexRef = useRef(0);
-  const [activeIndex, setActiveIndex] = useState(0);
+  const activeIndexRef = useRef(null);
+  if (activeIndexRef.current === null) {
+    activeIndexRef.current = Math.round(initialScrollIndex || 0);
+  }
+  const [activeIndex, setActiveIndex] = useState(() => Math.round(initialScrollIndex || 0));
 
   // Automatically scroll/transition the cylinder to target card when it is selected
   useEffect(() => {
@@ -217,27 +220,32 @@ function CylinderScene({ items, matchingIds, onCardClick, hasSelection, selected
 }
 
 
-export default function ArchiveCylinder({ items, matchingIds, loading, onCardClick, hasSelection, selectedItemId, searchQuery }) {
+export default function ArchiveCylinder({ items, matchingIds, loading, onCardClick, hasSelection, selectedItemId, searchQuery, initialScrollIndex }) {
   const { lowPerf } = usePerf();
 
-  if (loading && items.length === 0) {
-    return (
-      <div style={{ position: 'absolute', inset: 0, background: 'var(--bg-void)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '0.75rem', alignItems: 'center' }}>
-          <div style={{ width: 40, height: 40, borderRadius: '50%', border: '2px solid rgba(207,163,101,0.2)', borderTopColor: 'var(--accent-gold)', animation: 'spin 1s linear infinite' }} />
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)', letterSpacing: '0.1em' }}>RETRIEVING SIGNALS…</span>
-          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-        </div>
-      </div>
-    );
-  }
   return (
-    <Canvas camera={{ position: [0, 0, CAMERA_Z], fov: 50 }} style={{ background: 'transparent' }} gl={{ antialias: !lowPerf, alpha: true }}>
-      <ambientLight intensity={0.15} color="#F4EFEB" />
-      {!lowPerf && <CursorFlashlight />}
-      <BackgroundGrid />
-      {items.length > 0 && <CylinderScene items={items} matchingIds={matchingIds} onCardClick={onCardClick} hasSelection={hasSelection} selectedItemId={selectedItemId} searchQuery={searchQuery} />}
-    </Canvas>
+    <div style={{ position: 'absolute', inset: 0, background: 'var(--bg-void)', overflow: 'hidden' }}>
+      {/* Skeleton loader overlay */}
+      {loading && items.length === 0 && (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '2rem', flexWrap: 'wrap', padding: '2rem', overflow: 'hidden', zIndex: 10, background: 'var(--bg-void)' }}>
+          {[1, 2, 3].map(i => (
+            <div key={i} className="skeleton-card" style={{ width: 'min(480px, 90vw)', height: 280, background: 'rgba(17,15,20,0.4)', border: '1px dashed rgba(207,163,101,0.08)', borderRadius: 16, padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1rem', justifyContent: 'center', opacity: 0.5 }}>
+              <div style={{ width: '60%', height: 24, background: 'rgba(240,237,232,0.05)', borderRadius: 4 }} />
+              <div style={{ width: '90%', height: 16, background: 'rgba(240,237,232,0.03)', borderRadius: 4 }} />
+              <div style={{ width: '80%', height: 16, background: 'rgba(240,237,232,0.03)', borderRadius: 4 }} />
+              <div style={{ width: '40%', height: 12, background: 'rgba(240,237,232,0.02)', borderRadius: 4, marginTop: 'auto' }} />
+            </div>
+          ))}
+        </div>
+      )}
+      
+      <Canvas camera={{ position: [0, 0, CAMERA_Z], fov: 50 }} style={{ background: 'transparent', width: '100%', height: '100%' }} gl={{ antialias: !lowPerf, alpha: true }}>
+        <ambientLight intensity={0.15} color="#F4EFEB" />
+        {!lowPerf && <CursorFlashlight />}
+        <BackgroundGrid />
+        {items.length > 0 && <CylinderScene items={items} matchingIds={matchingIds} onCardClick={onCardClick} hasSelection={hasSelection} selectedItemId={selectedItemId} searchQuery={searchQuery} initialScrollIndex={initialScrollIndex} />}
+      </Canvas>
+    </div>
   );
 }
 

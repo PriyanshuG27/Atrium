@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import { apiFetch } from '../api/client';
 
 const AuthContext = createContext(null);
 
@@ -7,12 +8,7 @@ export function AuthProvider({ children }) {
   const [token, setToken] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Fetch current user status on mount
-  useEffect(() => {
-    checkAuth();
-  }, []);
-
-  const checkAuth = async () => {
+  const checkAuth = useCallback(async () => {
     try {
       // Check for tgWebAppStartParam in query or hash parameters
       const searchParams = new URLSearchParams(window.location.search);
@@ -49,16 +45,21 @@ export function AuthProvider({ children }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const login = (userData) => {
+  // Fetch current user status on mount
+  useEffect(() => {
+    checkAuth();
+  }, [checkAuth]);
+
+  const login = useCallback((userData) => {
     setUser(userData);
     if (userData && userData.token) {
       setToken(userData.token);
     }
-  };
+  }, []);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     try {
       await fetch('/auth/logout', { method: 'POST' });
     } catch (err) {
@@ -70,10 +71,19 @@ export function AuthProvider({ children }) {
       setUser(null);
       setToken(null);
     }
-  };
+  }, []);
+
+  const providerValue = useMemo(() => ({
+    user,
+    token,
+    loading,
+    login,
+    logout,
+    checkAuth
+  }), [user, token, loading, login, logout, checkAuth]);
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, logout, checkAuth }}>
+    <AuthContext.Provider value={providerValue}>
       {children}
     </AuthContext.Provider>
   );

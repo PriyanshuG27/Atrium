@@ -8,7 +8,7 @@ import AudioEngine from '../utils/AudioEngine';
    Shows counts for locked/shaky/miss, "next review" message,
    streak progress, and celebratory particle burst.
    ============================================================ */
-export default function DrillSummary({ scores, total, nextReviewAt, streak, onNavigate }) {
+export default function DrillSummary({ scores, total, nextReviewAt, streak, remainingCount = 0, onDrillMore, onNavigate }) {
   const containerRef = useRef(null);
   const itemsRef = useRef([]);
 
@@ -169,6 +169,7 @@ export default function DrillSummary({ scores, total, nextReviewAt, streak, onNa
             color: 'var(--accent-gold)',
             display: 'flex',
             alignItems: 'center',
+            justifyContent: 'center',
             gap: '0.35rem',
             marginTop: '0.75rem',
           }}>
@@ -244,6 +245,40 @@ export default function DrillSummary({ scores, total, nextReviewAt, streak, onNa
         ref={el => { itemsRef.current[4] = el; }}
         style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}
       >
+        {remainingCount > 0 && onDrillMore && (
+          <button
+            onClick={() => {
+              AudioEngine.playClick();
+              onDrillMore();
+            }}
+            style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: 11,
+              color: '#0c0b0f',
+              background: 'var(--accent-gold)',
+              border: '1px solid var(--accent-gold)',
+              borderRadius: 3,
+              padding: '0.625rem 1.5rem',
+              cursor: 'pointer',
+              letterSpacing: '0.12em',
+              textTransform: 'uppercase',
+              transition: 'all 0.2s ease',
+              fontWeight: 'bold',
+            }}
+            onMouseEnter={e => {
+              e.target.style.background = '#dfb375';
+              e.target.style.borderColor = '#dfb375';
+              e.target.style.boxShadow = '0 0 12px rgba(207,163,101,0.4)';
+            }}
+            onMouseLeave={e => {
+              e.target.style.background = 'var(--accent-gold)';
+              e.target.style.borderColor = 'var(--accent-gold)';
+              e.target.style.boxShadow = 'none';
+            }}
+          >
+            Drill More ({remainingCount} left) ›
+          </button>
+        )}
         <button
           onClick={() => {
             AudioEngine.playClick();

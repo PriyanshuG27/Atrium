@@ -2,7 +2,10 @@ import { useRef, useState, useEffect } from 'react';
 
 export default function useScrollVelocity() {
   const velocityRef = useRef(0);
-  const lastTime = useRef(performance.now());
+  const lastTime = useRef(null);
+  if (lastTime.current === null) {
+    lastTime.current = performance.now();
+  }
   const rafId = useRef(null);
   const [, setTick] = useState(0);
 

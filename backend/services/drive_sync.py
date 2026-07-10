@@ -74,7 +74,7 @@ async def _send_telegram_message(chat_id: str, text: str) -> None:
         logger.error("Failed to send Telegram message to chat %s: %s", chat_id, err_msg)
 
 
-async def sync_user_to_drive(user_id: int, db: psycopg.AsyncConnection) -> None:
+async def sync_user_to_drive(user_id: int, db: psycopg.AsyncConnection = None) -> None:
     """
     Export a user's 50 most recent items into a Google Docs document stored
     in their Google Drive 'Recall' folder.
@@ -85,18 +85,33 @@ async def sync_user_to_drive(user_id: int, db: psycopg.AsyncConnection) -> None:
     telegram_chat_id: str | None = None
     timezone_offset: int | None = None
     
+    from backend.db.connection import get_connection
+    
+    # Helper to execute DB queries with either the passed-in connection or a new checked-out connection
+    async def get_db_scope():
+        if db is not None:
+            class FakeContext:
+                async def __aenter__(self):
+                    return db
+                async def __aexit__(self, exc_type, exc_val, exc_tb):
+                    pass
+            return FakeContext()
+        else:
+            return get_connection()
+
     # 1. Fetch user data (encrypted refresh token, telegram_chat_id, and timezone_offset)
-    async with db.cursor() as cur:
-        await cur.execute(
-            "SELECT google_refresh_token, telegram_chat_id, timezone_offset FROM users WHERE id = %s;",
-            (user_id,)
-        )
-        row = await cur.fetchone()
-        if not row:
-            logger.warning("User %d not found in database.", user_id)
-            return
-        
-        encrypted_token, telegram_chat_id, timezone_offset = row
+    async with await get_db_scope() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT google_refresh_token, telegram_chat_id, timezone_offset FROM users WHERE id = %s;",
+                (user_id,)
+            )
+            row = await cur.fetchone()
+            if not row:
+                logger.warning("User %d not found in database.", user_id)
+                return
+            
+            encrypted_token, telegram_chat_id, timezone_offset = row
         
     if not encrypted_token:
         logger.info("No Google refresh token connected for user %d. Exiting gracefully.", user_id)
@@ -129,12 +144,13 @@ async def sync_user_to_drive(user_id: int, db: psycopg.AsyncConnection) -> None:
                 if status_code == 401:
                     logger.warning("Google refresh token revoked/expired (401) for user %d. Clearing token and notifying.", user_id)
                     # Clear the token in DB
-                    async with db.cursor() as cur:
-                        await cur.execute(
-                            "UPDATE users SET google_refresh_token = NULL WHERE id = %s;",
-                            (user_id,)
-                        )
-                        await db.commit()
+                    async with await get_db_scope() as conn:
+                        async with conn.cursor() as cur:
+                            await cur.execute(
+                                "UPDATE users SET google_refresh_token = NULL WHERE id = %s;",
+                                (user_id,)
+                            )
+                            await conn.commit()
                     # Notify the user
                     if telegram_chat_id:
                         msg = "⚠️ Google Drive disconnected! Your access has been revoked or expired. Please reconnect it from the web dashboard."
@@ -153,18 +169,19 @@ async def sync_user_to_drive(user_id: int, db: psycopg.AsyncConnection) -> None:
 
             # 3. Retrieve user's 50 most recent items
             items = []
-            async with db.cursor() as cur:
-                await cur.execute(
-                    """
-                    SELECT title, summary, source_url, created_at
-                    FROM items
-                    WHERE user_id = %s
-                    ORDER BY created_at DESC
-                    LIMIT 50;
-                    """,
-                    (user_id,)
-                )
-                items = await cur.fetchall()
+            async with await get_db_scope() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        """
+                        SELECT title, summary, source_url, created_at
+                        FROM items
+                        WHERE user_id = %s
+                        ORDER BY created_at DESC
+                        LIMIT 50;
+                        """,
+                        (user_id,)
+                    )
+                    items = await cur.fetchall()
 
             # 4. Generate Document in User's Local Time using GoogleDocBuilder
             from datetime import timedelta

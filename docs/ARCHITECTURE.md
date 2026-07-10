@@ -35,7 +35,7 @@ flowchart TB
 
     subgraph Workers["Background Queue & Processing"]
         REDIS["Upstash Redis Queue
-        (recall:tasks)"]
+        (atrium:tasks)"]
         WORKER["Async Worker Loop
         (backend/worker.py
         Semaphore: 3)"]
@@ -83,7 +83,7 @@ sequenceDiagram
     autonumber
     participant User as User (Telegram)
     participant Hook as Webhook Router (webhook.py)
-    participant Redis as Upstash Redis (recall:tasks)
+    participant Redis as Upstash Redis (atrium:tasks)
     participant Worker as Async Worker (worker.py)
     participant Nvidia as NVIDIA NIM (Primary OCR)
     participant Gemini as Gemini API (OCR Fallback / Summarization)
@@ -93,10 +93,10 @@ sequenceDiagram
     participant SPA as React SPA (App.jsx)
 
     User->>Hook: Send voice note / text / link
-    Hook->>Redis: Push task JSON to recall:tasks
+    Hook->>Redis: Push task JSON to atrium:tasks
     Hook-->>User: Return HTTP 200 ACK (< 50 ms)
     
-    Worker->>Redis: brpoplpush recall:tasks recall:processing
+    Worker->>Redis: brpoplpush atrium:tasks atrium:processing
     Worker->>Nvidia: Extract OCR Text (Image/PDF)
     Nvidia-->>Worker: OCR Text (or low confidence failover)
     opt Low Confidence / Empty OCR
@@ -145,8 +145,8 @@ sequenceDiagram
 
 ## 3. Worker Queue & Concurrency Design
 
-* **Task Queue**: Upstash Redis REST list key `recall:tasks`.
-* **Atomic Processing**: Worker uses `brpoplpush("recall:tasks", "recall:processing")` guaranteeing zero task loss on worker crash.
+* **Task Queue**: Upstash Redis REST list key `atrium:tasks`.
+* **Atomic Processing**: Worker uses `brpoplpush("atrium:tasks", "atrium:processing")` guaranteeing zero task loss on worker crash.
 * **Concurrency Semaphore**: `worker_semaphore = asyncio.Semaphore(3)` caps concurrent AI tasks.
 * **Dead Letter Queue**: Exceptions write failure payloads to `dead_letter_queue` table ([dlq.py](../backend/services/dlq.py)). Startup lifespan re-enqueues unretried tasks failed < 24h ago.
 * **Background Scheduler**: 22 background cron jobs running in APScheduler with `misfire_grace_time=60`.

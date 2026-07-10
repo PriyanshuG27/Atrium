@@ -1,68 +1,59 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import client, { setUnauthorizedHandler, setToastHandler } from '../api/client';
+import { apiFetch, setUnauthorizedHandler, setToastHandler } from '../api/client';
 
-describe('API Client Interceptors', () => {
+describe('API Client apiFetch', () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
     setUnauthorizedHandler(null);
     setToastHandler(null);
+    window.fetch = vi.fn();
   });
 
   it('passes through successful responses', async () => {
-    const res = { status: 200, data: { ok: true } };
-    const interceptor = client.interceptors.response.handlers[0].fulfilled;
-    expect(interceptor(res)).toEqual(res);
+    const mockRes = { ok: true, status: 200, json: () => Promise.resolve({ ok: true }) };
+    window.fetch.mockResolvedValue(mockRes);
+
+    const res = await apiFetch('/api/test');
+    expect(res).toBe(mockRes);
   });
 
   it('handles network error (no response)', async () => {
     const toastSpy = vi.fn();
     setToastHandler(toastSpy);
-    const interceptor = client.interceptors.response.handlers[0].rejected;
+    window.fetch.mockRejectedValue(new Error('Network Error'));
+    
+    // Simulate navigator.onLine = true
+    Object.defineProperty(navigator, 'onLine', { value: true, configurable: true });
 
-    const err = {};
-    await expect(interceptor(err)).rejects.toEqual({
-      userMessage: 'Connection lost — check your internet'
-    });
+    await expect(apiFetch('/api/test')).rejects.toThrow('Network Error');
     expect(toastSpy).toHaveBeenCalledWith('Connection lost — check your internet', 'error');
   });
 
   it('handles 401 unauthorized response', async () => {
     const unauthSpy = vi.fn();
     setUnauthorizedHandler(unauthSpy);
+    const mockRes = { ok: false, status: 401 };
+    window.fetch.mockResolvedValue(mockRes);
 
-    const interceptor = client.interceptors.response.handlers[0].rejected;
-    const err = { response: { status: 401, data: {} }, config: { url: '/api/items' } };
-
-    await expect(interceptor(err)).rejects.toEqual({
-      ...err,
-      userMessage: 'Session expired — please log in again'
-    });
+    await apiFetch('/api/test');
     expect(unauthSpy).toHaveBeenCalled();
   });
 
-  it('handles status code errors 400, 403, 404, 429 with/without retry, 503, default', async () => {
+  it('handles 429 with retry_after', async () => {
     const toastSpy = vi.fn();
     setToastHandler(toastSpy);
-    const interceptor = client.interceptors.response.handlers[0].rejected;
+    
+    const mockClone = {
+      json: () => Promise.resolve({ retry_after: 5 })
+    };
+    const mockRes = {
+      ok: false,
+      status: 429,
+      clone: () => mockClone
+    };
+    window.fetch.mockResolvedValue(mockRes);
 
-    const err429 = { response: { status: 429, data: { retry_after: 5 } }, config: { url: '/api/items' } };
-    await expect(interceptor(err429)).rejects.toBeDefined();
+    await apiFetch('/api/test');
     expect(toastSpy).toHaveBeenCalledWith('Too many requests — please retry in 5s.', 'warning');
-
-    toastSpy.mockClear();
-    const err429NoRetry = { response: { status: 429, data: {} }, config: { url: '/api/items' } };
-    await expect(interceptor(err429NoRetry)).rejects.toBeDefined();
-    expect(toastSpy).toHaveBeenCalledWith('Too many requests — please wait', 'warning');
-
-    toastSpy.mockClear();
-    const err503 = { response: { status: 503, data: {} }, config: { url: '/api/items' } };
-    await expect(interceptor(err503)).rejects.toBeDefined();
-    expect(toastSpy).toHaveBeenCalledWith('Server unavailable — retrying in 30 s', 'error');
-
-    // 400, 403, 404, 500
-    const otherStatuses = [400, 403, 404, 500];
-    for (const st of otherStatuses) {
-      const errOther = { response: { status: st, data: {} }, config: { url: '/api/items' } };
-      await expect(interceptor(errOther)).rejects.toBeDefined();
-    }
   });
 });

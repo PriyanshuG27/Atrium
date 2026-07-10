@@ -8,11 +8,13 @@ import { useToast } from '../components/Toast';
 
 // Mock axios client
 vi.mock('../api/client', () => {
+  const mockApiFetch = vi.fn().mockImplementation(() => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }));
   return {
     default: {
       delete: vi.fn(),
       post: vi.fn(),
     },
+    apiFetch: mockApiFetch,
   };
 });
 

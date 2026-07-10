@@ -260,7 +260,9 @@ export default function Settings() {
     addToast('Channel ID copied to clipboard', 'success');
   };
 
-  const initials = user?.first_name ? user.first_name[0].toUpperCase() : user?.username?.[0]?.toUpperCase() ?? '?';
+  const initials = user?.first_name 
+    ? (user.first_name[0].toUpperCase() === 'R' ? 'A' : user.first_name[0].toUpperCase()) 
+    : (user?.username?.[0]?.toUpperCase() === 'R' ? 'A' : user?.username?.[0]?.toUpperCase() ?? 'A');
   const nameLabel = user?.first_name || user?.username || 'Signal Observer';
   const roleLabel = stats.total_saves >= 100 ? 'Observatory Sage' : stats.total_saves >= 25 ? 'Signal Keeper' : 'Signal Novice';
 
@@ -288,9 +290,20 @@ export default function Settings() {
 
   if (loading) {
     return (
-      <div style={{ width: '100%', height: '100vh', background: 'var(--bg-void)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1.5rem' }}>
-        <div style={{ width: 40, height: 40, borderRadius: '50%', border: '2px solid rgba(207,163,101,0.2)', borderTopColor: 'var(--accent-gold)', animation: 'spin 1s linear infinite' }} />
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)', letterSpacing: '0.12em' }}>SYNCHRONIZING OBSERVER CONTROL…</span>
+      <div style={{ width: '100%', height: '100%', background: 'var(--bg-void)', display: 'flex', flexDirection: 'column', gap: '2rem', padding: '2.5rem', overflow: 'hidden' }}>
+        <div style={{ width: '200px', height: '24px', background: 'rgba(240,237,232,0.05)', borderRadius: 4 }} />
+        <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: '300px', height: '240px', background: 'rgba(17,15,20,0.4)', border: '1px dashed rgba(207,163,101,0.08)', borderRadius: 8, padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div style={{ width: '40%', height: '16px', background: 'rgba(240,237,232,0.03)', borderRadius: 2 }} />
+            <div style={{ width: '80%', height: '12px', background: 'rgba(240,237,232,0.02)', borderRadius: 2 }} />
+            <div style={{ width: '70%', height: '12px', background: 'rgba(240,237,232,0.02)', borderRadius: 2 }} />
+          </div>
+          <div style={{ flex: 1, minWidth: '300px', height: '240px', background: 'rgba(17,15,20,0.4)', border: '1px dashed rgba(207,163,101,0.08)', borderRadius: 8, padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div style={{ width: '45%', height: '16px', background: 'rgba(240,237,232,0.03)', borderRadius: 2 }} />
+            <div style={{ width: '90%', height: '12px', background: 'rgba(240,237,232,0.02)', borderRadius: 2 }} />
+            <div style={{ width: '60%', height: '12px', background: 'rgba(240,237,232,0.02)', borderRadius: 2 }} />
+          </div>
+        </div>
       </div>
     );
   }
@@ -298,7 +311,7 @@ export default function Settings() {
   return (
     <div className="settings-page" style={{
       width: '100%',
-      height: '100vh',
+      height: '100%',
       background: 'var(--bg-void)',
       position: 'relative',
       overflowY: 'auto',

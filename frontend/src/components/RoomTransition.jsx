@@ -111,7 +111,7 @@ export default function RoomTransition({ fromRoom, toRoom, children, onDone }) {
     }
 
     return () => { tl.kill(); };
-  }, [fromRoom, toRoom]);
+  }, [fromRoom, toRoom, onDone]);
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>

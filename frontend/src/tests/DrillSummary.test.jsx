@@ -78,4 +78,26 @@ describe('DrillSummary Component', () => {
     fireEvent.click(exploreBtn);
     expect(handleNavigate).toHaveBeenCalledWith('map');
   });
+
+  it('renders Drill More button and triggers callback when remainingCount > 0', () => {
+    const handleDrillMore = vi.fn();
+    render(
+      <DrillSummary
+        scores={mockScores}
+        total={7}
+        nextReviewAt={null}
+        streak={0}
+        remainingCount={15}
+        onDrillMore={handleDrillMore}
+        onNavigate={() => {}}
+      />
+    );
+
+    const drillMoreBtn = screen.getByRole('button', { name: /Drill More/i });
+    expect(drillMoreBtn).toBeInTheDocument();
+    expect(screen.getByText(/15 left/i)).toBeInTheDocument();
+
+    fireEvent.click(drillMoreBtn);
+    expect(handleDrillMore).toHaveBeenCalled();
+  });
 });

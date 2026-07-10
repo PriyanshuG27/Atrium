@@ -1,14 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useContext } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
-import { useGraphSocket as useLegacySocket } from '../context/SocketContext';
+import { SocketContext } from '../context/SocketContext';
 
 export function useGraphSocket(token, initialGraph) {
   // If no token is provided, fall back to the legacy socket context connection status
-  const legacyContext = token ? null : useLegacySocket();
-  if (!token) {
-    return legacyContext;
-  }
+  const legacyContext = useContext(SocketContext);
 
   const { checkAuth } = useAuth();
   const { addToast } = useToast();
@@ -30,12 +27,13 @@ export function useGraphSocket(token, initialGraph) {
 
   // Sync state if initialGraph changes
   useEffect(() => {
+    if (!token) return;
     if (initialGraph) {
       setNodes(initialGraph.nodes || []);
       setEdges(initialGraph.edges || []);
       setHubs(initialGraph.hubs || []);
     }
-  }, [initialGraph]);
+  }, [initialGraph, token]);
 
   // Clean up all timers on unmount
   useEffect(() => {
@@ -54,6 +52,7 @@ export function useGraphSocket(token, initialGraph) {
 
   // Connect function
   useEffect(() => {
+    if (!token) return;
     isFailedRef.current = false;
     reconnectCountRef.current = 0;
     
@@ -200,6 +199,13 @@ export function useGraphSocket(token, initialGraph) {
       }
     };
   }, [token]);
+
+  if (!token) {
+    if (!legacyContext) {
+      throw new Error('useGraphSocket must be used within a SocketProvider');
+    }
+    return legacyContext;
+  }
 
   return {
     nodes,

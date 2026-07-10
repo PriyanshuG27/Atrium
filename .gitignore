@@ -246,3 +246,7 @@ deployment_profile.csv
 remote_ai_deployment_profile.json
 
 audit_results.json
+
+# React Doctor reports
+react-doctor-report*.txt
+frontend/react-doctor-report*.txt

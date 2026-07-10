@@ -4,9 +4,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import SettingsPanel from '../components/SettingsPanel';
 import { AuthProvider, useAuth } from '../context/AuthContext';
 import { ToastProvider } from '../components/Toast';
-import axios from 'axios';
+import axios from '../api/client';
 
-vi.mock('axios', () => {
+vi.mock('../api/client', () => {
   const mockInstance = {
     create: vi.fn(() => mockInstance),
     get: vi.fn(),

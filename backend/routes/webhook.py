@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from backend.services.sm2 import update_sm2
 
 from backend.config import settings
-from backend.db.connection import get_db
+from backend.db.connection import get_db, transaction_context
 from backend.services.user_service import upsert_user
 from backend.services.rate_limiter import check_rate_limit, RateLimitExceeded
 from backend.services.redis_client import redis
@@ -1156,30 +1156,52 @@ async def telegram_webhook(
                 else:
                     try:
                         item_id = int(args)
-                        async with db.cursor() as cur:
-                            await cur.execute(
-                                "DELETE FROM quizzes WHERE item_id = %s AND user_id = %s;",
-                                (item_id, user_id)
-                            )
-                            await cur.execute(
-                                "DELETE FROM item_chunks WHERE item_id = %s AND user_id = %s;",
-                                (item_id, user_id)
-                            )
-                            await cur.execute(
-                                "DELETE FROM items WHERE id = %s AND user_id = %s;",
-                                (item_id, user_id)
-                            )
-                            rows_deleted = cur.rowcount
-                            if rows_deleted > 0:
-                                from backend.services.audit_service import log_audit
-                                await log_audit(
-                                    db=db,
-                                    user_id=user_id,
-                                    action="delete_item",
-                                    details={"item_id": item_id, "channel": "telegram"},
-                                    request_id=f"tg_{chat_id}"
+                        async with transaction_context(db):
+                            async with db.cursor() as cur:
+                                await cur.execute(
+                                    "DELETE FROM quizzes WHERE item_id = %s AND user_id = %s;",
+                                    (item_id, user_id)
                                 )
-                            await db.commit()
+                                await cur.execute(
+                                    "DELETE FROM item_chunks WHERE item_id = %s AND user_id = %s;",
+                                    (item_id, user_id)
+                                )
+                                await cur.execute(
+                                    "DELETE FROM reminders WHERE item_id = %s AND user_id = %s;",
+                                    (item_id, user_id)
+                                )
+                                await cur.execute(
+                                    "DELETE FROM insight_candidates WHERE (item_id_a = %s OR item_id_b = %s) AND user_id = %s;",
+                                    (item_id, item_id, user_id)
+                                )
+                                await cur.execute(
+                                    "DELETE FROM entity_mentions WHERE item_id = %s AND user_id = %s;",
+                                    (item_id, user_id)
+                                )
+                                await cur.execute(
+                                    """
+                                    DELETE FROM relationships 
+                                    WHERE ((source_type = 'item' AND source_id = %s) 
+                                       OR (target_type = 'item' AND target_id = %s) 
+                                       OR (item_id = %s)) 
+                                      AND user_id = %s;
+                                    """,
+                                    (item_id, item_id, item_id, user_id)
+                                )
+                                await cur.execute(
+                                    "DELETE FROM items WHERE id = %s AND user_id = %s;",
+                                    (item_id, user_id)
+                                )
+                                rows_deleted = cur.rowcount
+                                if rows_deleted > 0:
+                                    from backend.services.audit_service import log_audit
+                                    await log_audit(
+                                        db=db,
+                                        user_id=user_id,
+                                        action="delete_item",
+                                        details={"item_id": item_id, "channel": "telegram"},
+                                        request_id=f"tg_{chat_id}"
+                                    )
                         if rows_deleted > 0:
                             delete_msg = "Deleted ✓"
                         else:

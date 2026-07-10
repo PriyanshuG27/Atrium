@@ -13,8 +13,10 @@ const PerfContext = createContext({ fps: 60, lowPerf: false });
 export function PerfProvider({ children }) {
   const { fps, lowPerf } = useFPSMonitor();
 
+  const providerValue = React.useMemo(() => ({ fps, lowPerf }), [fps, lowPerf]);
+
   return (
-    <PerfContext.Provider value={{ fps, lowPerf }}>
+    <PerfContext.Provider value={providerValue}>
       {children}
     </PerfContext.Provider>
   );

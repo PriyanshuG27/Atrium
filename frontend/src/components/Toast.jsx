@@ -38,8 +38,10 @@ export function ToastProvider({ children }) {
     return id;
   }, []);
 
+  const providerValue = React.useMemo(() => ({ addToast, removeToast }), [addToast, removeToast]);
+
   return (
-    <ToastContext.Provider value={{ addToast, removeToast }}>
+    <ToastContext.Provider value={providerValue}>
       {children}
       <ToastContainer toasts={toasts} onRemove={removeToast} />
     </ToastContext.Provider>
@@ -85,6 +87,14 @@ function ToastContainer({ toasts, onRemove }) {
 
 function ToastItem({ id, message, type, persistent, duration, action, onRemove }) {
   const [isRemoving, setIsRemoving] = useState(false);
+  const fadeTimerRef = React.useRef(null);
+
+  const handleClose = useCallback(() => {
+    setIsRemoving(true);
+    fadeTimerRef.current = setTimeout(() => {
+      onRemove(id);
+    }, 200);
+  }, [id, onRemove]);
 
   useEffect(() => {
     if (persistent) return;
@@ -94,15 +104,13 @@ function ToastItem({ id, message, type, persistent, duration, action, onRemove }
     }, duration || 4000);
 
     return () => clearTimeout(dismissTimer);
-  }, [id, persistent, duration]);
+  }, [persistent, duration, handleClose]);
 
-  const handleClose = () => {
-    setIsRemoving(true);
-    const fadeTimer = setTimeout(() => {
-      onRemove(id);
-    }, 200);
-    return () => clearTimeout(fadeTimer);
-  };
+  useEffect(() => {
+    return () => {
+      if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    };
+  }, []);
 
   return (
     <div 

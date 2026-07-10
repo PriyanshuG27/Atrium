@@ -231,6 +231,7 @@ async def get_db() -> AsyncGenerator[psycopg.AsyncConnection, None]:
         async with _pool.connection() as conn:
             # Apply a 30-second statement timeout to all queries on this connection
             await conn.execute("SET statement_timeout = '30s'")
+            await conn.commit()
             yield conn
     except psycopg.OperationalError as exc:
         logger.error("Database operational error: %s", exc)
@@ -251,6 +252,60 @@ async def get_connection() -> AsyncGenerator[psycopg.AsyncConnection, None]:
     async with _pool.connection() as conn:
         await conn.execute("SET statement_timeout = '30s'")
         yield conn
+
+
+from fastapi import Request
+import inspect
+
+async def get_db_or_none(request: Request) -> psycopg.AsyncConnection | None:
+    """
+    FastAPI dependency that returns the mocked connection in test mode,
+    or None in production to avoid checking out a connection early.
+    """
+    app = request.app
+    if get_db in app.dependency_overrides:
+        override = app.dependency_overrides[get_db]
+        if inspect.isasyncgenfunction(override):
+            async for val in override():
+                return val
+        elif inspect.isgeneratorfunction(override):
+            for val in override():
+                return val
+        else:
+            if inspect.iscoroutinefunction(override):
+                return await override()
+            else:
+                return override()
+    return None
+
+
+@asynccontextmanager
+async def get_db_scope(db: psycopg.AsyncConnection | None = None) -> AsyncGenerator[psycopg.AsyncConnection, None]:
+    """
+    Yields the provided connection (test mock) if not None, or checks out a
+    fresh short-lived connection from the pool in production.
+    """
+    if db is not None:
+        yield db
+    else:
+        async with get_connection() as conn:
+            yield conn
+
+
+class TransactionStub:
+    async def __aenter__(self):
+        return self
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+def transaction_context(conn):
+    """
+    Returns a transaction context manager if the connection object supports it,
+    otherwise returns a stub context manager for test mocks.
+    """
+    if hasattr(conn, "transaction") and callable(conn.transaction):
+        return conn.transaction()
+    return TransactionStub()
 
 
 # ---------------------------------------------------------------------------

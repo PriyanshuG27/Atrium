@@ -10,6 +10,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
+import { useRoomState } from '../context/RoomStateContext';
 
 const BranchingPOC = lazy(() => import('./BranchingPOC'));
 
@@ -77,7 +78,7 @@ const HEARTH_CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@200;300;400;600&family=JetBrains+Mono:wght@400;500&display=swap');
 
 .hearth-root {
-  width: 100vw; height: 100vh;
+  width: 100vw; height: 100%;
   background: #0C0B0F;
   position: relative; overflow: hidden;
   font-family: 'Outfit', sans-serif;
@@ -902,6 +903,7 @@ function DevPanel({ onSelect }) {
 }
 
 export default function Hearth() {
+  const { isVisible } = useRoomState();
   const [journeys,      setJourneys]      = useState([]);     // all active journeys from API
   const [loading,       setLoading]       = useState(true);
   const [activeJourney, setActiveJourney] = useState(null);   // null = hub/landing
@@ -1089,6 +1091,7 @@ export default function Hearth() {
               hearthMode
               pairId={pair_id}
               onReplayReady={(fn) => { replayFnRef.current = fn; }}
+              isVisible={isVisible}
             />
           </Suspense>
         </div>

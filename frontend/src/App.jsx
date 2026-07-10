@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, lazy, Suspense, useCallback } from 'react';
+import React, { useEffect, useState, useRef, lazy, Suspense, useCallback, useSyncExternalStore } from 'react';
 import { useAuth } from './context/AuthContext';
 import Login from './pages/Login';
 import { useToast } from './components/Toast';
@@ -22,6 +22,8 @@ const Hearth   = lazy(() => import('./pages/Hearth'));
 const BranchingPOC = lazy(() => import('./pages/BranchingPOC'));
 const Landing = lazy(() => import('./pages/Landing'));
 import PWAInstallBanner from './components/PWAInstallBanner';
+import MobileTopHeader from './components/MobileTopHeader';
+import { RoomStateProvider } from './context/RoomStateContext';
 
 /* ── Map pathname → room id ──────────────────────────────── */
 function pathToRoom(pathname) {
@@ -136,6 +138,12 @@ class RoomErrorBoundary extends React.Component {
     return this.props.children;
   }
 }
+
+const subscribePopState = (callback) => {
+  window.addEventListener('popstate', callback);
+  return () => window.removeEventListener('popstate', callback);
+};
+const getPopStateSnapshot = () => window.location.pathname;
 
 function App() {
   const { user, loading, logout } = useAuth();
@@ -266,13 +274,16 @@ function App() {
   }, [user, fetchStatsAndProfile]);
 
   /* ── Routing ───────────────────────────────────────────── */
-  const [currentPath, setCurrentPath] = useState(window.location.pathname);
+  const currentPath = useSyncExternalStore(subscribePopState, getPopStateSnapshot);
   const prevRoomRef = useRef(null);
 
-  useEffect(() => {
-    const handler = () => setCurrentPath(window.location.pathname);
-    window.addEventListener('popstate', handler);
-    return () => window.removeEventListener('popstate', handler);
+  const navigate = useCallback((path, replace = false) => {
+    if (replace) {
+      window.history.replaceState({}, '', path + (window.location.search || ''));
+    } else {
+      window.history.pushState({}, '', path + (window.location.search || ''));
+    }
+    window.dispatchEvent(new Event('popstate'));
   }, []);
 
   /* ── Auth redirect ────────────────────────────────────── */
@@ -280,18 +291,14 @@ function App() {
     if (loading) return;
     if (user) {
       if (['/login', '/', '/dashboard'].includes(currentPath)) {
-        const search = window.location.search || '';
-        window.history.replaceState({}, '', `/archive${search}`);
-        setCurrentPath('/archive');
+        navigate('/archive', true);
       }
     } else {
       if (currentPath !== '/login' && currentPath !== '/') {
-        const search = window.location.search || '';
-        window.history.replaceState({}, '', `/login${search}`);
-        setCurrentPath('/login');
+        navigate('/login', true);
       }
     }
-  }, [user, loading, currentPath]);
+  }, [user, loading, currentPath, navigate]);
 
   const currentRoom = pathToRoom(currentPath);
 
@@ -321,9 +328,8 @@ function App() {
     const paths = { archive: '/archive', map: '/map', drill: '/drill', settings: '/settings', profile: '/profile', hearth: '/hearth' };
     if (!paths[roomId] || roomId === currentRoom) return;
     prevRoomRef.current = currentRoom;
-    window.history.pushState({}, '', paths[roomId]);
-    setCurrentPath(paths[roomId]);
-  }, [currentRoom]);
+    navigate(paths[roomId]);
+  }, [currentRoom, navigate]);
 
   /* ── Loading screen ───────────────────────────────────── */
   if (loading) {
@@ -362,17 +368,26 @@ function App() {
 
   /* ── Observatory Shell ────────────────────────────────── */
   return (
-    <PerfProvider>
-      <div className={`observatory-shell ${assistantOpen ? 'assistant-active' : ''}`}>
-        <CustomCursor />
-      <Sidebar
-        currentRoom={currentRoom}
-        onNavigate={handleNavigate}
-        onSearchOpen={() => setSearchOpen(true)}
-        onSettingsOpen={() => handleNavigate('settings')}
-        dueCount={dueCount}
-        streak={streak}
-      />
+    <RoomStateProvider>
+      <PerfProvider>
+        <div className={`observatory-shell ${assistantOpen ? 'assistant-active' : ''}`}>
+          <CustomCursor />
+          <Sidebar
+            currentRoom={currentRoom}
+            onNavigate={handleNavigate}
+            onSearchOpen={() => setSearchOpen(true)}
+            onSettingsOpen={() => handleNavigate('settings')}
+            dueCount={dueCount}
+            streak={streak}
+          />
+          <MobileTopHeader
+            currentRoom={currentRoom}
+            onNavigate={handleNavigate}
+            onSearchOpen={() => setSearchOpen(true)}
+            streak={streak}
+            user={user}
+            logout={logout}
+          />
       
       {/* MB-1: Mobile Bottom Tab Bar */}
       <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
@@ -414,12 +429,12 @@ function App() {
             )
           },
           {
-            id: 'settings',
-            label: 'Settings',
+            id: 'hearth',
+            label: 'Hearth',
             icon: (
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <circle cx="12" cy="12" r="3"/>
-                <path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+                <path d="M12 2C6 6 4 10 4 14a8 8 0 0 0 16 0c0-4-2-8-8-12z" />
+                <path d="M12 14c0-3 2-5 2-5s-4 2-4 5" />
               </svg>
             )
           }
@@ -470,7 +485,7 @@ function App() {
       </main>
 
 
-      {currentRoom !== 'hearth' && <ChatDrawer 
+      {currentRoom !== 'hearth' && currentRoom !== 'drill' && <ChatDrawer 
         isOpen={assistantOpen} 
         onOpen={() => setAssistantOpen(true)} 
         onClose={() => setAssistantOpen(false)} 
@@ -516,6 +531,7 @@ function App() {
       <PWAInstallBanner />
       </div>
     </PerfProvider>
+    </RoomStateProvider>
   );
 }
 

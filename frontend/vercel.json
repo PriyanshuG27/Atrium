@@ -1,0 +1,16 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://recall-backend.onrender.com/api/:path*"
+    },
+    {
+      "source": "/auth/:path*",
+      "destination": "https://recall-backend.onrender.com/auth/:path*"
+    },
+    {
+      "source": "/webhook",
+      "destination": "https://recall-backend.onrender.com/webhook"
+    }
+  ]
+}

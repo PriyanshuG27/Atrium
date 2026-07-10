@@ -3,7 +3,7 @@ import { useAuth } from './AuthContext';
 import { useToast } from '../components/Toast';
 import client from '../api/client';
 
-const SocketContext = createContext(null);
+export const SocketContext = createContext(null);
 
 export function SocketProvider({ children }) {
   const { user, checkAuth } = useAuth();
@@ -180,8 +180,10 @@ export function SocketProvider({ children }) {
     };
   }, []);
 
+  const providerValue = React.useMemo(() => ({ connectionStatus, lastSyncTime }), [connectionStatus, lastSyncTime]);
+
   return (
-    <SocketContext.Provider value={{ connectionStatus, lastSyncTime }}>
+    <SocketContext.Provider value={providerValue}>
       {children}
     </SocketContext.Provider>
   );

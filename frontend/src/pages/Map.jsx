@@ -1,10 +1,11 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { 
   Compass, List, MagnifyingGlass, Crosshair, Tag, Play, Pause, Folder, Note, Link, Microphone, FilePdf, Image, Warning
 } from '@phosphor-icons/react';
 import MapCanvas from '../canvas/MapCanvas';
 import NodePanel from '../components/NodePanel';
 import AudioEngine from '../utils/AudioEngine';
+import { useRoomState } from '../context/RoomStateContext';
 
 const FILTERS = [
   { id: 'all',   label: 'All',   color: '#CFA365' },
@@ -138,9 +139,29 @@ function buildGraph(items, W = 900, H = 600, tagPortraits = {}) {
 
 /* ── Hub Info Panel (Semantic Cluster Inspector) ─────────────────────── */
 function HubPanel({ hub, memberItems, onItemSelect, onClose }) {
+  const panelRef = React.useRef(null);
+  const isMobile = window.innerWidth <= 768;
+
+  React.useEffect(() => {
+    const onDown = e => {
+      if (panelRef.current && !panelRef.current.contains(e.target)) {
+        if (e.target.closest('.map-workspace')) {
+          return;
+        }
+        onClose();
+      }
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('touchstart', onDown, { passive: true });
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('touchstart', onDown);
+    };
+  }, [onClose]);
+
   if (!hub) return null;
   return (
-    <div style={{ 
+    <div ref={panelRef} className="hub-panel" style={isMobile ? {} : { 
       position: 'absolute', top: 0, right: 0, bottom: 0, width: 360, 
       background: 'rgba(9, 8, 14, 0.96)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)', 
       borderLeft: '1px solid rgba(207, 163, 101, 0.12)', display: 'flex', flexDirection: 'column', 
@@ -226,6 +247,20 @@ function HubPanel({ hub, memberItems, onItemSelect, onClose }) {
    MapPage
    ══════════════════════════════════════════════════════════════════════════ */
 export default function MapPage() {
+  const { roomStates, updateRoomState, isVisible } = useRoomState();
+  const initialCamera = roomStates.map?.camera || null;
+  const [showResetButton, setShowResetButton] = useState(false);
+  const resetTimerRef = useRef(null);
+
+  const onCameraChange = useCallback((newTransform) => {
+    updateRoomState('map', { camera: newTransform });
+    setShowResetButton(true);
+    if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+    resetTimerRef.current = setTimeout(() => {
+      setShowResetButton(false);
+    }, 2000);
+  }, [updateRoomState]);
+
   const [items,        setItems]        = useState([]);
   const [graphNodes,   setGraphNodes]   = useState([]);
   const [tagPortraits, setTagPortraits] = useState({});
@@ -239,7 +274,10 @@ export default function MapPage() {
   
   // Custom interactive controls
   const [filterType,   setFilterType]   = useState('all');
-  const [selectedNode, setSelectedNode] = useState(null);
+  const [selectedNodeId, setSelectedNodeId] = useState(null);
+  const selectedNode = useMemo(() => {
+    return selectedNodeId ? items.find(it => String(it.id) === String(selectedNodeId)) : null;
+  }, [selectedNodeId, items]);
   const [selectedHub,  setSelectedHub]  = useState(null);
   
   const [searchQuery,   setSearchQuery]   = useState('');
@@ -339,19 +377,17 @@ export default function MapPage() {
   const fetchData = useCallback(async () => {
     try {
       setLoading(true); setError(null); setLoadProgress(0);
-      const all = [];
-      let page = 1;
-      while (page <= 10) {
-        const res = await fetch(`/api/items?page=${page}&limit=50`, { credentials: 'include' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data  = await res.json();
-        const batch = data.items || (Array.isArray(data) ? data : []);
-        all.push(...batch);
-        setLoadProgress(Math.min(95, page * 10));
-        if (batch.length < 50) break;
-        page++;
-      }
-      // Fetch tag portraits
+      
+      // Fetch Page 1 immediately to resolve loading and render the first page
+      const res = await fetch('/api/items?page=1&limit=50', { credentials: 'include' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data  = await res.json();
+      const firstPage = data.items || (Array.isArray(data) ? data : []);
+      
+      setItems(firstPage);
+      setLoadProgress(10);
+
+      // Fetch tag portraits and profile pulse score
       let portraits = {};
       try {
         const portRes = await fetch('/api/tags/portraits', { credentials: 'include' });
@@ -363,7 +399,6 @@ export default function MapPage() {
         console.error('[Map] failed to fetch tag portraits:', pErr);
       }
 
-      // Fetch user profile pulse score
       try {
         const profRes = await fetch('/api/user/profile', { credentials: 'include' });
         if (profRes.ok) {
@@ -376,8 +411,8 @@ export default function MapPage() {
         console.error('[Map] failed to fetch profile pulse score:', profErr);
       }
 
-      setItems(all);
-      const { nodes, edges } = buildGraph(all, window.innerWidth, window.innerHeight, portraits);
+      // Build graph for first page
+      const { nodes, edges } = buildGraph(firstPage, window.innerWidth, window.innerHeight, portraits);
       setGraphNodes(nodes);
       setGraphEdges(edges);
       
@@ -399,11 +434,55 @@ export default function MapPage() {
         const randNode = nonHubs[Math.floor(Math.random() * nonHubs.length)];
         setFlareNodeId(randNode.id);
       }
+
+      setLoading(false); // Resolve loading state immediately for fast FCP/LCP
+      setLoadProgress(100);
+
+      // If there are more items to fetch, load subsequent pages in the background
+      if (firstPage.length === 50) {
+        (async () => {
+          let accumulatedItems = [...firstPage];
+          let page = 2;
+          let hasMore = true;
+          while (hasMore && page <= 10) {
+            try {
+              const bgRes = await fetch(`/api/items?page=${page}&limit=50`, { credentials: 'include' });
+              if (!bgRes.ok) break;
+              const bgData = await bgRes.json();
+              const bgBatch = bgData.items || (Array.isArray(bgData) ? bgData : []);
+              if (bgBatch.length === 0) {
+                hasMore = false;
+              } else {
+                accumulatedItems = [...accumulatedItems, ...bgBatch];
+                setItems(accumulatedItems);
+                
+                // Rebuild the graph with the new batch of nodes/edges
+                const { nodes: updatedNodes, edges: updatedEdges } = buildGraph(
+                  accumulatedItems, 
+                  window.innerWidth, 
+                  window.innerHeight, 
+                  portraits
+                );
+                setGraphNodes(updatedNodes);
+                setGraphEdges(updatedEdges);
+
+                if (bgBatch.length < 50) {
+                  hasMore = false;
+                } else {
+                  page++;
+                }
+              }
+            } catch (bgErr) {
+              console.error('[Map] Background fetch error for page', page, bgErr);
+              break;
+            }
+          }
+        })();
+      }
     } catch (err) {
       console.error('[Map] fetch error:', err);
       setError(err.message || 'Failed to load');
-    } finally {
-      setLoading(false); setLoadProgress(100);
+      setLoading(false);
     }
   }, []);
 
@@ -415,35 +494,27 @@ export default function MapPage() {
     return () => window.removeEventListener('online-refetch', h);
   }, [fetchData]);
 
-  // Sync selectedNode state with updated item in items list (for real-time updates)
-  useEffect(() => {
-    if (!selectedNode) return;
-    const updated = items.find(item => String(item.id) === String(selectedNode.id));
-    if (updated) {
-      if (updated.context_note !== selectedNode.context_note || JSON.stringify(updated.tags) !== JSON.stringify(selectedNode.tags)) {
-        setSelectedNode(updated);
-      }
-    }
-  }, [items, selectedNode]);
-
   const handleNodeClick = useCallback((node) => {
-    console.log('[Map] Node clicked:', node);
+    if (!node) {
+      setSelectedNodeId(null);
+      setSelectedHub(null);
+      setBurstHubId(null);
+      return;
+    }
     if (node.type === 'hub') { 
       // T4.3: toggle burst expansion on hub click
       setBurstHubId(prev => prev === node.id ? null : node.id);
       setSelectedHub(node); 
-      setSelectedNode(null); 
+      setSelectedNodeId(null); 
     } else { 
       setBurstHubId(null);
-      const foundItem = items.find(it => it.id === node.id) || node;
-      console.log('[Map] Setting selected node:', foundItem);
-      setSelectedNode(foundItem); 
+      setSelectedNodeId(node.id); 
       setSelectedHub(null); 
     }
-  }, [items]);
+  }, []);
 
   const handleItemSelect = useCallback((item) => {
-    setSelectedNode(item);
+    setSelectedNodeId(item ? item.id : null);
     setSelectedHub(null);
   }, []);
 
@@ -453,7 +524,7 @@ export default function MapPage() {
       if (!nodeId) return;
       const foundItem = items.find(it => it.id != null && String(it.id) === String(nodeId));
       if (foundItem) {
-        setSelectedNode(foundItem);
+        setSelectedNodeId(foundItem.id);
         setSelectedHub(null);
         setFlareNodeId(nodeId);
         window.dispatchEvent(new CustomEvent('map-canvas-focus', { detail: { nodeId } }));
@@ -469,24 +540,30 @@ export default function MapPage() {
   useEffect(() => {
     if (loading || items.length === 0) return;
     const pendingNodeId = sessionStorage.getItem('pending_map_focus_node');
+    let timer1 = null;
+    let timer2 = null;
     if (pendingNodeId) {
       sessionStorage.removeItem('pending_map_focus_node');
       const foundItem = items.find(it => it.id != null && String(it.id) === String(pendingNodeId));
       if (foundItem) {
-        setSelectedNode(foundItem);
+        setSelectedNodeId(foundItem.id);
         setSelectedHub(null);
         setFlareNodeId(foundItem.id);
         
         // Wait briefly for canvas simulation initialization/mount
-        setTimeout(() => {
+        timer1 = setTimeout(() => {
           window.dispatchEvent(new CustomEvent('map-canvas-focus', { detail: { nodeId: foundItem.id } }));
         }, 250);
 
-        setTimeout(() => {
+        timer2 = setTimeout(() => {
           setFlareNodeId(null);
         }, 8000); // 8 seconds flare visibility
       }
     }
+    return () => {
+      if (timer1) clearTimeout(timer1);
+      if (timer2) clearTimeout(timer2);
+    };
   }, [loading, items]);
 
   const handleAutoFit = () => {
@@ -518,24 +595,25 @@ export default function MapPage() {
     return matchesHub || matchesMembers;
   });
 
-  if (loading) return (
-    <div style={{ width:'100%', height:'100vh', background:'#08070B', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:'1.5rem' }}>
-      <div style={{ position:'relative', width:52, height:52 }}>
-        <div style={{ position:'absolute', inset:0, borderRadius:'50%', border:'1.5px solid rgba(207,163,101,0.1)', borderTopColor:'rgba(207,163,101,0.7)', animation:'mapspin 1.1s linear infinite' }} />
-        <div style={{ position:'absolute', inset:8, borderRadius:'50%', border:'1px solid rgba(207,163,101,0.06)', borderBottomColor:'rgba(207,163,101,0.35)', animation:'mapspin 1.8s linear infinite reverse' }} />
-      </div>
-      <div style={{ textAlign:'center' }}>
-        <p style={{ fontFamily:'var(--font-mono)', fontSize:11, color:'rgba(207,163,101,0.6)', letterSpacing:'0.14em', marginBottom:8 }}>MAPPING YOUR KNOWLEDGE</p>
-        <div style={{ width:160, height:2, background:'rgba(207,163,101,0.08)', borderRadius:2, overflow:'hidden' }}>
-          <div style={{ height:'100%', background:'linear-gradient(90deg,#CFA365,#E8C47A)', borderRadius:2, width:`${loadProgress}%`, transition:'width 0.4s ease' }} />
-        </div>
-      </div>
-      <style>{`@keyframes mapspin{to{transform:rotate(360deg);}}`}</style>
-    </div>
-  );
-
   return (
-    <div style={{ position:'relative', width:'100%', height:'100vh', background:'#08070B', overflow:'hidden', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ position:'relative', width:'100%', height:'100%', background:'#08070B', overflow:'hidden', display: 'flex', flexDirection: 'column' }}>
+      
+      {/* Loading Overlay */}
+      {loading && items.length === 0 && (
+        <div style={{ position:'absolute', inset:0, background:'#08070B', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:'1.5rem', zIndex: 2000 }}>
+          <div style={{ position:'relative', width:52, height:52 }}>
+            <div style={{ position:'absolute', inset:0, borderRadius:'50%', border:'1.5px solid rgba(207,163,101,0.1)', borderTopColor:'rgba(207,163,101,0.7)', animation:'mapspin 1.1s linear infinite' }} />
+            <div style={{ position:'absolute', inset:8, borderRadius:'50%', border:'1px solid rgba(207,163,101,0.06)', borderBottomColor:'rgba(207,163,101,0.35)', animation:'mapspin 1.8s linear infinite reverse' }} />
+          </div>
+          <div style={{ textAlign:'center' }}>
+            <p style={{ fontFamily:'var(--font-mono)', fontSize:11, color:'rgba(207,163,101,0.6)', letterSpacing:'0.14em', marginBottom:8 }}>MAPPING YOUR KNOWLEDGE</p>
+            <div style={{ width:160, height:2, background:'rgba(207,163,101,0.08)', borderRadius:2, overflow:'hidden' }}>
+              <div style={{ height:'100%', background:'linear-gradient(90deg,#CFA365,#E8C47A)', borderRadius:2, width:`${loadProgress}%`, transition:'width 0.4s ease' }} />
+            </div>
+          </div>
+          <style>{`@keyframes mapspin{to{transform:rotate(360deg);}}`}</style>
+        </div>
+      )}
       
       {/* ── TOP CONTROL BAR ── */}
       <div className="map-control-bar" style={{ 
@@ -660,7 +738,7 @@ export default function MapPage() {
       </div>
 
       {/* ── MAIN WORKSPACE ── */}
-      <div style={{
+      <div className="map-workspace" style={{
         flex: 1, position: 'relative', overflow: 'hidden',
         opacity: viewTransitioning ? 0 : 1,
         transform: viewTransitioning ? 'scale(0.98)' : 'scale(1)',
@@ -686,6 +764,9 @@ export default function MapPage() {
                 gapsMode={gapsMode}
                 burstHubId={burstHubId}
                 onNodeClick={handleNodeClick} 
+                initialCamera={initialCamera}
+                onCameraChange={onCameraChange}
+                isVisible={isVisible}
               />
             </div>
 
@@ -823,7 +904,37 @@ export default function MapPage() {
               </button>
             </div>
 
-            {/* 2. Mobile-Only Collapsible Top-Right Control Panel */}
+            {/* Mobile-Only Auto-Fade Camera Reset Button */}
+            <button
+              onClick={handleAutoFit}
+              title="Recenter Map Viewport"
+              className="mobile-only-controls"
+              style={{
+                position: 'absolute',
+                bottom: 'calc(var(--mobile-bottom-nav-height) + var(--safe-bottom, 0) + 16px)',
+                right: '16px',
+                zIndex: 22,
+                background: 'rgba(10,9,15,0.85)',
+                backdropFilter: 'blur(20px)',
+                border: '1px solid var(--accent-gold)',
+                borderRadius: '50%',
+                width: '44px',
+                height: '44px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                color: 'var(--accent-gold)',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+                opacity: showResetButton ? 1 : 0,
+                transform: showResetButton ? 'scale(1)' : 'scale(0.8)',
+                pointerEvents: showResetButton ? 'all' : 'none',
+                transition: 'opacity 0.25s ease, transform 0.25s ease',
+              }}
+            >
+              <Crosshair size={20} />
+            </button>
+
             {/* 2. Mobile-Only Collapsible & Movable Control Panel */}
             <div className="mobile-only-controls" style={{
               position: 'absolute',
@@ -939,6 +1050,8 @@ export default function MapPage() {
               )}
             </div>
 
+
+
             {/* T4.2 — Gaps mode tooltip banner */}
             {gapsMode && (
               <div style={{
@@ -1025,7 +1138,7 @@ export default function MapPage() {
                   return (
                     <div
                       key={hub.id}
-                      onClick={() => { AudioEngine.playClick(); setSelectedHub(hub); setSelectedNode(null); }}
+                      onClick={() => { AudioEngine.playClick(); setSelectedHub(hub); setSelectedNodeId(null); }}
                       style={{
                         padding: '0.75rem 1.5rem',
                         cursor: 'pointer',
@@ -1250,13 +1363,22 @@ export default function MapPage() {
       {/* Floating Info Panels */}
       {selectedNode && (
         <NodePanel
+          key={selectedNode.id}
           node={selectedNode}
           activeCandidates={activeCandidates}
           activeNodes={graphNodes}
-          onClose={() => setSelectedNode(null)}
+          onClose={() => setSelectedNodeId(null)}
         />
       )}
-      {selectedHub  && <HubPanel  hub={selectedHub} memberItems={hubMemberItems} onItemSelect={handleItemSelect} onClose={() => setSelectedHub(null)} />}
+      {selectedHub  && (
+        <HubPanel  
+          key={selectedHub.id}
+          hub={selectedHub} 
+          memberItems={hubMemberItems} 
+          onItemSelect={handleItemSelect} 
+          onClose={() => { setSelectedHub(null); setBurstHubId(null); }} 
+        />
+      )}
 
       {/* Error state */}
       {error && (

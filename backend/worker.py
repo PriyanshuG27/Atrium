@@ -894,10 +894,46 @@ async def process_batch_task(task: Dict[str, Any], user_id: int, chat_id: str) -
                 original_ids = [it["id"] for it in group_items]
                 async with db_conn._pool.connection() as conn:
                     await conn.execute("SET statement_timeout = '30s'")
-                    async with conn.cursor() as cur:
-                        await cur.execute("DELETE FROM item_chunks WHERE item_id = ANY(%s) AND user_id = %s;", (original_ids, user_id))
-                        await cur.execute("DELETE FROM items WHERE id = ANY(%s) AND user_id = %s;", (original_ids, user_id))
-                        await conn.commit()
+                    async with db_conn.transaction_context(conn):
+                        async with conn.cursor() as cur:
+                            await cur.execute(
+                                "DELETE FROM quizzes WHERE item_id = ANY(%s) AND user_id = %s;",
+                                (original_ids, user_id)
+                            )
+                            await cur.execute(
+                                "DELETE FROM item_chunks WHERE item_id = ANY(%s) AND user_id = %s;",
+                                (original_ids, user_id)
+                            )
+                            await cur.execute(
+                                "DELETE FROM reminders WHERE item_id = ANY(%s) AND user_id = %s;",
+                                (original_ids, user_id)
+                            )
+                            await cur.execute(
+                                """
+                                DELETE FROM insight_candidates 
+                                WHERE (item_id_a = ANY(%s) OR item_id_b = ANY(%s)) 
+                                  AND user_id = %s;
+                                """,
+                                (original_ids, original_ids, user_id)
+                            )
+                            await cur.execute(
+                                "DELETE FROM entity_mentions WHERE item_id = ANY(%s) AND user_id = %s;",
+                                (original_ids, user_id)
+                            )
+                            await cur.execute(
+                                """
+                                DELETE FROM relationships 
+                                WHERE ((source_type = 'item' AND source_id = ANY(%s)) 
+                                   OR (target_type = 'item' AND target_id = ANY(%s)) 
+                                   OR (item_id = ANY(%s))) 
+                                  AND user_id = %s;
+                                """,
+                                (original_ids, original_ids, original_ids, user_id)
+                            )
+                            await cur.execute(
+                                "DELETE FROM items WHERE id = ANY(%s) AND user_id = %s;",
+                                (original_ids, user_id)
+                            )
                         
                 from backend.services.pdf_ingester import chunk_text
                 chunk_idx = 0

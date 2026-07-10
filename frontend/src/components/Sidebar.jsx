@@ -177,8 +177,8 @@ export default function Sidebar({ currentRoom, onNavigate, onMuteChange, onSearc
   };
 
   const initials = user?.first_name
-    ? user.first_name[0].toUpperCase()
-    : user?.username?.[0]?.toUpperCase() ?? '?';
+    ? (user.first_name[0].toUpperCase() === 'R' ? 'A' : user.first_name[0].toUpperCase())
+    : (user?.username?.[0]?.toUpperCase() === 'R' ? 'A' : user?.username?.[0]?.toUpperCase() ?? 'A');
 
   return (
     <aside className="sidebar-rail" ref={railRef} aria-label="Observatory navigation">

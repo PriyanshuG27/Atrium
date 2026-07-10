@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from psycopg.rows import dict_row
 
 from backend.middleware.twa_auth import get_current_user, UserContext
-from backend.db.connection import get_db
+from backend.db.connection import get_db, transaction_context
 from backend.config import settings
 from backend.services.http_client import get_http_client
 
@@ -285,46 +285,46 @@ async def accept_invite(
     and no duplicate active pair with the same person (DB unique constraint).
     Both users receive a Telegram notification.
     """
-    async with db.cursor(row_factory=dict_row) as cur:
-        await cur.execute(
-            """
-            SELECT id, inviter_id FROM journey_invites
-            WHERE invite_code = %s
-              AND status = 'pending'
-              AND expires_at > NOW()
-            FOR UPDATE;
-            """,
-            (body.invite_code,),
-        )
-        invite = await cur.fetchone()
-
-        if not invite:
-            raise HTTPException(status_code=404, detail="Invalid or expired invite code")
-
-        inviter_id = get_row_val(invite, "inviter_id", 1)
-        invite_id  = get_row_val(invite, "id", 0)
-
-        if inviter_id == user.id:
-            raise HTTPException(status_code=400, detail="Cannot pair with yourself")
-
-        # Check if this exact pair already exists (prevents duplicate with same person)
-        a_id, b_id = sorted([inviter_id, user.id])
-        await cur.execute(
-            """
-            SELECT 1 FROM journey_pairs
-            WHERE user_a_id = %s AND user_b_id = %s
-            LIMIT 1;
-            """,
-            (a_id, b_id),
-        )
-        if await cur.fetchone():
-            raise HTTPException(
-                status_code=400,
-                detail="You already have an active journey with this person"
+    async with transaction_context(db):
+        async with db.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT id, inviter_id FROM journey_invites
+                WHERE invite_code = %s
+                  AND status = 'pending'
+                  AND expires_at > NOW()
+                FOR UPDATE;
+                """,
+                (body.invite_code,),
             )
+            invite = await cur.fetchone()
 
-        # Transaction: create pair + mark invite accepted
-        async with db.transaction():
+            if not invite:
+                raise HTTPException(status_code=404, detail="Invalid or expired invite code")
+
+            inviter_id = get_row_val(invite, "inviter_id", 1)
+            invite_id  = get_row_val(invite, "id", 0)
+
+            if inviter_id == user.id:
+                raise HTTPException(status_code=400, detail="Cannot pair with yourself")
+
+            # Check if this exact pair already exists (prevents duplicate with same person)
+            a_id, b_id = sorted([inviter_id, user.id])
+            await cur.execute(
+                """
+                SELECT 1 FROM journey_pairs
+                WHERE user_a_id = %s AND user_b_id = %s
+                LIMIT 1;
+                """,
+                (a_id, b_id),
+            )
+            if await cur.fetchone():
+                raise HTTPException(
+                    status_code=400,
+                    detail="You already have an active journey with this person"
+                )
+
+            # create pair + mark invite accepted
             await cur.execute(
                 """
                 INSERT INTO journey_pairs (user_a_id, user_b_id)
@@ -349,20 +349,20 @@ async def accept_invite(
                 }
             )
 
-        # Fetch inviter info for Telegram nudge
-        await cur.execute(
-            "SELECT telegram_chat_id, first_name FROM users WHERE id = %s;",
-            (inviter_id,),
-        )
-        inviter = await cur.fetchone()
-        inviter_chat_id = get_row_val(inviter, "telegram_chat_id", 0)
+            # Fetch inviter info for Telegram nudge
+            await cur.execute(
+                "SELECT telegram_chat_id, first_name FROM users WHERE id = %s;",
+                (inviter_id,),
+            )
+            inviter = await cur.fetchone()
+            inviter_chat_id = get_row_val(inviter, "telegram_chat_id", 0)
 
-        await cur.execute(
-            "SELECT COALESCE(first_name, username, 'Someone') AS name FROM users WHERE id = %s;",
-            (user.id,),
-        )
-        accepter_row  = await cur.fetchone()
-        accepter_name = get_row_val(accepter_row, "name", 0) or "Someone"
+            await cur.execute(
+                "SELECT COALESCE(first_name, username, 'Someone') AS name FROM users WHERE id = %s;",
+                (user.id,),
+            )
+            accepter_row  = await cur.fetchone()
+            accepter_name = get_row_val(accepter_row, "name", 0) or "Someone"
 
     if inviter_chat_id:
         await _notify_telegram(
@@ -384,41 +384,41 @@ async def leave_journey(
     User was explicitly warned before this is called.
     Notifies partner via Telegram.
     """
-    async with db.cursor(row_factory=dict_row) as cur:
-        # Verify ownership — user must be part of this pair
-        await cur.execute(
-            """
-            SELECT id, user_a_id, user_b_id
-            FROM journey_pairs
-            WHERE id = %s AND (user_a_id = %s OR user_b_id = %s);
-            """,
-            (pair_id, user.id, user.id),
-        )
-        pair = await cur.fetchone()
-        if not pair:
-            raise HTTPException(status_code=404, detail="Journey not found")
+    async with transaction_context(db):
+        async with db.cursor(row_factory=dict_row) as cur:
+            # Verify ownership — user must be part of this pair
+            await cur.execute(
+                """
+                SELECT id, user_a_id, user_b_id
+                FROM journey_pairs
+                WHERE id = %s AND (user_a_id = %s OR user_b_id = %s);
+                """,
+                (pair_id, user.id, user.id),
+            )
+            pair = await cur.fetchone()
+            if not pair:
+                raise HTTPException(status_code=404, detail="Journey not found")
 
-        user_a_id  = get_row_val(pair, "user_a_id", 1)
-        user_b_id  = get_row_val(pair, "user_b_id", 2)
-        partner_id = user_b_id if user_a_id == user.id else user_a_id
+            user_a_id  = get_row_val(pair, "user_a_id", 1)
+            user_b_id  = get_row_val(pair, "user_b_id", 2)
+            partner_id = user_b_id if user_a_id == user.id else user_a_id
 
-        # Fetch partner's chat ID for notification
-        await cur.execute(
-            "SELECT telegram_chat_id FROM users WHERE id = %s;",
-            (partner_id,),
-        )
-        partner_row     = await cur.fetchone()
-        partner_chat_id = get_row_val(partner_row, "telegram_chat_id", 0)
+            # Fetch partner's chat ID for notification
+            await cur.execute(
+                "SELECT telegram_chat_id FROM users WHERE id = %s;",
+                (partner_id,),
+            )
+            partner_row     = await cur.fetchone()
+            partner_chat_id = get_row_val(partner_row, "telegram_chat_id", 0)
 
-        await cur.execute(
-            "SELECT COALESCE(first_name, username, 'Someone') AS name FROM users WHERE id = %s;",
-            (user.id,),
-        )
-        leaver_row  = await cur.fetchone()
-        leaver_name = get_row_val(leaver_row, "name", 0) or "Someone"
+            await cur.execute(
+                "SELECT COALESCE(first_name, username, 'Someone') AS name FROM users WHERE id = %s;",
+                (user.id,),
+            )
+            leaver_row  = await cur.fetchone()
+            leaver_name = get_row_val(leaver_row, "name", 0) or "Someone"
 
-        # Hard delete — data is gone as warned
-        async with db.transaction():
+            # Hard delete — data is gone as warned
             await cur.execute(
                 "DELETE FROM journey_pairs WHERE id = %s;",
                 (pair_id,),

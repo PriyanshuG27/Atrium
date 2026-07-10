@@ -319,7 +319,7 @@ export default function Feed({
       if (menuRef.current && !menuRef.current.contains(e.target)) setActiveMenuId(null);
     };
     document.addEventListener('mousedown', handler);
-    document.addEventListener('touchstart', handler);
+    document.addEventListener('touchstart', handler, { passive: true });
     return () => {
       document.removeEventListener('mousedown', handler);
       document.removeEventListener('touchstart', handler);

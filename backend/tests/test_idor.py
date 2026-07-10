@@ -103,7 +103,7 @@ def test_delete_own_item_success(client):
     response = client.delete("/api/items/5", cookies={"atrium_session": token})
     
     assert response.status_code == 204
-    assert len(current_cursor.executed) == 7
+    assert len(current_cursor.executed) == 9
     
     q_query, q_params = current_cursor.executed[1]
     assert "DELETE FROM quizzes" in q_query
@@ -121,12 +121,20 @@ def test_delete_own_item_success(client):
     assert "DELETE FROM insight_candidates" in candidates_query
     assert candidates_params == (5, 5, 42)
     
-    item_query, item_params = current_cursor.executed[5]
+    entities_query, entities_params = current_cursor.executed[5]
+    assert "DELETE FROM entity_mentions" in entities_query
+    assert entities_params == (5, 42)
+
+    rel_query, rel_params = current_cursor.executed[6]
+    assert "DELETE FROM relationships" in rel_query
+    assert rel_params == (5, 5, 5, 42)
+
+    item_query, item_params = current_cursor.executed[7]
     assert "DELETE FROM items" in item_query
     assert "user_id = %s" in item_query
     assert item_params == (5, 42)
     
-    audit_query, audit_params = current_cursor.executed[6]
+    audit_query, audit_params = current_cursor.executed[8]
     assert "INSERT INTO audit_logs" in audit_query
 
 def test_delete_other_user_item_idor_prevented(client):
@@ -139,7 +147,7 @@ def test_delete_other_user_item_idor_prevented(client):
     
     assert response.status_code == 404
     assert response.json()["detail"] == "Item not found"
-    assert len(current_cursor.executed) == 6
+    assert len(current_cursor.executed) == 8
     
     chunk_query, chunk_params = current_cursor.executed[2]
     assert "DELETE FROM item_chunks" in chunk_query
@@ -153,7 +161,15 @@ def test_delete_other_user_item_idor_prevented(client):
     assert "DELETE FROM insight_candidates" in candidates_query
     assert candidates_params == (5, 5, 100)
     
-    item_query, item_params = current_cursor.executed[5]
+    entities_query, entities_params = current_cursor.executed[5]
+    assert "DELETE FROM entity_mentions" in entities_query
+    assert entities_params == (5, 100)
+
+    rel_query, rel_params = current_cursor.executed[6]
+    assert "DELETE FROM relationships" in rel_query
+    assert rel_params == (5, 5, 5, 100)
+
+    item_query, item_params = current_cursor.executed[7]
     assert "DELETE FROM items" in item_query
     assert "user_id = %s" in item_query
     assert item_params == (5, 100)

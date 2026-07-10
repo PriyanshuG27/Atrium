@@ -4,6 +4,8 @@ import ArchiveCylinder from '../canvas/ArchiveCylinder';
 import AddNoteModal from '../components/AddNoteModal';
 import AudioEngine from '../utils/AudioEngine';
 import { useToast } from '../components/Toast';
+import { useRoomState } from '../context/RoomStateContext';
+import { apiFetch } from '../api/client';
 
 /* ============================================================
    Archive Room — Observatory 3D Cylindrical Review.
@@ -21,6 +23,9 @@ import { useToast } from '../components/Toast';
    ============================================================ */
 export default function Archive({ initialSelectedItem, onClearInitialSelect }) {
   const { addToast } = useToast();
+  const { roomStates, updateRoomState } = useRoomState();
+  const initialScrollIndex = roomStates.archive?.scrollTop || 0;
+
   const [items, setSelectedItemForArchive] = useState([]);
   const [itemsList, setItems] = useState([]);
   const [selectedItem, setSelectedItem] = useState(null);
@@ -28,6 +33,7 @@ export default function Archive({ initialSelectedItem, onClearInitialSelect }) {
   const [error, setError] = useState(null);
   const [filterSourceType, setFilterSourceType] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [pipelineStage, setPipelineStage] = useState(null);
 
   // HUD persistent hover collapse state
   const [hoveredHUD, setHoveredHUD] = useState(false);
@@ -95,33 +101,46 @@ export default function Archive({ initialSelectedItem, onClearInitialSelect }) {
   const fetchItems = useCallback(async () => {
     try {
       setLoading(true);
-      let allItems = [];
-      let pageNum = 1;
-      let hasMore = true;
+      // Fetch Page 1 immediately to resolve loading and render the first page
+      const res = await apiFetch('/api/items?page=1&limit=50');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const firstPage = data.items || data || [];
 
-      while (hasMore && pageNum <= 6) {
-        const res = await fetch(`/api/items?page=${pageNum}&limit=50`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        const fetched = data.items || data || [];
-
-        if (fetched.length === 0) {
-          hasMore = false;
-        } else {
-          allItems = [...allItems, ...fetched];
-          if (fetched.length < 50) {
-            hasMore = false;
-          } else {
-            pageNum++;
-          }
-        }
-      }
-
-      setItems(allItems);
+      setItems(firstPage);
       setError(null);
+      setLoading(false); // Resolve loading state immediately for fast FCP/LCP
+
+      // If there are more items to fetch, load subsequent pages in the background
+      if (firstPage.length === 50) {
+        (async () => {
+          let pageNum = 2;
+          let hasMore = true;
+          while (hasMore && pageNum <= 6) {
+            try {
+              const bgRes = await apiFetch(`/api/items?page=${pageNum}&limit=50`);
+              if (!bgRes.ok) break;
+              const bgData = await bgRes.json();
+              const bgFetched = bgData.items || bgData || [];
+              if (bgFetched.length === 0) {
+                hasMore = false;
+              } else {
+                setItems(prev => [...prev, ...bgFetched]);
+                if (bgFetched.length < 50) {
+                  hasMore = false;
+                } else {
+                  pageNum++;
+                }
+              }
+            } catch (bgErr) {
+              console.error('[Archive] Background fetch error for page', pageNum, bgErr);
+              break;
+            }
+          }
+        })();
+      }
     } catch (err) {
       setError(err.message);
-    } finally {
       setLoading(false);
     }
   }, []);
@@ -129,10 +148,42 @@ export default function Archive({ initialSelectedItem, onClearInitialSelect }) {
   useEffect(() => { fetchItems(); }, [fetchItems]);
 
   useEffect(() => {
-    const handler = () => fetchItems();
+    const handler = () => {
+      fetchItems();
+      setPipelineStage('done');
+      setTimeout(() => setPipelineStage(null), 3000);
+    };
     window.addEventListener('online-refetch', handler);
     return () => window.removeEventListener('online-refetch', handler);
   }, [fetchItems]);
+
+  // Track active 3D cylinder angle scroll position in context
+  useEffect(() => {
+    const handleIndexChange = (e) => {
+      updateRoomState('archive', { scrollTop: e.detail.index });
+    };
+    window.addEventListener('archive-active-index', handleIndexChange);
+    return () => window.removeEventListener('archive-active-index', handleIndexChange);
+  }, [updateRoomState]);
+
+  // Parse TWA ingestion handoff flag from query params on mount
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('ingestion') === 'true') {
+      setPipelineStage('enqueued');
+      const t1 = setTimeout(() => setPipelineStage('ocr'), 4000);
+      const t2 = setTimeout(() => setPipelineStage('embedding'), 8000);
+      
+      const newSearch = window.location.search.replace(/[?&]ingestion=[^&]*/, '').replace(/^&/, '?').replace(/^\?$/, '');
+      const newUrl = window.location.pathname + newSearch;
+      window.history.replaceState({}, '', newUrl);
+
+      return () => {
+        clearTimeout(t1);
+        clearTimeout(t2);
+      };
+    }
+  }, []);
 
   const handleCardClick = useCallback((item) => { setSelectedItem(item); }, []);
   const handlePanelClose = useCallback(() => { setSelectedItem(null); }, []);
@@ -168,7 +219,38 @@ export default function Archive({ initialSelectedItem, onClearInitialSelect }) {
 
 
   return (
-    <div className="archive-room" style={{ width: '100%', height: '100vh', position: 'relative', background: '#08070a', overflow: 'hidden' }}>
+    <div className="archive-room" style={{ width: '100%', height: '100%', position: 'relative', background: '#08070a', overflow: 'hidden' }}>
+      
+      {/* Mobile quick-entry banner */}
+      {pipelineStage && (
+        <div className="mobile-only-controls ingestion-banner" style={{
+          position: 'absolute',
+          top: '12px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          width: '90%',
+          background: 'rgba(20, 18, 24, 0.95)',
+          border: pipelineStage === 'done' ? '1px solid rgba(143, 163, 130, 0.4)' : '1px solid rgba(207, 163, 101, 0.4)',
+          borderRadius: '8px',
+          padding: '10px 16px',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+          zIndex: 1005,
+          backdropFilter: 'blur(10px)',
+          alignItems: 'center',
+          gap: '8px',
+          color: pipelineStage === 'done' ? '#8FA382' : 'var(--accent-gold)',
+          fontFamily: 'var(--font-mono)',
+          fontSize: '11px',
+          justifyContent: 'center',
+        }}>
+          {pipelineStage === 'done' ? '✓' : '⚡'} {
+            pipelineStage === 'enqueued' ? 'Voice note received. Preparing processing pipeline...' :
+            pipelineStage === 'ocr' ? 'Extraction active. OCR processing...' :
+            pipelineStage === 'embedding' ? 'Synthesizing context. Embedding text...' :
+            'Memory saved! Ready in Archive.'
+          }
+        </div>
+      )}
       
       {/* ── Left HUD Panel (collapses when item selected, expands on hover) ── */}
       {/* Floating R button (Mobile only) */}
@@ -200,7 +282,7 @@ export default function Archive({ initialSelectedItem, onClearInitialSelect }) {
             transition: 'all 0.2s'
           }}
         >
-          R
+          A
         </button>
       )}
 
@@ -237,7 +319,7 @@ export default function Archive({ initialSelectedItem, onClearInitialSelect }) {
               <span className="mobile-hud-close-label">✕</span>
             </button>
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--accent-gold)', letterSpacing: '0.15em', textTransform: 'uppercase', marginBottom: '0.25rem' }}>
-              RECALL // OBSERVATORY
+              ATRIUM // OBSERVATORY
             </div>
             <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '1.75rem', fontWeight: 600, color: 'var(--text-signal)', letterSpacing: '-0.02em', margin: 0 }}>
               Signal Archive
@@ -456,7 +538,7 @@ export default function Archive({ initialSelectedItem, onClearInitialSelect }) {
           e.currentTarget.style.boxShadow = '0 8px 32px rgba(0,0,0,0.4)';
         }}
         >
-          <span style={{ color: 'rgba(207,163,101,0.6)', display: 'flex', alignItems: 'center' }}>
+          <span style={{ color: 'rgba(207,163,101,0.6)', display: 'flex', alignItems: 'center', pointerEvents: 'none' }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="11" cy="11" r="8" />
               <line x1="21" y1="21" x2="16.65" y2="16.65" />
@@ -525,6 +607,7 @@ export default function Archive({ initialSelectedItem, onClearInitialSelect }) {
           hasSelection={!!selectedItem} 
           selectedItemId={selectedItem?.id}
           searchQuery={searchQuery}
+          initialScrollIndex={initialScrollIndex}
         />
 
       </div>

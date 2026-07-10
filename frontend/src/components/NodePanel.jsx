@@ -308,12 +308,15 @@ export default function NodePanel({
     if (!displayNode) return;
     const onDown = e => {
       if (panelRef.current && !panelRef.current.contains(e.target)) {
+        if (e.target.closest('.map-workspace')) {
+          return;
+        }
         if (e.target.closest('.constellation-node') || e.target.closest('.context-menu')) return;
         onClose();
       }
     };
     document.addEventListener('mousedown', onDown);
-    document.addEventListener('touchstart', onDown);
+    document.addEventListener('touchstart', onDown, { passive: true });
     return () => {
       document.removeEventListener('mousedown', onDown);
       document.removeEventListener('touchstart', onDown);
