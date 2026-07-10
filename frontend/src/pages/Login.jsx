@@ -217,7 +217,7 @@ export default function Login() {
     script.setAttribute('data-telegram-login', import.meta.env.VITE_BOT_USERNAME || '');
     script.setAttribute('data-size', 'large');
     script.setAttribute('data-radius', '4');
-    script.setAttribute('data-auth-url', `${import.meta.env.VITE_API_URL || ''}/auth/telegram`);
+    script.setAttribute('data-auth-url', `${window.location.origin}/auth/telegram`);
     script.async = true;
     const container = document.getElementById('tg-widget');
     if (container) container.appendChild(script);
