@@ -49,7 +49,7 @@ class PersistenceManager:
                 doc[field] = getattr(result, field)
 
         self.persisted_records.append(doc)
-        logger.info("Persisted AI Result successfully: %s", str(doc))
+        logger.info("Persisted AI Result successfully (model: %s, provider: %s)", result.model_used, result.provider_used)
 
         # Async PostgreSQL Write and Event Publishing
         try:

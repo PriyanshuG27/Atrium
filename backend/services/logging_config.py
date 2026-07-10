@@ -26,6 +26,10 @@ def _initialize_secrets():
 
 def _redact_value(val):
     if isinstance(val, str):
+        # Mask JWT tokens in WebSocket path logs
+        if "/api/ws/" in val:
+            import re
+            val = re.sub(r"/api/ws/[^\s\"']+", "/api/ws/[REDACTED_TOKEN]", val)
         for secret in _SENSITIVE_VALUES:
             if secret in val:
                 val = val.replace(secret, "[REDACTED]")
@@ -94,3 +98,23 @@ def configure_logging() -> None:
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
+
+    # 12. Register UvicornTokenFilter to sanitize JWT tokens from all loggers (access, errors, root)
+    import re
+    class UvicornTokenFilter(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            if record.args and len(record.args) >= 3:
+                # record.args[2] is usually the full HTTP path in uvicorn access logs
+                path = record.args[2]
+                if isinstance(path, str) and "/api/ws/" in path:
+                    args_list = list(record.args)
+                    args_list[2] = re.sub(r"/api/ws/[^\s\"']+", "/api/ws/[REDACTED_TOKEN]", path)
+                    record.args = tuple(args_list)
+            if isinstance(record.msg, str) and "/api/ws/" in record.msg:
+                record.msg = re.sub(r"/api/ws/[^\s\"']+", "/api/ws/[REDACTED_TOKEN]", record.msg)
+            return True
+
+    token_filter = UvicornTokenFilter()
+    for uvicorn_logger_name in ("uvicorn", "uvicorn.access", "uvicorn.error"):
+        ul = logging.getLogger(uvicorn_logger_name)
+        ul.addFilter(token_filter)

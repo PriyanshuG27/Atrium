@@ -141,7 +141,7 @@ export function SocketProvider({ children }) {
         clearTimeout(reconnectTimeoutRef.current);
       }
     };
-  }, [user]);
+  }, [user, token]);
 
   // Intercept window.fetch and axios client responses to update lastSyncTime
   useEffect(() => {

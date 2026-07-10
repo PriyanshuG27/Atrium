@@ -52,6 +52,50 @@ def extract_urls_from_ocr(ocr_text: str) -> list[str]:
             
     return final_urls
 
+def clean_ocr_title(ocr_text: str) -> str:
+    if not ocr_text:
+        return "OCR Image"
+        
+    import re
+    lines = ocr_text.splitlines()
+    clean_lines = []
+    
+    # Common garbage words/patterns to ignore in title
+    garbage_patterns = [
+        r"^\d{1,2}:\d{2}(?:\s?[aApP][mM])?$",  # 11:56, 12:34 PM
+        r"^\d+(?:\s?[kKmMgG][bB]/[sS])?$",     # 66, 0.02 KB/s
+        r"^[0-9.]+\s?[kKmMgG][bB]/[sS]$",      # 0.02 KB/s
+        r"^(?:[lL][tT][eE]|[55][gG]|[44][gG]|\d+\s?%|\d+)$", # LTE, 5G, 4G, 88%, lone digits
+        r"^(?:[rR]eels|[fF]riends|[eE]xplore|[hH]ome|[fF]ollowing|[fF]or\s?[yY]ou)$", # App UI tabs
+        r"^[^\w\s]+$"                          # Only punctuation
+    ]
+    
+    for line in lines:
+        line_strip = line.strip()
+        if not line_strip:
+            continue
+        # Check if line matches any garbage patterns
+        is_garbage = False
+        for pattern in garbage_patterns:
+            if re.match(pattern, line_strip, re.IGNORECASE):
+                is_garbage = True
+                break
+        if not is_garbage:
+            clean_lines.append(line_strip)
+            
+    if clean_lines:
+        # Join the first two meaningful lines to give context (capped at 80 chars)
+        title_candidate = " ".join(clean_lines[:2])
+        if len(title_candidate) > 80:
+            title_candidate = title_candidate[:77] + "..."
+        return title_candidate
+        
+    # Fallback to simple slice if everything was filtered out
+    fallback = ocr_text.replace("\n", " ").strip()
+    if len(fallback) > 80:
+        fallback = fallback[:77] + "..."
+    return fallback
+
 async def download_telegram_image(file_id: str, local_path: str) -> None:
     """Downloads an image from Telegram API and saves it locally."""
     from backend.services.telegram_downloader import download_telegram_file_robust
@@ -155,7 +199,7 @@ async def ingest_image(file_id: str, user_id: int, chat_id: str, db: AsyncConnec
             summary = ai_res.get("summary") or f"OCR summary: {ocr_text[:100]}..."
             tags = ai_res.get("tags") or ["image", "ocr"]
             context_prompt = ai_res.get("context_prompt")
-            title = f"OCR: {ocr_text[:80].strip()}"
+            title = f"OCR: {clean_ocr_title(ocr_text)}"
         else:
             logger.info("OCR text <= 50 chars. Requesting Gemini caption...")
             caption = await cascade.caption_image(image_bytes)
