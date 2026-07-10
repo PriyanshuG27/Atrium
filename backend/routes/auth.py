@@ -165,6 +165,58 @@ async def auth_telegram(
         logger.info("User %d logged in via Telegram widget (redirect mode).", user_id)
         return redirect_response
 
+# ── Bot-session browser login ─────────────────────────────────────────────────
+# Flow: browser calls /init → shows deep link → user opens bot in Telegram
+#       → bot stores user_id under token → browser polls /poll → gets cookie
+
+@router.get("/bot-session/init", summary="Initialise a bot-session browser login token")
+async def bot_session_init():
+    """Generate a one-time token and return the Telegram deep-link for browser login."""
+    import secrets
+    from backend.services.redis_client import redis as _redis
+    token = secrets.token_urlsafe(24)
+    await _redis.setex(f"bot_web_login_pending:{token}", 300, "pending")
+    bot_username = getattr(settings, "BOT_USERNAME", "AtriumHub_bot")
+    deep_link = f"https://t.me/{bot_username}?start=weblogin_{token}"
+    return {"token": token, "deep_link": deep_link, "expires_in": 300}
+
+
+@router.get("/bot-session/poll", summary="Poll bot-session login completion")
+async def bot_session_poll(
+    token: str,
+    response: Response,
+    db: psycopg.AsyncConnection = Depends(get_db)
+):
+    """Returns 202 while waiting; 200 + sets session cookie once the bot confirms the token."""
+    from backend.services.redis_client import redis as _redis
+    confirmed_user_id = await _redis.get(f"bot_web_login:{token}")
+    if not confirmed_user_id:
+        return Response(status_code=202)
+
+    user_id = int(confirmed_user_id)
+
+    async with db.cursor() as cur:
+        await cur.execute("SELECT telegram_chat_id FROM users WHERE id = %s;", (user_id,))
+        row = await cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=400, detail="User not found")
+    chat_id = str(row[0])
+
+    now = int(time.time())
+    payload = {"sub": str(user_id), "chat_id": chat_id, "exp": now + 7 * 86400}
+    token_jwt = generate_jwt(payload, settings.JWT_SECRET)
+    cookie_secure = settings.ENV != "development"
+
+    response.set_cookie("atrium_session", token_jwt, httponly=True, secure=cookie_secure, samesite="lax", max_age=604800)
+    response.set_cookie("jwt", token_jwt, httponly=True, secure=cookie_secure, samesite="lax", max_age=604800)
+
+    await _redis.delete(f"bot_web_login:{token}")
+    await _redis.delete(f"bot_web_login_pending:{token}")
+
+    logger.info("Bot-session login complete for user %d (chat_id %s)", user_id, chat_id)
+    return {"status": "ok", "user_id": user_id, "chat_id": chat_id}
+
+
 @router.post(
     "/logout",
     response_model=LoginStatusResponse,

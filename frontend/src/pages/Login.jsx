@@ -193,7 +193,8 @@ export default function Login() {
   const [error, setError]             = useState('');
   const [customChatId, setCustomChatId] = useState('');
   const [displayText, setDisplayText] = useState('');
-  const [twaDebug, setTwaDebug]       = useState(null); // debug info inside Telegram
+  const [twaDebug, setTwaDebug]       = useState(null);
+  const [botSession, setBotSession]   = useState(null); // { token, deep_link, status }
   const canvasRef = useRef(null);
 
   // Animate demo graph
@@ -282,6 +283,42 @@ export default function Login() {
       if (container) container.innerHTML = '';
       delete window.onTelegramAuth;
     };
+  }, [login]);
+
+  // Bot-session browser login — auto-init + poll (only in a real browser, not inside Telegram)
+  useEffect(() => {
+    const isTWA = Boolean(window.Telegram?.WebApp?.initData);
+    if (isTWA) return;
+
+    let pollInterval = null;
+    let cancelled = false;
+
+    const init = async () => {
+      try {
+        const res = await fetch('/auth/bot-session/init');
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (!cancelled) setBotSession({ token: data.token, deep_link: data.deep_link, status: 'waiting' });
+
+        pollInterval = setInterval(async () => {
+          if (cancelled) return;
+          try {
+            const poll = await fetch(`/auth/bot-session/poll?token=${data.token}`);
+            if (poll.status === 200) {
+              clearInterval(pollInterval);
+              const profile_res = await fetch('/auth/me');
+              if (profile_res.ok) {
+                const profile = await profile_res.json();
+                login({ id: profile.id, chat_id: profile.chat_id, drive_connected: profile.drive_connected, google_last_sync: profile.google_last_sync });
+              }
+            }
+          } catch (_) { /* network blip */ }
+        }, 2000);
+      } catch (_) { /* init failed silently */ }
+    };
+
+    init();
+    return () => { cancelled = true; clearInterval(pollInterval); };
   }, [login]);
 
   const handleDeveloperBypass = async () => {
@@ -483,12 +520,12 @@ export default function Login() {
             <div id="tg-widget" style={{ minHeight: 48, display: 'flex', alignItems: 'center', justifyContent: 'center' }} />
           </div>
 
-          {/* TWA login hint + direct button */}
+          {/* Bot-session login — works without Login Widget */}
           <div style={{ marginTop: '0.875rem' }}>
             <div style={{ textAlign: 'center', marginBottom: '0.5rem' }}>
               <div style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 9, color: 'rgba(244,239,235,0.2)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '0.5rem' }}>or open directly</div>
               <a
-                href={`https://t.me/${import.meta.env.VITE_BOT_USERNAME || 'AtriumHub_bot'}`}
+                href={botSession?.deep_link || `https://t.me/${import.meta.env.VITE_BOT_USERNAME || 'AtriumHub_bot'}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{
@@ -509,9 +546,16 @@ export default function Login() {
                 </svg>
                 Open in Telegram
               </a>
-              <div style={{ fontFamily: '"Inter", sans-serif', fontSize: 10, color: 'rgba(244,239,235,0.2)', marginTop: '0.4rem' }}>
-                Opens bot → send /start → tap "Open Atrium 🧠"
-              </div>
+              {botSession ? (
+                <div style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 9, color: 'rgba(41,171,226,0.5)', marginTop: '0.4rem', letterSpacing: '0.06em' }}>
+                  <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#29ABE2', marginRight: 5, animation: 'pulse-border 1s ease-in-out infinite' }} />
+                  Waiting · open link → send /start → auto-login
+                </div>
+              ) : (
+                <div style={{ fontFamily: '"Inter", sans-serif', fontSize: 10, color: 'rgba(244,239,235,0.2)', marginTop: '0.4rem' }}>
+                  Opens bot → send /start → logged in instantly
+                </div>
+              )}
             </div>
           </div>
         </div>

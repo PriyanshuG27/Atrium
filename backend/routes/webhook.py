@@ -828,6 +828,24 @@ async def telegram_webhook(
                 command_part = "/file"
             
             if command_part == "/start":
+                # ── Bot-session web login ──────────────────────────────────
+                # When the browser initiates a bot-login, it opens:
+                #   t.me/AtriumHub_bot?start=weblogin_<token>
+                # The bot stores the token → user_id in Redis so the browser
+                # can poll /auth/bot-session/poll?token=<token> to complete login.
+                if args.startswith("weblogin_"):
+                    token = args[len("weblogin_"):]
+                    if token:
+                        await redis.setex(f"bot_web_login:{token}", 300, str(user_id))
+                        ack_msg = (
+                            "✅ <b>Browser login confirmed!</b>\n\n"
+                            "Switch back to your browser tab — you're now logged in."
+                        )
+                        background_tasks.add_task(send_telegram_ack, chat_id, ack_msg, "HTML", None, None)
+                        logger.info("Bot-session web login: stored token for user %d", user_id)
+                        return {"status": "ok", "detail": "web_login_token_stored"}
+
+                # ── Normal /start flow ─────────────────────────────────────
                 # Check if user already finished onboarding
                 async with db.cursor() as cur:
                     await cur.execute("SELECT initial_onboarding_completed FROM users WHERE id = %s;", (user_id,))
