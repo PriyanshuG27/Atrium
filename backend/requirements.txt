@@ -10,6 +10,7 @@ pydantic==2.13.4
 pydantic-settings==2.14.2
 python-multipart==0.0.19
 PyYAML==6.0.2
+Jinja2==3.1.5
 
 # Database & Storage
 psycopg==3.3.4
