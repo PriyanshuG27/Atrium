@@ -208,8 +208,8 @@ async def perform_nvidia_ocr(image_bytes: bytes, api_key: str) -> Optional[str]:
     b64_image = base64.b64encode(processed_bytes).decode("utf-8")
     
     models = [
-        "nvidia/nemoretriever-parse",
-        "nvidia/nemotron-nano-12b-v2-vl"
+        "nvidia/nemotron-nano-12b-v2-vl",
+        "nvidia/cosmos3-nano-reasoner"
     ]
     
     for model_name in models:
