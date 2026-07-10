@@ -29,8 +29,21 @@ export function SocketProvider({ children }) {
     }
 
     try {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/api/ws`;
+      let base = import.meta.env.VITE_API_URL || '';
+      if (!base) {
+        const isHttps = window.location.protocol === 'https:';
+        base = `${isHttps ? 'wss:' : 'ws:'}//${window.location.host}`;
+      } else {
+        if (base.startsWith('https://')) {
+          base = base.replace('https://', 'wss://');
+        } else if (base.startsWith('http://')) {
+          base = base.replace('http://', 'ws://');
+        } else {
+          const isHttps = window.location.protocol === 'https:';
+          base = `${isHttps ? 'wss:' : 'ws:'}//${base}`;
+        }
+      }
+      const wsUrl = `${base.replace(/\/$/, '')}/api/ws`;
       
       // Prevent duplicate connection attempts if already open/connecting
       if (socketRef.current && (socketRef.current.readyState === WebSocket.OPEN || socketRef.current.readyState === WebSocket.CONNECTING)) {
