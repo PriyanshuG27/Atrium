@@ -14,7 +14,7 @@ providers:
       openai/gpt-oss-20b:
         status: active
         replacement: none
-      qwen/qwen3-32b:
+      qwen/qwen3.6-27b:
         status: active
         replacement: none
       whisper-large-v3:

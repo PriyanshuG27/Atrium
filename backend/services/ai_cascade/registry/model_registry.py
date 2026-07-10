@@ -90,7 +90,7 @@ DEFAULT_MODELS = [
         latency_class="low"
     ),
     ModelMetadata(
-        model_id="qwen/qwen3-32b",
+        model_id="qwen/qwen3.6-27b",
         provider_name="groq",
         capabilities={ModelCapability.TEXT_GENERATION, ModelCapability.STRUCTURED_JSON},
         context_window=32768,
