@@ -103,7 +103,7 @@ def configure_logging() -> None:
     import re
     class UvicornTokenFilter(logging.Filter):
         def filter(self, record: logging.LogRecord) -> bool:
-            if record.args and len(record.args) >= 3:
+            if record.args and isinstance(record.args, (tuple, list)) and len(record.args) >= 3:
                 # record.args[2] is usually the full HTTP path in uvicorn access logs
                 path = record.args[2]
                 if isinstance(path, str) and "/api/ws/" in path:
