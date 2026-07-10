@@ -203,7 +203,7 @@ export default function Login() {
   // TWA auto-login: runs when Login page mounts inside Telegram
   useEffect(() => {
     const tg = window.Telegram?.WebApp;
-    if (!tg) return; // not inside Telegram at all
+    if (!tg || tg.platform === 'unknown') return; // not inside Telegram at all
 
     const initData = tg.initData;
     if (!initData) {

@@ -171,14 +171,17 @@ async def auth_telegram(
 
 @router.get("/bot-session/init", summary="Initialise a bot-session browser login token")
 async def bot_session_init():
-    """Generate a one-time token and return the Telegram deep-link for browser login."""
-    import secrets
+    """Generate a one-time OTP + token for browser login via Telegram bot."""
+    import secrets, random
     from backend.services.redis_client import redis as _redis
     token = secrets.token_urlsafe(24)
+    otp = f"{random.randint(0, 999999):06d}"   # 6-digit zero-padded
+    # token → pending (polled by browser)
     await _redis.setex(f"bot_web_login_pending:{token}", 300, "pending")
+    # otp → token (looked up by bot webhook when user sends the code)
+    await _redis.setex(f"bot_web_login_otp:{otp}", 300, token)
     bot_username = getattr(settings, "BOT_USERNAME", "AtriumHub_bot")
-    deep_link = f"https://t.me/{bot_username}?start=weblogin_{token}"
-    return {"token": token, "deep_link": deep_link, "expires_in": 300}
+    return {"token": token, "otp": otp, "bot_username": bot_username, "expires_in": 300}
 
 
 @router.get("/bot-session/poll", summary="Poll bot-session login completion")
