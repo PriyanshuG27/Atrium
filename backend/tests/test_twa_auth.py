@@ -98,10 +98,18 @@ def client():
 
 @pytest.fixture()
 def mock_db_conn():
-    """Mock connection and cursor supporting async context manager."""
+    """Mock connection and cursor supporting async context manager.
+    
+    The cursor's `result` attribute controls what fetchone() returns.
+    upsert_user does INSERT RETURNING first (returns row on success),
+    then falls back to SELECT if result is None (conflict path).
+    Setting result to (id, chat_id) simulates a successful INSERT RETURNING.
+    Setting result to None for INSERT then (id,) for SELECT simulates conflict path.
+    """
     class MockCursor:
         def __init__(self):
             self.result = None
+            self._call_count = 0
             
         async def __aenter__(self):
             return self
@@ -113,6 +121,7 @@ def mock_db_conn():
             pass
             
         async def fetchone(self):
+            self._call_count += 1
             return self.result
 
     class MockConn:
@@ -121,6 +130,9 @@ def mock_db_conn():
             
         def cursor(self):
             return self._cursor
+        
+        async def commit(self):
+            pass
 
     return MockConn()
 
@@ -146,8 +158,8 @@ def test_twa_valid_init_data(client, mock_db_conn):
     now = int(time.time())
     init_data = make_twa_init_data(12345, settings.TELEGRAM_BOT_TOKEN, now)
     
-    # Mock user exists in database
-    mock_db_conn.cursor().result = (42, "12345")
+    # upsert_user: INSERT RETURNING returns (42,) meaning new user created
+    mock_db_conn.cursor().result = (42,)
     
     response = client.get(
         "/test-auth/twa",
@@ -202,20 +214,22 @@ def test_twa_missing_hash_field(client, mock_db_conn):
     assert "Not authenticated" in response.json().get("detail", "")
 
 
-def test_twa_user_not_found(client, mock_db_conn):
-    """TWA user validated but not found in DB -> 401."""
+def test_twa_new_user_auto_registered(client, mock_db_conn):
+    """TWA user validated but not yet in DB -> auto-registered and 200 returned."""
     now = int(time.time())
-    init_data = make_twa_init_data(12345, settings.TELEGRAM_BOT_TOKEN, now)
+    init_data = make_twa_init_data(99999, settings.TELEGRAM_BOT_TOKEN, now)
     
-    # Mock user NOT in DB
-    mock_db_conn.cursor().result = None
+    # upsert_user INSERT RETURNING returns new user id (first-time registration)
+    mock_db_conn.cursor().result = (77,)
     
     response = client.get(
         "/test-auth/twa",
         headers={"Authorization": f"TelegramInitData {init_data}"}
     )
-    assert response.status_code == 401
-    assert "Not authenticated" in response.json().get("detail", "")
+    # New user is auto-registered — must succeed
+    assert response.status_code == 200
+    assert response.json()["user_id"] == 77
+    assert response.json()["chat_id"] == "99999"
 
 
 # ---------------------------------------------------------------------------
@@ -307,11 +321,12 @@ def test_unified_jwt_fails_immediately(client, mock_db_conn):
 
 
 def test_unified_fallback_to_twa_succeeds(client, mock_db_conn):
-    """Unified auth: JWT cookie missing, valid TWA header succeeds."""
+    """Unified auth: JWT cookie missing, valid TWA header succeeds (auto-registers if new)."""
     now = int(time.time())
     init_data = make_twa_init_data(12345, settings.TELEGRAM_BOT_TOKEN, now)
     
-    mock_db_conn.cursor().result = (42, "12345")
+    # upsert_user INSERT RETURNING -> existing user id
+    mock_db_conn.cursor().result = (42,)
     
     response = client.get(
         "/test-auth/current",

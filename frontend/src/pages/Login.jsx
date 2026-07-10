@@ -387,7 +387,45 @@ export default function Login() {
           <div style={{ border: '1px solid rgba(207,163,101,0.15)', borderRadius: 8, padding: '1.25rem', animation: 'pulse-border 4s ease-in-out infinite' }}>
             <div id="tg-widget" style={{ minHeight: 48, display: 'flex', alignItems: 'center', justifyContent: 'center' }} />
           </div>
+
+          {/* Open in Telegram App — instant TWA login, no SMS needed */}
+          <div style={{ marginTop: '0.875rem', textAlign: 'center' }}>
+            <div style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 9, color: 'rgba(244,239,235,0.2)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '0.5rem' }}>
+              or
+            </div>
+            <a
+              href={`https://t.me/${import.meta.env.VITE_BOT_USERNAME || 'AtriumHub_bot'}?startapp=open`}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '0.6rem 1.25rem',
+                background: 'rgba(41,171,226,0.08)',
+                border: '1px solid rgba(41,171,226,0.2)',
+                borderRadius: 6,
+                color: '#29ABE2',
+                fontFamily: '"JetBrains Mono", monospace',
+                fontSize: '0.8rem',
+                letterSpacing: '0.04em',
+                textDecoration: 'none',
+                transition: 'background 0.15s, border-color 0.15s',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(41,171,226,0.14)'; e.currentTarget.style.borderColor = 'rgba(41,171,226,0.4)'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(41,171,226,0.08)'; e.currentTarget.style.borderColor = 'rgba(41,171,226,0.2)'; }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221-1.97 9.289c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12l-6.871 4.326-2.962-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.833.932z"/>
+              </svg>
+              Open in Telegram App
+            </a>
+            <div style={{ fontFamily: '"Inter", sans-serif', fontSize: 10, color: 'rgba(244,239,235,0.2)', marginTop: '0.4rem' }}>
+              Instant login · no confirmation needed
+            </div>
+          </div>
         </div>
+
 
         {/* Error */}
         {error && (

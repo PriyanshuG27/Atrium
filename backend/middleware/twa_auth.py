@@ -118,35 +118,38 @@ def verify_twa_init_data(init_data_raw: str, bot_token: str) -> int:
 # ---------------------------------------------------------------------------
 async def get_twa_user(
     request: Request,
+    response: Response,
     db: psycopg.AsyncConnection = Depends(get_db)
 ) -> UserContext:
-    """FastAPI dependency for verifying Telegram Web App initData in Authorization header."""
+    """FastAPI dependency for verifying Telegram Web App initData in Authorization header.
+
+    Auto-registers new users on first open and sets a JWT session cookie so
+    subsequent requests work without needing the TelegramInitData header.
+    """
+    from backend.services.user_service import upsert_user
+
     auth_header = request.headers.get("Authorization")
     if not auth_header:
         raise HTTPException(status_code=401, detail="Not authenticated")
-        
+
     if not auth_header.startswith("TelegramInitData "):
         raise HTTPException(status_code=401, detail="Not authenticated")
-        
+
     init_data_raw = auth_header[len("TelegramInitData "):]
-    
-    # Verify HMAC
+
+    # Verify HMAC signature
     try:
         telegram_user_id = verify_twa_init_data(init_data_raw, settings.TELEGRAM_BOT_TOKEN)
     except Exception:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    
-    # Query database for user
-    async with db.cursor() as cur:
-        await cur.execute(
-            "SELECT id, telegram_chat_id FROM users WHERE telegram_chat_id = %s",
-            (str(telegram_user_id),)
-        )
-        row = await cur.fetchone()
-        
-    if not row:
+
+    # Auto-register new users; return existing user id for known users
+    try:
+        user_id = await upsert_user(str(telegram_user_id), db)
+    except Exception:
         raise HTTPException(status_code=401, detail="Not authenticated")
-        
+
+    # Optionally update display name / username from initData
     try:
         params = dict(urllib.parse.parse_qsl(init_data_raw, keep_blank_values=True))
         user_json = params.get('user')
@@ -158,13 +161,38 @@ async def get_twa_user(
                 async with db.cursor() as cur:
                     await cur.execute(
                         "UPDATE users SET first_name = COALESCE(%s, first_name), username = COALESCE(%s, username) WHERE id = %s;",
-                        (first_name, username, row[0])
+                        (first_name, username, user_id)
                     )
                     await db.commit()
     except Exception:
         pass
-        
-    return UserContext(id=row[0], telegram_chat_id=str(row[1]))
+
+    # Issue a persistent JWT session cookie so the browser stays logged in
+    payload = {
+        "sub": str(user_id),
+        "chat_id": str(telegram_user_id),
+        "exp": int(time.time()) + 7 * 86400,
+    }
+    token = generate_jwt(payload, settings.JWT_SECRET)
+    cookie_secure = settings.ENV != "development"
+    response.set_cookie(
+        "atrium_session",
+        token,
+        httponly=True,
+        secure=cookie_secure,
+        samesite="lax",
+        max_age=7 * 86400,
+    )
+    response.set_cookie(
+        "jwt",
+        token,
+        httponly=True,
+        secure=cookie_secure,
+        samesite="lax",
+        max_age=7 * 86400,
+    )
+
+    return UserContext(id=user_id, telegram_chat_id=str(telegram_user_id))
 
 
 async def get_jwt_user_by_token(
@@ -243,22 +271,23 @@ async def get_current_user(
 ) -> UserContext:
     """
     Unified auth dependency for /api/* routes.
-    
+
     Tries JWT cookie first; if missing, tries TWA header or Bearer header; if all missing: 401.
     """
     # 1. Try JWT cookie first
     jwt_cookie = request.cookies.get("atrium_session") or request.cookies.get("jwt")
     if jwt_cookie is not None:
         return await get_jwt_user_by_token(jwt_cookie, request, response, db, set_cookies=True)
-        
+
     # 2. Check Authorization header
     auth_header = request.headers.get("Authorization")
     if auth_header is not None:
         if auth_header.startswith("TelegramInitData "):
-            return await get_twa_user(request, db)
+            # Pass response so get_twa_user can set the session cookie
+            return await get_twa_user(request, response, db)
         elif auth_header.startswith("Bearer "):
             token = auth_header.split(" ", 1)[1].strip()
             return await get_jwt_user_by_token(token, request, response, db, set_cookies=False)
-            
+
     # 3. If all are missing
     raise HTTPException(status_code=401, detail="Not authenticated")
