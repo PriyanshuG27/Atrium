@@ -166,7 +166,7 @@ async def lifespan(app: FastAPI):
     # Open the async DB connection pool
     await open_pool()
 
-    # Dynamic startup migration for initial onboarding completion column
+    # Dynamic startup migrations — all use IF NOT EXISTS so safe on every boot
     try:
         from backend.db.connection import _pool
         if _pool is not None:
@@ -175,8 +175,12 @@ async def lifespan(app: FastAPI):
                     await cur.execute(
                         "ALTER TABLE users ADD COLUMN IF NOT EXISTS initial_onboarding_completed BOOLEAN DEFAULT FALSE;"
                     )
+                    await cur.execute(
+                        "ALTER TABLE users ADD COLUMN IF NOT EXISTS mind_type_detailed TEXT;"
+                    )
                 await conn.commit()
             logger.info("Database startup migration: initial_onboarding_completed column ensured.")
+            logger.info("Database startup migration: mind_type_detailed column ensured.")
     except Exception as migration_err:
         logger.error("Failed to run startup database migration: %s", migration_err)
 

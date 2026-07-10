@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS users (
     self_description     TEXT,
     mind_type            VARCHAR(50),
     mind_type_summary    TEXT,
+    mind_type_detailed   TEXT,
     mind_type_trajectory JSONB DEFAULT '[]'::jsonb,
     node_milestones      JSONB DEFAULT '{"unlocked": []}'::jsonb,
     last_confession_at   TIMESTAMP WITH TIME ZONE,
