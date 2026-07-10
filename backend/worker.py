@@ -1524,8 +1524,7 @@ async def start_worker_task() -> None:
             else:
                 semaphore.release()
                 holding_semaphore = False
-                await asyncio.sleep(idle_sleep)
-                idle_sleep = min(idle_sleep * 1.5, 30.0)
+                # brpoplpush blocks for 2 seconds, so we loop back immediately without sleeping.
                     
         except asyncio.CancelledError:
             if holding_semaphore:
