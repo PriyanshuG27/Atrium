@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 
 /* ══════════════════════════════════════════════════════════════════════════
-   RECALL — Login v3 — "Your Memory, Mapped."
+   ATRIUM — Login v3 — "Your Memory, Mapped."
    
    Layout: full-bleed split-screen
    • Left  60%: Live animated demo knowledge graph (pure canvas, no deps)
@@ -260,6 +260,22 @@ export default function Login() {
         .login-step { opacity: 0; animation: login-fade-up 0.6s cubic-bezier(0.16,1,0.3,1) forwards; }
         .bypass-input:focus { border-color: rgba(207,163,101,0.4) !important; outline: none; }
         .bypass-btn:hover { opacity: 0.8; }
+        .back-link {
+          background: none;
+          border: none;
+          color: rgba(244,239,235,0.45);
+          cursor: pointer;
+          font-family: "JetBrains Mono", monospace;
+          font-size: 11px;
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 0;
+          transition: color 0.2s;
+        }
+        .back-link:hover {
+          color: #CFA365 !important;
+        }
       `}</style>
 
       {/* ── LEFT: Animated knowledge graph ── */}
@@ -273,7 +289,7 @@ export default function Login() {
         {/* Floating label in top-left */}
         <div style={{ position: 'absolute', top: 32, left: 36, zIndex: 5 }}>
           <div style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 10, color: 'rgba(207,163,101,0.5)', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 6 }}>
-            RECALL
+            ATRIUM
           </div>
           <div style={{ fontFamily: '"Outfit", sans-serif', fontWeight: 700, fontSize: '1.5rem', color: '#F0EDE8', letterSpacing: '-0.03em' }}>
             Your knowledge,<br />connected.
@@ -284,7 +300,7 @@ export default function Login() {
         <div style={{ position: 'absolute', bottom: 36, left: 36, zIndex: 5, display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
           {[
             ['01', 'SEND', 'Message your Telegram bot'],
-            ['02', 'SAVE', 'Recall indexes it instantly'],
+            ['02', 'SAVE', 'Atrium indexes it instantly'],
             ['03', 'MAP',  'Your knowledge graph grows'],
           ].map(([num, title, desc], i) => (
             <div key={num} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', opacity: 0.7 }}>
@@ -312,13 +328,26 @@ export default function Login() {
         backdropFilter: 'blur(20px)',
       }}>
 
+        {/* Back Button */}
+        <div className="login-step" style={{ animationDelay: '0.02s', marginBottom: '1.5rem' }}>
+          <button 
+            className="back-link"
+            onClick={() => {
+              window.history.pushState({}, '', '/');
+              window.dispatchEvent(new PopStateEvent('popstate'));
+            }}
+          >
+            ← Back to Atrium
+          </button>
+        </div>
+
         {/* Wordmark */}
         <div className="login-step" style={{ animationDelay: '0.05s', marginBottom: '2.5rem' }}>
           <div style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 10, color: 'rgba(207,163,101,0.5)', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 10 }}>
             Personal knowledge OS
           </div>
           <h1 style={{ fontFamily: '"Outfit", sans-serif', fontWeight: 800, fontSize: '2.5rem', lineHeight: 1.05, letterSpacing: '-0.05em', color: '#F0EDE8', margin: '0 0 0.5rem 0' }}>
-            Recall.
+            Atrium.
           </h1>
           <p style={{ fontFamily: '"Inter", sans-serif', fontSize: '0.9375rem', color: 'rgba(244,239,235,0.45)', lineHeight: 1.5, margin: 0, minHeight: '1.5em' }}>
             {displayText}

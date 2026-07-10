@@ -39,7 +39,7 @@ async function executeSave(info, tab, contextNote = null, quote = null, tags = n
   const storageData = await chrome.storage.local.get(["jwt", "api_url", "notifications_enabled"]);
   
   if (!storageData.jwt) {
-    showNotification("Error", "Please log in via the Recall extension first.", storageData.notifications_enabled);
+    showNotification("Error", "Please log in via the Atrium extension first.", storageData.notifications_enabled);
     return { success: false, error: "Unauthenticated" };
   }
 
@@ -97,17 +97,17 @@ async function executeSave(info, tab, contextNote = null, quote = null, tags = n
         chrome.action.setBadgeText({ text: "" });
       }, 3000);
 
-      const notifTitle = response.status === 200 ? "Already saved" : "Saved to Recall";
+      const notifTitle = response.status === 200 ? "Already saved" : "Saved to Atrium";
       showNotification(notifTitle, title, storageData.notifications_enabled);
       return { success: true };
     } else {
       const errorData = await response.json().catch(() => ({}));
-      const errMsg = errorData.detail || "Failed to save to Recall.";
+      const errMsg = errorData.detail || "Failed to save to Atrium.";
       showNotification("Error Saving", errMsg, storageData.notifications_enabled);
       return { success: false, error: errMsg };
     }
   } catch (err) {
-    showNotification("Error", "Recall server unreachable.", storageData.notifications_enabled);
+    showNotification("Error", "Atrium server unreachable.", storageData.notifications_enabled);
     return { success: false, error: "Network Error" };
   }
 }
@@ -115,15 +115,15 @@ async function executeSave(info, tab, contextNote = null, quote = null, tags = n
 // 1. Context Menu Registration
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
-    id: "recall-save-link",
-    title: "Save to Recall",
+    id: "atrium-save-link",
+    title: "Save to Atrium",
     contexts: ["link", "page", "selection"]
   });
 });
 
 // 2. Click Handler
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-  if (info.menuItemId !== "recall-save-link") return;
+  if (info.menuItemId !== "atrium-save-link") return;
   await executeSave(info, tab);
 });
 

@@ -219,7 +219,7 @@ def test_get_hearth_unpaired(client):
     current_cursor.fetchall_val = []  # No pairs in DB
     
     token = get_auth_token(user_id=42)
-    response = client.get("/api/hearth", cookies={"recall_session": token})
+    response = client.get("/api/hearth", cookies={"atrium_session": token})
     
     assert response.status_code == 200
     res_data = response.json()
@@ -241,7 +241,7 @@ def test_get_hearth_paired(client):
     current_cursor.fetchval_val = 1
     
     token = get_auth_token(user_id=42)
-    response = client.get("/api/hearth", cookies={"recall_session": token})
+    response = client.get("/api/hearth", cookies={"atrium_session": token})
     
     assert response.status_code == 200
     res_data = response.json()
@@ -263,7 +263,7 @@ def test_get_hearth_status(client):
     current_cursor.fetchval_val = True
     
     token = get_auth_token(user_id=42)
-    response = client.get("/api/hearth/status", cookies={"recall_session": token})
+    response = client.get("/api/hearth/status", cookies={"atrium_session": token})
     
     assert response.status_code == 200
     res_data = response.json()
@@ -277,7 +277,7 @@ def test_create_invite_multiple_pairs_allowed(client):
     current_cursor.fetchone_val = None  # No existing pending invite
     
     token = get_auth_token(user_id=42)
-    response = client.post("/api/hearth/invite", cookies={"recall_session": token})
+    response = client.post("/api/hearth/invite", cookies={"atrium_session": token})
     
     assert response.status_code == 200
     res_data = response.json()
@@ -297,7 +297,7 @@ def test_leave_journey_success(client):
     
     with mock.patch("backend.routes.hearth._notify_telegram", return_value=None) as mock_notify:
         token = get_auth_token(user_id=42)
-        response = client.delete("/api/hearth/leave/5", cookies={"recall_session": token})
+        response = client.delete("/api/hearth/leave/5", cookies={"atrium_session": token})
         
         assert response.status_code == 200
         assert response.json()["success"] is True
@@ -311,7 +311,7 @@ def test_create_invite_success(client):
     current_cursor.fetchone_val = None  # No existing pending invite
     
     token = get_auth_token(user_id=42)
-    response = client.post("/api/hearth/invite", cookies={"recall_session": token})
+    response = client.post("/api/hearth/invite", cookies={"atrium_session": token})
     
     assert response.status_code == 200
     res_data = response.json()
@@ -330,7 +330,7 @@ def test_accept_invite_self(client):
     }
     
     token = get_auth_token(user_id=42)
-    response = client.post("/api/hearth/accept", json={"invite_code": "RCL-1234-5678"}, cookies={"recall_session": token})
+    response = client.post("/api/hearth/accept", json={"invite_code": "RCL-1234-5678"}, cookies={"atrium_session": token})
     
     assert response.status_code == 400
     assert "Cannot pair with yourself" in response.json()["detail"]
@@ -348,7 +348,7 @@ def test_accept_invite_success(client):
     
     with mock.patch("backend.routes.hearth._notify_telegram", return_value=None) as mock_notify:
         token = get_auth_token(user_id=42)
-        response = client.post("/api/hearth/accept", json={"invite_code": "RCL-9999-0000"}, cookies={"recall_session": token})
+        response = client.post("/api/hearth/accept", json={"invite_code": "RCL-9999-0000"}, cookies={"atrium_session": token})
         
         assert response.status_code == 200
         res_data = response.json()

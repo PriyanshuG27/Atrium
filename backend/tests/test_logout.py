@@ -67,14 +67,14 @@ def client():
             yield c
 
 def test_logout_clears_cookies(client):
-    """POST /auth/logout clears recall_session and jwt cookies with correct attributes."""
+    """POST /auth/logout clears atrium_session and jwt cookies with correct attributes."""
     response = client.post("/auth/logout")
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "message": "Logged out"}
     
     # Check headers for deleted cookies
     cookies = response.cookies
-    assert "recall_session" not in cookies or cookies["recall_session"] == ""
+    assert "atrium_session" not in cookies or cookies["atrium_session"] == ""
     assert "jwt" not in cookies or cookies["jwt"] == ""
     
     # Verify exact delete_cookie headers have correct attributes (httpOnly, Secure, SameSite=lax)
@@ -97,22 +97,22 @@ def test_jwt_auto_refresh(client):
     token = generate_jwt(payload, settings.JWT_SECRET)
     
     # Trigger an authenticated request
-    response = client.get("/test-logout/refresh", cookies={"recall_session": token})
+    response = client.get("/test-logout/refresh", cookies={"atrium_session": token})
     assert response.status_code == 200
     assert response.json()["user_id"] == 42
     
     # Verify cookie was refreshed and set in response headers
     headers = response.headers.get_list("set-cookie")
-    assert len(headers) >= 2 # sets both recall_session and jwt
+    assert len(headers) >= 2 # sets both atrium_session and jwt
     
-    recall_session_header = next((h for h in headers if "recall_session=" in h), None)
+    atrium_session_header = next((h for h in headers if "atrium_session=" in h), None)
     jwt_header = next((h for h in headers if "jwt=" in h), None)
     
-    assert recall_session_header is not None
-    assert "HttpOnly" in recall_session_header
-    assert "Secure" in recall_session_header
-    assert "samesite=lax" in recall_session_header.lower()
-    assert "Max-Age=604800" in recall_session_header # 7 days
+    assert atrium_session_header is not None
+    assert "HttpOnly" in atrium_session_header
+    assert "Secure" in atrium_session_header
+    assert "samesite=lax" in atrium_session_header.lower()
+    assert "Max-Age=604800" in atrium_session_header # 7 days
     
     assert jwt_header is not None
     assert "HttpOnly" in jwt_header
@@ -131,7 +131,7 @@ def test_jwt_no_refresh_if_plenty_time(client):
     }
     token = generate_jwt(payload, settings.JWT_SECRET)
     
-    response = client.get("/test-logout/refresh", cookies={"recall_session": token})
+    response = client.get("/test-logout/refresh", cookies={"atrium_session": token})
     assert response.status_code == 200
     
     # Verify no cookies were set in response

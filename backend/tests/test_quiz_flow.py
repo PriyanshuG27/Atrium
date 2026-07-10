@@ -178,8 +178,11 @@ def db_state():
     return QuizTestDbState()
 
 @pytest.fixture(autouse=True)
-def override_db(patch_env, db_state):
+def override_db(patch_env, db_state, monkeypatch):
     from backend.db.connection import get_db
+    import backend.db.connection as db_conn
+    
+    monkeypatch.setattr(db_conn, "_pool", None)
     
     async def _mock_get_db():
         yield QuizMockConnection(db_state)

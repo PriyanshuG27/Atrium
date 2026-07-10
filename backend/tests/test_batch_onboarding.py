@@ -22,7 +22,7 @@ async def test_process_onboarding_task_normal(mock_db_connection):
          patch("backend.worker.send_telegram_message", new_callable=AsyncMock) as mock_send, \
          patch("backend.worker.AICascade") as mock_cascade_cls, \
          patch("backend.worker.embed_text", new_callable=AsyncMock) as mock_embed, \
-         patch("backend.worker._pool") as mock_pool, \
+         patch("backend.db.connection._pool") as mock_pool, \
          patch.object(redis, "get", new_callable=AsyncMock, return_value=None), \
          patch("backend.routes.webhook.advance_onboarding_step", new_callable=AsyncMock) as mock_advance:
          
@@ -59,7 +59,7 @@ async def test_process_onboarding_task_spam(mock_db_connection):
     """Test process_onboarding_task handles spam input by prompting retry / skip button."""
     with patch("backend.worker.upsert_user", new_callable=AsyncMock) as mock_upsert, \
          patch("backend.worker.AICascade") as mock_cascade_cls, \
-         patch("backend.worker._pool") as mock_pool, \
+         patch("backend.db.connection._pool") as mock_pool, \
          patch.object(redis, "get", new_callable=AsyncMock, return_value=None), \
          patch("httpx.AsyncClient") as mock_client_cls:
          
@@ -101,7 +101,7 @@ async def test_process_batch_task_combining(mock_db_connection):
          patch("backend.worker.send_telegram_message", new_callable=AsyncMock) as mock_send, \
          patch("backend.worker.AICascade") as mock_cascade_cls, \
          patch("backend.worker.embed_text", new_callable=AsyncMock) as mock_embed, \
-         patch("backend.worker._pool") as mock_pool, \
+         patch("backend.db.connection._pool") as mock_pool, \
          patch.object(redis, "get", new_callable=AsyncMock, return_value=None):
          
         mock_upsert.return_value = 1

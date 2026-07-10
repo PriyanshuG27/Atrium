@@ -5,7 +5,7 @@ import EmptyState from '../components/EmptyState';
 
 describe('EmptyState Component', () => {
   beforeEach(() => {
-    import.meta.env.VITE_BOT_USERNAME = 'TestRecallBot';
+    import.meta.env.VITE_BOT_USERNAME = 'TestAtriumBot';
   });
 
   it('renders graph empty state with pulsing node, text, and bot URL', () => {
@@ -19,7 +19,7 @@ describe('EmptyState Component', () => {
 
     const linkButton = screen.getByRole('link', { name: /Open Telegram Bot/i });
     expect(linkButton).toBeInTheDocument();
-    expect(linkButton).toHaveAttribute('href', 'https://t.me/TestRecallBot');
+    expect(linkButton).toHaveAttribute('href', 'https://t.me/TestAtriumBot');
   });
 
   it('uses default fallback bot username when env variable is empty', () => {
@@ -27,7 +27,7 @@ describe('EmptyState Component', () => {
     render(<EmptyState variant="graph" />);
 
     const linkButton = screen.getByRole('link', { name: /Open Telegram Bot/i });
-    expect(linkButton).toHaveAttribute('href', 'https://t.me/RecallTestEnvBot');
+    expect(linkButton).toHaveAttribute('href', 'https://t.me/AtriumTestEnvBot');
   });
 
   it('renders feed empty state with magnifying glass and text', () => {

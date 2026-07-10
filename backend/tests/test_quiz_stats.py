@@ -246,7 +246,7 @@ def get_auth_token(user_id=1):
 def test_get_quiz_stats_schema_and_calculation(client, db_state):
     token = get_auth_token(user_id=1)
     # Fetch stats initially
-    response = client.get("/api/quizzes/stats", cookies={"recall_session": token})
+    response = client.get("/api/quizzes/stats", cookies={"atrium_session": token})
     assert response.status_code == 200
     data = response.json()
     
@@ -263,7 +263,7 @@ def test_quiz_answer_logging(client, db_state):
     token = get_auth_token(user_id=1)
     # Answer a quiz via API
     payload = {"quality": 5}
-    response = client.post("/api/quizzes/101/answer", json=payload, cookies={"recall_session": token})
+    response = client.post("/api/quizzes/101/answer", json=payload, cookies={"atrium_session": token})
     assert response.status_code == 200
     
     # Assert answer is logged to DB
@@ -272,7 +272,7 @@ def test_quiz_answer_logging(client, db_state):
     assert db_state.answers[-1]["quality"] == 5
     
     # Fetch stats and confirm counts went up
-    response = client.get("/api/quizzes/stats", cookies={"recall_session": token})
+    response = client.get("/api/quizzes/stats", cookies={"atrium_session": token})
     assert response.status_code == 200
     data = response.json()
     assert data["answered_all_time"] == 3

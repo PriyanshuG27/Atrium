@@ -100,7 +100,7 @@ def test_delete_own_item_success(client):
     current_cursor = RecordingCursor(user_id=42, delete_returning_row=(5, "url"))
     
     token = get_auth_token(user_id=42)
-    response = client.delete("/api/items/5", cookies={"recall_session": token})
+    response = client.delete("/api/items/5", cookies={"atrium_session": token})
     
     assert response.status_code == 204
     assert len(current_cursor.executed) == 7
@@ -135,7 +135,7 @@ def test_delete_other_user_item_idor_prevented(client):
     current_cursor = RecordingCursor(user_id=100, delete_returning_row=None)
     
     token = get_auth_token(user_id=100)
-    response = client.delete("/api/items/5", cookies={"recall_session": token})
+    response = client.delete("/api/items/5", cookies={"atrium_session": token})
     
     assert response.status_code == 404
     assert response.json()["detail"] == "Item not found"
@@ -175,7 +175,7 @@ def test_delete_own_reminder_success(client):
     current_cursor = ReminderRecordingCursor(user_id=42, delete_returning_row=(10,))
     
     token = get_auth_token(user_id=42)
-    response = client.delete("/api/reminders/10", cookies={"recall_session": token})
+    response = client.delete("/api/reminders/10", cookies={"atrium_session": token})
     
     assert response.status_code == 204
     assert len(current_cursor.executed) == 2
@@ -192,7 +192,7 @@ def test_delete_other_user_reminder_idor_prevented(client):
     current_cursor = ReminderRecordingCursor(user_id=100, delete_returning_row=None)
     
     token = get_auth_token(user_id=100)
-    response = client.delete("/api/reminders/10", cookies={"recall_session": token})
+    response = client.delete("/api/reminders/10", cookies={"atrium_session": token})
     
     assert response.status_code == 404
     assert len(current_cursor.executed) == 2

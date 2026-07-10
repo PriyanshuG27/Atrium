@@ -209,7 +209,7 @@ export default function Header({ onSearch, dueQuizCount, viewMode = 'graph', onV
             pointerEvents: 'auto'
           }}
         >
-          Recall.
+          Atrium.
         </a>
 
         {user && (

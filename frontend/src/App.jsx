@@ -20,10 +20,12 @@ const Settings = lazy(() => import('./pages/Settings'));
 const Profile  = lazy(() => import('./pages/Profile'));
 const Hearth   = lazy(() => import('./pages/Hearth'));
 const BranchingPOC = lazy(() => import('./pages/BranchingPOC'));
+const Landing = lazy(() => import('./pages/Landing'));
 import PWAInstallBanner from './components/PWAInstallBanner';
 
 /* ── Map pathname → room id ──────────────────────────────── */
 function pathToRoom(pathname) {
+  if (pathname === '/') return 'landing';
   if (pathname.startsWith('/archive')) return 'archive';
   if (pathname.startsWith('/map'))     return 'map';
   if (pathname.startsWith('/nebula'))  return 'map'; // legacy redirect
@@ -161,11 +163,11 @@ function App() {
 
   /* ── PWA install prompt ────────────────────────────────── */
   useEffect(() => {
-    const isActive = sessionStorage.getItem('recall_session_active');
+    const isActive = sessionStorage.getItem('atrium_session_active');
     if (!isActive) {
-      sessionStorage.setItem('recall_session_active', 'true');
-      const v = parseInt(localStorage.getItem('recall_visits') || '0', 10);
-      localStorage.setItem('recall_visits', (v + 1).toString());
+      sessionStorage.setItem('atrium_session_active', 'true');
+      const v = parseInt(localStorage.getItem('atrium_visits') || '0', 10);
+      localStorage.setItem('atrium_visits', (v + 1).toString());
     }
 
     let deferred = null;
@@ -174,7 +176,7 @@ function App() {
     const onPrompt = (e) => {
       e.preventDefault();
       deferred = e;
-      const visits = parseInt(localStorage.getItem('recall_visits') || '0', 10);
+      const visits = parseInt(localStorage.getItem('atrium_visits') || '0', 10);
       if (visits >= 3) {
         const doInstall = async () => {
           if (!deferred) return;
@@ -185,7 +187,7 @@ function App() {
         };
         toastId = addToast(
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', justifyContent: 'space-between', width: '100%' }}>
-            <span>Add Recall to your homescreen?</span>
+            <span>Add Atrium to your homescreen?</span>
             <button onClick={doInstall} className="btn" style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem', minHeight: 28, background: 'var(--accent-gold)', color: '#000', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 700 }}>
               Install
             </button>
@@ -283,7 +285,7 @@ function App() {
         setCurrentPath('/archive');
       }
     } else {
-      if (currentPath !== '/login') {
+      if (currentPath !== '/login' && currentPath !== '/') {
         const search = window.location.search || '';
         window.history.replaceState({}, '', `/login${search}`);
         setCurrentPath('/login');
@@ -326,6 +328,15 @@ function App() {
   /* ── Loading screen ───────────────────────────────────── */
   if (loading) {
     return <SplashScreen />;
+  }
+
+  /* ── Landing page (public) ──────────────────────── */
+  if (currentRoom === 'landing') {
+    return (
+      <Suspense fallback={<SplashScreen />}>
+        <Landing />
+      </Suspense>
+    );
   }
 
   /* ── Unauthenticated ──────────────────────────────────── */

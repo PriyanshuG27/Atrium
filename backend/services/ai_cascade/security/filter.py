@@ -27,15 +27,8 @@ security_layer = SecurityLayer()
 
 
 def mask_pii(text: str) -> str:
-    if not text:
-        return text
-    # Mask emails
-    email_pattern = r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+"
-    text = re.sub(email_pattern, "[MASKED_EMAIL]", text)
-    # Mask phone numbers
-    phone_pattern = r"\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b|\b\d{10,11}\b"
-    text = re.sub(phone_pattern, "[MASKED_PHONE]", text)
-    return text
+    from backend.services.pii_masker import mask_pii as advanced_mask_pii
+    return advanced_mask_pii(text)
 
 
 def check_prompt_injection(query: str) -> Optional[str]:

@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 # Pool singleton — created on FastAPI startup, closed on shutdown
 # ---------------------------------------------------------------------------
 _pool: AsyncConnectionPool | None = None
+STARTUP_LOCK_ID = 987654321
 
 
 async def open_pool() -> None:
@@ -63,22 +64,19 @@ async def open_pool() -> None:
     await _pool.open()
     logger.info("Database connection pool opened (min=0, max=5, max_idle=240s).")
     try:
-        import os
-        schema_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "schema.sql")
-        with open(schema_path, "r", encoding="utf-8") as f:
-            schema_sql = f.read()
-
         async with _pool.connection() as conn:
-            await conn.execute(schema_sql)
+            async with conn.cursor() as cur:
+                # Acquire transactional advisory lock to serialize dynamic partition and centroid seeding
+                await cur.execute("SELECT pg_advisory_xact_lock(%s);", (STARTUP_LOCK_ID,))
+                await ensure_partitions(conn)
+                await seed_static_centroids(conn)
             await conn.commit()
-        logger.info("Dynamic schema check completed: tables and columns verified/added successfully from schema.sql.")
-        await ensure_partitions(_pool)
-        await seed_static_centroids(_pool)
+        logger.info("Startup database initialization completed successfully.")
     except Exception as ddl_err:
-        logger.error("Failed to run dynamic schema update: %s", ddl_err)
+        logger.error("Failed to run startup database initialization: %s", ddl_err)
 
 
-async def ensure_partitions(pool) -> None:
+async def ensure_partitions(conn) -> None:
     """
     Acquire a transaction-level advisory lock to ensure current and next month partitions
     are created safely and without concurrent DDL lock contention.
@@ -98,114 +96,109 @@ async def ensure_partitions(pool) -> None:
         else:
             months_to_create.append((today.year, today.month + 1))
 
-        async with pool.connection() as conn:
-            async with conn.cursor() as cur:
-                # Acquire transactional advisory lock. Safe: automatically released on commit/rollback.
-                # Lock ID: 123456789
-                await cur.execute("SELECT pg_advisory_xact_lock(123456789);")
+        async with conn.cursor() as cur:
+            # Acquire transactional advisory lock. Safe: automatically released on commit/rollback.
+            await cur.execute("SELECT pg_advisory_xact_lock(%s);", (STARTUP_LOCK_ID,))
+            
+            for year, month in months_to_create:
+                partition_name = f"items_y{year:04d}m{month:02d}"
                 
-                for year, month in months_to_create:
-                    partition_name = f"items_y{year:04d}m{month:02d}"
+                # Compute bounds
+                start_date = f"{year:04d}-{month:02d}-01"
+                if month == 12:
+                    next_year = year + 1
+                    next_month = 1
+                else:
+                    next_year = year
+                    next_month = month + 1
+                end_date = f"{next_year:04d}-{next_month:02d}-01"
+                
+                # Identifier validation (sanity checks to prevent injection)
+                if not (2000 <= year <= 2100) or not (1 <= month <= 12):
+                    raise ValueError(f"Invalid year/month calculated: {year}/{month}")
                     
-                    # Compute bounds
-                    start_date = f"{year:04d}-{month:02d}-01"
-                    if month == 12:
-                        next_year = year + 1
-                        next_month = 1
-                    else:
-                        next_year = year
-                        next_month = month + 1
-                    end_date = f"{next_year:04d}-{next_month:02d}-01"
-                    
-                    # Identifier validation (sanity checks to prevent injection)
-                    if not (2000 <= year <= 2100) or not (1 <= month <= 12):
-                        raise ValueError(f"Invalid year/month calculated: {year}/{month}")
-                        
-                    query = f"""
-                    CREATE TABLE IF NOT EXISTS {partition_name} PARTITION OF items
-                    FOR VALUES FROM ('{start_date} 00:00:00') TO ('{end_date} 00:00:00');
-                    """
-                    await cur.execute(query)
-            await conn.commit()
+                query = psycopg.sql.SQL("""
+                CREATE TABLE IF NOT EXISTS {} PARTITION OF items
+                FOR VALUES FROM (%s) TO (%s);
+                """).format(psycopg.sql.Identifier(partition_name))
+                await cur.execute(query, (f"{start_date} 00:00:00", f"{end_date} 00:00:00"))
         logger.info("Partition pre-creation completed successfully.")
     except Exception as e:
         logger.error("Failed to pre-create partitions on startup: %s", e, exc_info=True)
         raise
 
 
-async def seed_static_centroids(pool) -> None:
+async def seed_static_centroids(conn) -> None:
     """Seed the 200 static domain centroids if the table is empty."""
     try:
-        async with pool.connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute("SELECT COUNT(*) FROM static_domain_centroids;")
-                row = await cur.fetchone()
-                if row and row[0] > 0:
-                    return
-                
-                logger.info("Seeding static_domain_centroids table with 200 general knowledge domains...")
-                from backend.services.search_service import embed_text
-                
-                domains = [
-                    # Philosophy & Ethics (30)
-                    "Stoicism", "Epistemology", "Existentialism", "Ethics", "Utilitarianism", "Metaphysics", "Nihilism", "Absurdism", 
-                    "Phenomenology", "Scholasticism", "Hermeneutics", "Dialectics", "Cynicism", "Epicureanism", "Rationalism", "Empiricism",
-                    "Pragmatism", "Dualism", "Solipsism", "Virtue Ethics", "Postmodernism", "Deontology", "Aesthetics", "Eastern Philosophy",
-                    "Taoism", "Buddhism", "Confucianism", "Logical Positivism", "Political Philosophy", "Philosophy of Mind",
-                    # Science & Mathematics (40)
-                    "Quantum Mechanics", "Astrophysics", "Organic Chemistry", "Evolutionary Biology", "Genetics", "Neuroscience", "Cognitive Science",
-                    "Chaos Theory", "Linear Algebra", "Calculus", "Topology", "Number Theory", "Probability Theory", "Game Theory", "Thermodynamics",
-                    "Information Theory", "Fractal Geometry", "Complexity Science", "Special Relativity", "General Relativity", "Particle Physics",
-                    "String Theory", "Cosmology", "Molecular Biology", "Immunology", "Neuroanatomy", "Epidemiology", "Plate Tectonics", "Meteorology",
-                    "Astronomy", "Quantum Computing", "Statistical Mechanics", "Number Theory", "Cryptography", "Graph Theory", "Discrete Mathematics",
-                    "Set Theory", "Mathematical Logic", "Abstract Algebra", "Fluid Dynamics",
-                    # Computer Science & Technology (40)
-                    "Software Architecture", "Machine Learning", "Deep Learning", "Database Systems", "Functional Programming", 
-                    "Object-Oriented Design", "Distributed Systems", "Compiler Design", "Cyber Security", "Computer Networks", "Operating Systems",
-                    "Algorithm Complexity", "Automata Theory", "Artificial Intelligence", "Natural Language Processing", "Computer Vision",
-                    "Reinforcement Learning", "Cloud Computing", "DevOps", "Frontend Engineering", "Backend Engineering", "System Design",
-                    "Blockchain Technology", "Web3 Development", "Internet of Things", "Human-Computer Interaction", "Virtual Reality",
-                    "Augmented Reality", "Embedded Systems", "Parallel Computing", "Graphics Programming", "Web Security", "Penetration Testing",
-                    "API Design", "Agile Methodologies", "Test-Driven Development", "Microservices", "Serverless Architecture", "Containerization",
-                    "Database Normalization",
-                    # History & Politics (30)
-                    "World War II", "Roman Empire", "French Revolution", "Industrial Revolution", "Cold War", "Renaissance", "Classical Antiquity",
-                    "Marxism", "Capitalism", "Liberalism", "Anarchism", "Geopolitics", "Ancient Egypt", "American Civil War", "Feudalism", 
-                    "Decolonization", "Ottoman Empire", "British Empire", "Ancient Greece", "Middle Ages", "Russian Revolution", "Civil Rights Movement",
-                    "Globalization", "Imperialism", "Feudal Japan", "World War I", "Age of Discovery", "Scientific Revolution", "Enlightenment",
-                    "Fascism",
-                    # Business & Economics (30)
-                    "Microeconomics", "Macroeconomics", "Behavioral Economics", "Venture Capital", "Corporate Finance", "Game Development",
-                    "Product Management", "Brand Strategy", "Supply Chain Management", "Cryptocurrencies", "Marketing Analytics", 
-                    "Business Model Innovation", "Financial Markets", "Asset Valuation", "Game Theory", "Startup Equity", "Valuation Models",
-                    "Strategic Management", "Consumer Behavior", "Design Thinking", "Search Engine Optimization", "Growth Hacking", 
-                    "Sales Strategy", "Operations Research", "Development Economics", "Game Economics", "Mergers & Acquisitions", "Monetary Policy",
-                    "Fiscal Policy", "Econometrics",
-                    # Art, Literature & Media (20)
-                    "Creative Writing", "Modern Art", "Renaissance Painting", "Architecture", "Cinematography", "Screenwriting", 
-                    "Literary Criticism", "Music Theory", "Graphic Design", "Photography", "Sculpture", "Impressionism", "Surrealism",
-                    "Typography", "Color Theory", "Game Design", "Narrative Design", "Poetry", "Art History", "Classical Music",
-                    # Psychology & Self-Improvement (10)
-                    "Habit Formation", "Cognitive Behavioral Therapy", "Meditation & Mindfulness", "Emotional Intelligence", "Sleep Science",
-                    "Productivity Systems", "Psychoanalysis", "Behavioral Psychology", "Developmental Psychology", "Social Psychology"
-                ]
-                
-                sem = asyncio.Semaphore(5)
-                async def process_domain(domain):
-                    async with sem:
-                        emb = await embed_text(domain)
-                        return domain, emb
-                
-                tasks = [process_domain(d) for d in domains]
-                results = await asyncio.gather(*tasks)
-                
-                for domain, emb in results:
-                    await cur.execute(
-                        "INSERT INTO static_domain_centroids (domain_name, embedding) VALUES (%s, %s) ON CONFLICT (domain_name) DO NOTHING;",
-                        (domain, emb)
-                    )
-                await conn.commit()
-                logger.info("Successfully seeded 200 static domain centroids.")
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT COUNT(*) FROM static_domain_centroids;")
+            row = await cur.fetchone()
+            if row and row[0] > 0:
+                return
+            
+            logger.info("Seeding static_domain_centroids table with 200 general knowledge domains...")
+            from backend.services.search_service import embed_text
+            
+            domains = [
+                # Philosophy & Ethics (30)
+                "Stoicism", "Epistemology", "Existentialism", "Ethics", "Utilitarianism", "Metaphysics", "Nihilism", "Absurdism", 
+                "Phenomenology", "Scholasticism", "Hermeneutics", "Dialectics", "Cynicism", "Epicureanism", "Rationalism", "Empiricism",
+                "Pragmatism", "Dualism", "Solipsism", "Virtue Ethics", "Postmodernism", "Deontology", "Aesthetics", "Eastern Philosophy",
+                "Taoism", "Buddhism", "Confucianism", "Logical Positivism", "Political Philosophy", "Philosophy of Mind",
+                # Science & Mathematics (40)
+                "Quantum Mechanics", "Astrophysics", "Organic Chemistry", "Evolutionary Biology", "Genetics", "Neuroscience", "Cognitive Science",
+                "Chaos Theory", "Linear Algebra", "Calculus", "Topology", "Number Theory", "Probability Theory", "Game Theory", "Thermodynamics",
+                "Information Theory", "Fractal Geometry", "Complexity Science", "Special Relativity", "General Relativity", "Particle Physics",
+                "String Theory", "Cosmology", "Molecular Biology", "Immunology", "Neuroanatomy", "Epidemiology", "Plate Tectonics", "Meteorology",
+                "Astronomy", "Quantum Computing", "Statistical Mechanics", "Number Theory", "Cryptography", "Graph Theory", "Discrete Mathematics",
+                "Set Theory", "Mathematical Logic", "Abstract Algebra", "Fluid Dynamics",
+                # Computer Science & Technology (40)
+                "Software Architecture", "Machine Learning", "Deep Learning", "Database Systems", "Functional Programming", 
+                "Object-Oriented Design", "Distributed Systems", "Compiler Design", "Cyber Security", "Computer Networks", "Operating Systems",
+                "Algorithm Complexity", "Automata Theory", "Artificial Intelligence", "Natural Language Processing", "Computer Vision",
+                "Reinforcement Learning", "Cloud Computing", "DevOps", "Frontend Engineering", "Backend Engineering", "System Design",
+                "Blockchain Technology", "Web3 Development", "Internet of Things", "Human-Computer Interaction", "Virtual Reality",
+                "Augmented Reality", "Embedded Systems", "Parallel Computing", "Graphics Programming", "Web Security", "Penetration Testing",
+                "API Design", "Agile Methodologies", "Test-Driven Development", "Microservices", "Serverless Architecture", "Containerization",
+                "Database Normalization",
+                # History & Politics (30)
+                "World War II", "Roman Empire", "French Revolution", "Industrial Revolution", "Cold War", "Renaissance", "Classical Antiquity",
+                "Marxism", "Capitalism", "Liberalism", "Anarchism", "Geopolitics", "Ancient Egypt", "American Civil War", "Feudalism", 
+                "Decolonization", "Ottoman Empire", "British Empire", "Ancient Greece", "Middle Ages", "Russian Revolution", "Civil Rights Movement",
+                "Globalization", "Imperialism", "Feudal Japan", "World War I", "Age of Discovery", "Scientific Revolution", "Enlightenment",
+                "Fascism",
+                # Business & Economics (30)
+                "Microeconomics", "Macroeconomics", "Behavioral Economics", "Venture Capital", "Corporate Finance", "Game Development",
+                "Product Management", "Brand Strategy", "Supply Chain Management", "Cryptocurrencies", "Marketing Analytics", 
+                "Business Model Innovation", "Financial Markets", "Asset Valuation", "Game Theory", "Startup Equity", "Valuation Models",
+                "Strategic Management", "Consumer Behavior", "Design Thinking", "Search Engine Optimization", "Growth Hacking", 
+                "Sales Strategy", "Operations Research", "Development Economics", "Game Economics", "Mergers & Acquisitions", "Monetary Policy",
+                "Fiscal Policy", "Econometrics",
+                # Art, Literature & Media (20)
+                "Creative Writing", "Modern Art", "Renaissance Painting", "Architecture", "Cinematography", "Screenwriting", 
+                "Literary Criticism", "Music Theory", "Graphic Design", "Photography", "Sculpture", "Impressionism", "Surrealism",
+                "Typography", "Color Theory", "Game Design", "Narrative Design", "Poetry", "Art History", "Classical Music",
+                # Psychology & Self-Improvement (10)
+                "Habit Formation", "Cognitive Behavioral Therapy", "Meditation & Mindfulness", "Emotional Intelligence", "Sleep Science",
+                "Productivity Systems", "Psychoanalysis", "Behavioral Psychology", "Developmental Psychology", "Social Psychology"
+            ]
+            
+            sem = asyncio.Semaphore(5)
+            async def process_domain(domain):
+                async with sem:
+                    emb = await embed_text(domain)
+                    return domain, emb
+            
+            tasks = [process_domain(d) for d in domains]
+            results = await asyncio.gather(*tasks)
+            
+            for domain, emb in results:
+                await cur.execute(
+                    "INSERT INTO static_domain_centroids (domain_name, embedding) VALUES (%s, %s) ON CONFLICT (domain_name) DO NOTHING;",
+                    (domain, emb)
+                )
+            logger.info("Successfully seeded 200 static domain centroids.")
     except Exception as seed_err:
         logger.error("Failed to seed static domain centroids: %s", seed_err)
 
@@ -278,6 +271,68 @@ async def db_health_check() -> bool:
     except Exception as exc:  # noqa: BLE001
         logger.warning("DB health check failed: %s", exc)
         return False
+
+
+async def get_background_db_connection():
+    """
+    Returns an async context manager yielding an AsyncConnection.
+    In production, this checks out a connection from the pool (_pool).
+    In testing/pytest, if _pool is not initialized, it attempts to resolve the
+    FastAPI dependency overrides (app.dependency_overrides[get_db]) as a fallback.
+    """
+    global _pool
+    if _pool is not None:
+        return _pool.connection()
+
+    # Fallback for pytest environment using FastAPI dependency overrides
+    try:
+        from backend.main import app
+        from backend.db.connection import get_db
+        if app.dependency_overrides.get(get_db):
+            override = app.dependency_overrides[get_db]
+            import inspect
+            if inspect.isasyncgenfunction(override):
+                gen = override()
+                conn = await anext(gen)
+                @asynccontextmanager
+                async def mock_ctx():
+                    try:
+                        yield conn
+                    finally:
+                        try:
+                            await anext(gen)
+                        except StopAsyncIteration:
+                            pass
+                return mock_ctx()
+            elif inspect.isgeneratorfunction(override):
+                gen = override()
+                conn = next(gen)
+                @asynccontextmanager
+                async def mock_ctx():
+                    try:
+                        yield conn
+                    finally:
+                        try:
+                            next(gen)
+                        except StopIteration:
+                            pass
+                return mock_ctx()
+            elif inspect.iscoroutinefunction(override):
+                conn = await override()
+                @asynccontextmanager
+                async def mock_ctx():
+                    yield conn
+                return mock_ctx()
+            else:
+                conn = override()
+                @asynccontextmanager
+                async def mock_ctx():
+                    yield conn
+                return mock_ctx()
+    except Exception as e:
+        logger.warning("Failed to resolve dependency override fallback for database: %s", e)
+
+    raise RuntimeError("Database connection pool is not initialized and no override fallback is available.")
 
 
 # ---------------------------------------------------------------------------

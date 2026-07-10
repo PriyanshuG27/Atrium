@@ -11,11 +11,45 @@ import sys
 import structlog
 from backend.config import settings
 
+# Identify sensitive values dynamically from settings to avoid hardcoding secrets
+_SENSITIVE_PATTERNS = ("SECRET", "TOKEN", "PASSWORD", "PRIVATE_KEY", "FERNET", "API_KEY")
+_SENSITIVE_VALUES = set()
+
+def _initialize_secrets():
+    global _SENSITIVE_VALUES
+    if not _SENSITIVE_VALUES:
+        for attr in dir(settings):
+            if any(p in attr.upper() for p in _SENSITIVE_PATTERNS):
+                val = getattr(settings, attr, None)
+                if isinstance(val, str) and len(val) > 4:
+                    _SENSITIVE_VALUES.add(val)
+
+def _redact_value(val):
+    if isinstance(val, str):
+        for secret in _SENSITIVE_VALUES:
+            if secret in val:
+                val = val.replace(secret, "[REDACTED]")
+        return val
+    elif isinstance(val, dict):
+        return {_redact_value(k): _redact_value(v) for k, v in val.items()}
+    elif isinstance(val, list):
+        return [_redact_value(item) for item in val]
+    elif isinstance(val, tuple):
+        return tuple(_redact_value(item) for item in val)
+    return val
+
+def structlog_secret_masker(logger, method_name, event_dict):
+    _initialize_secrets()
+    for k, v in list(event_dict.items()):
+        event_dict[k] = _redact_value(v)
+    return event_dict
+
 def configure_logging() -> None:
     """Configures structured logging for the application."""
     
     # Processors pipeline
     processors = [
+        structlog_secret_masker,
         structlog.contextvars.merge_contextvars,
         structlog.processors.add_log_level,
         structlog.processors.StackInfoRenderer(),

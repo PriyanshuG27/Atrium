@@ -43,6 +43,15 @@ async def structured_logging_middleware(request: Request, call_next):
         # Add correlation ID header to the response
         response.headers["x-correlation-id"] = correlation_id
         
+        # Track webhook latency if path matches
+        if request.url.path.startswith("/api/webhook"):
+            try:
+                from backend.services.redis_client import redis
+                await redis._request("", ["LPUSH", "metrics:system:webhook_latencies", str(duration_ms)])
+                await redis._request("", ["LTRIM", "metrics:system:webhook_latencies", "0", "49"])
+            except Exception:
+                pass
+
         # Log successful completion
         logger.info(
             "request_processed",

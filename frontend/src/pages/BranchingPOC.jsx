@@ -233,6 +233,13 @@ function PostVisual({ slot }) {
   const bambooHue = 0.09 + sr(slot.id) * 0.03;
   const postColor = new THREE.Color().setHSL(bambooHue, 0.62, 0.32);
 
+  useEffect(() => {
+    return () => {
+      postGeo.dispose();
+      nodeGeo.dispose();
+    };
+  }, [postGeo, nodeGeo]);
+
   return (
     <>
       <mesh geometry={postGeo} castShadow receiveShadow>
@@ -296,6 +303,14 @@ function WickerVisual({ slot }) {
   // Rib face offsets: placed on ±X face (side wall) or ±Z face (front/back)
   const faceOffset = thinHalf + RIB_T / 2;
 
+  useEffect(() => {
+    return () => {
+      wallGeo.dispose();
+      ribGeo.dispose();
+      trimGeo.dispose();
+    };
+  }, [wallGeo, ribGeo, trimGeo]);
+
   return (
     <>
       <mesh geometry={wallGeo} castShadow receiveShadow>
@@ -350,6 +365,11 @@ function StoneVisual({ slot }) {
     g.computeVertexNormals();
     return g;
   }, [W, H, D, slot.id]);
+
+  useEffect(() => {
+    return () => geo.dispose();
+  }, [geo]);
+
   return (
     <mesh geometry={geo} castShadow receiveShadow>
       <meshStandardMaterial color="#C8B89A" roughness={0.93} metalness={0.02} />
@@ -401,6 +421,13 @@ function PlasterVisual({ slot }) {
   const TIMBER  = '#52341A';
   const PLASTER = '#D4C0A0';
   const FRAME_C = '#6A4228';
+
+  useEffect(() => {
+    return () => {
+      wallGeo.dispose();
+      doorFrameGeo.dispose();
+    };
+  }, [wallGeo, doorFrameGeo]);
 
   return (
     <>
@@ -498,6 +525,13 @@ function CottageRoofVisual({ slot }) {
   // Thin overhang drip edge around perimeter
   const edgeGeo = useMemo(() => new THREE.BoxGeometry(W + 0.04, 0.032, D + 0.04), [W, D]);
 
+  useEffect(() => {
+    return () => {
+      slabGeo.dispose();
+      edgeGeo.dispose();
+    };
+  }, [slabGeo, edgeGeo]);
+
   return (
     <>
       {/* Main slab — slate/stone colour */}
@@ -544,6 +578,10 @@ function BrickVisual({ slot }) {
 
   /* Door arch */
   const DOOR_W = 0.52, DOOR_H = 0.82;
+
+  useEffect(() => {
+    return () => geo.dispose();
+  }, [geo]);
 
   return (
     <>
@@ -745,6 +783,11 @@ function ChimneyVisual({ slot }) {
     g.computeVertexNormals();
     return g;
   }, [slot.sz, slot.id]);
+
+  useEffect(() => {
+    return () => geo.dispose();
+  }, [geo]);
+
   return (
     <>
       <mesh geometry={geo} castShadow receiveShadow>
@@ -773,6 +816,11 @@ function TowerVisual({ slot }) {
     g.computeVertexNormals();
     return g;
   }, [W, H, D, slot.id]);
+
+  useEffect(() => {
+    return () => geo.dispose();
+  }, [geo]);
+
   const stoneColor = slot.si <= 3 ? '#A89878' : '#625444';
   return (
     <>
@@ -876,6 +924,10 @@ function ManorWallVisual({ slot }) {
   const WIN_X2 =  longDim * 0.23;
   // Door dims
   const DOOR_W = 0.72, DOOR_H = 1.06;
+
+  useEffect(() => {
+    return () => wallGeo.dispose();
+  }, [wallGeo]);
 
   return (
     <>
@@ -1921,6 +1973,11 @@ function ThatchedRoof({ show, ghost }) {
     g.translate(0,0,-0.975);
     return g;
   }, []);
+
+  useEffect(() => {
+    return () => geo.dispose();
+  }, [geo]);
+
   if (!show) return null;
   const op = ghost ? 0.13 : 1.0;
   const tr = ghost;
@@ -1957,6 +2014,11 @@ function ClayTileRoof({ show, ghost }) {
     g.translate(0,0,-1.59);
     return g;
   }, []);
+
+  useEffect(() => {
+    return () => geo.dispose();
+  }, [geo]);
+
   if (!show) return null;
   const op = ghost ? 0.13 : 1.0;
   const tr = ghost;
@@ -1990,6 +2052,11 @@ function SlateRoof({ show, ghost }) {
     g.translate(0,0,-1.90);
     return g;
   }, []);
+
+  useEffect(() => {
+    return () => geo.dispose();
+  }, [geo]);
+
   if (!show) return null;
   const op = ghost ? 0.10 : 1.0;
   const tr = !!ghost;
@@ -2220,6 +2287,11 @@ function Ground() {
     g.computeVertexNormals();
     return g;
   },[]);
+
+  useEffect(() => {
+    return () => geo.dispose();
+  }, [geo]);
+
   return (
     <mesh geometry={geo} rotation={[-Math.PI/2,0,0]} position={[0,-0.02,0]} receiveShadow>
       <meshStandardMaterial color="#121008" roughness={0.97} metalness={0.01} />

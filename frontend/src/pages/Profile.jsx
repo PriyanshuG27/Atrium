@@ -601,33 +601,43 @@ export default function Profile() {
           gap: 1.75rem;
         }
         
-        .stepper-line {
+        .stepper-item {
+          position: relative;
+          display: flex;
+          align-items: flex-start;
+          gap: 1.75rem;
+          z-index: 3;
+        }
+        
+        .stepper-item::before {
+          content: '';
           position: absolute;
           left: 24px;
           top: 24px;
-          bottom: 24px;
+          bottom: calc(-24px - 1.75rem);
           width: 1px;
           background: rgba(255, 255, 255, 0.05);
           z-index: 1;
         }
         
-        .stepper-progress {
+        .stepper-item:last-child::before {
+          display: none;
+        }
+
+        .stepper-item.unlocked-segment::after {
+          content: '';
           position: absolute;
           left: 24px;
           top: 24px;
+          bottom: calc(-24px - 1.75rem);
           width: 1px;
           background: var(--accent-gold);
           box-shadow: 0 0 8px var(--accent-gold);
           z-index: 2;
-          transition: height 0.6s cubic-bezier(0.16, 1, 0.3, 1);
         }
         
-        .stepper-item {
-          position: relative;
-          display: flex;
-          align-items: center;
-          gap: 1.75rem;
-          z-index: 3;
+        .stepper-item:last-child::after {
+          display: none;
         }
         
         .stepper-dot {
@@ -1329,20 +1339,13 @@ export default function Profile() {
           <p className="card-subtitle">Unlock thresholds of your cognitive capabilities.</p>
 
           <div className="stepper-container">
-            <div className="stepper-line" />
-            {unlocked.length > 1 && (
-              <div 
-                className="stepper-progress" 
-                style={{
-                  height: `${((unlocked.length - 1) / (milestoneThresholds.length - 1)) * 100}%`
-                }} 
-              />
-            )}
-            
-            {milestoneThresholds.map((m) => {
+            {milestoneThresholds.map((m, idx) => {
               const isUnlocked = node_count >= m.threshold;
+              const nextMilestone = milestoneThresholds[idx + 1];
+              const isNextUnlocked = nextMilestone ? (node_count >= nextMilestone.threshold) : false;
+              const hasUnlockedSegment = isUnlocked && isNextUnlocked;
               return (
-                <div key={m.key} className={`stepper-item ${isUnlocked ? 'unlocked' : ''}`}>
+                <div key={m.key} className={`stepper-item ${isUnlocked ? 'unlocked' : ''} ${hasUnlockedSegment ? 'unlocked-segment' : ''}`}>
                   <div className="stepper-dot">
                     {isUnlocked ? '✓' : MILESTONE_ICONS[m.key]}
                   </div>

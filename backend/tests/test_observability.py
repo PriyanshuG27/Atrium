@@ -235,8 +235,8 @@ async def test_observability_metrics_logger():
          
          await observability_metrics_logger()
          
-         mock_redis.llen.assert_called_once_with("recall:tasks")
-         mock_redis.lindex.assert_called_once_with("recall:tasks", -1)
+         mock_redis.llen.assert_called_once_with("atrium:tasks")
+         mock_redis.lindex.assert_called_once_with("atrium:tasks", -1)
          mock_pool.pop_stats.assert_called_once()
          
          log_instance.info.assert_called_once()

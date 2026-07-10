@@ -134,6 +134,10 @@ flowchart TD
    ```
 4. Deploy the backend by linking your GitHub repository to Koyeb.
 
+> [!IMPORTANT]
+> **Horizontal Scaling & APScheduler**: APScheduler is run locally in-memory. If scaling the API container to multiple instances in a paid tier, you must run only one instance with the scheduler active (or run the scheduler in a dedicated single-instance background worker process) to prevent concurrent duplicate execution of cron jobs (which leads to duplicate notifications and resource contention).
+
+
 #### C. Vercel (Frontend Setup)
 1. Link your frontend directory to Vercel.
 2. Configure the `VITE_API_URL` environment variable to point to your Koyeb backend URL.

@@ -57,18 +57,30 @@ async def embed_text(text: str) -> List[float]:
     from backend.services.redis_client import redis
     import json
 
-    cache_key = f"embed:{text}"
+    # NOTE: "v1" here refers exclusively to the cache schema format version.
+    # Bumping the embedding model in settings does not require incrementing this format version.
+    import hashlib
+    hashed = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    cache_key = f"embed:v1:{hashed}"
     try:
         cached_embed_str = await redis.get(cache_key)
         if cached_embed_str:
             cached_embed = json.loads(cached_embed_str)
             if isinstance(cached_embed, list) and len(cached_embed) == 384:
                 logger.info("Embedding cache HIT for text of length %d", len(text))
+                try:
+                    await redis._request("", ["INCR", "metrics:system:cache_hits"])
+                except Exception:
+                    pass
                 return cached_embed
     except Exception as e:
         logger.warning("Failed to fetch embedding from Redis cache: %s", e)
 
     logger.info("Embedding cache MISS for text of length %d. Generating new embedding...", len(text))
+    try:
+        await redis._request("", ["INCR", "metrics:system:cache_misses"])
+    except Exception:
+        pass
     embedding = await _generate_embedding_uncached(text)
 
     try:

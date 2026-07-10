@@ -147,14 +147,14 @@ def test_export_success(client, mock_db_connection, caplog):
 
     with caplog.at_level(logging.INFO), \
          mock.patch("backend.services.rate_limiter.check_rate_limit", new_callable=mock.AsyncMock, return_value=True):
-        resp = client.get("/api/export", cookies={"recall_session": token})
+        resp = client.get("/api/export", cookies={"atrium_session": token})
         assert resp.status_code == 200
         assert resp.headers["content-type"] == "application/json"
         
         # Check attachment disposition headers
         disp = resp.headers["content-disposition"]
         assert "attachment" in disp
-        assert "recall-export-" in disp
+        assert "atrium-export-" in disp
         assert ".json" in disp
 
         # Retrieve full stream payload
@@ -193,7 +193,7 @@ def test_export_rate_limit_429(client, mock_db_connection):
     mock_db_connection.fetchone_val = ("42", 5, 330, datetime.now(timezone.utc))
 
     with mock.patch("backend.services.rate_limiter.check_rate_limit", side_effect=RateLimitExceeded(retry_after=43200.0)):
-        resp = client.get("/api/export", cookies={"recall_session": token})
+        resp = client.get("/api/export", cookies={"atrium_session": token})
         assert resp.status_code == 429
         assert resp.headers["retry-after"] == "43200"
         assert resp.json() == {

@@ -36,7 +36,7 @@ const htmlContent = `
       <div class="context-container">
         <textarea id="context-note" placeholder="Write a context note..." rows="3"></textarea>
       </div>
-      <button id="btn-save">Save to Recall</button>
+      <button id="btn-save">Save to Atrium</button>
       <div id="status-message" class="status-message hidden"></div>
     </div>
   </div>
@@ -149,7 +149,7 @@ describe('Chrome Extension Popup', () => {
     expect(document.getElementById("auth-state-logged-in").classList.contains("hidden")).toBe(false);
   });
 
-  it('handles successful save to Recall on Save button click via background message passing', async () => {
+  it('handles successful save to Atrium on Save button click via background message passing', async () => {
     const encryptedToken = encryptToken('mock-jwt-token', 'mock-extension-id');
     chrome.storage.local.get.mockResolvedValue({ jwt: encryptedToken });
     chrome.tabs.query.mockResolvedValue([

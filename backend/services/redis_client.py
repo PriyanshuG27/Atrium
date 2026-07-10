@@ -46,6 +46,13 @@ class UpstashRedis:
         if not isinstance(key, str):
             return key
         import hashlib
+        from backend.config import settings
+
+        prefix = ""
+        if settings and settings.ENV == "test":
+            if not key.startswith("test:"):
+                prefix = "test:"
+
         parts = key.split(":")
         hashed_parts = []
         for part in parts:
@@ -60,7 +67,7 @@ class UpstashRedis:
                 hashed_parts.append(hashed)
             else:
                 hashed_parts.append(part)
-        return ":".join(hashed_parts)
+        return prefix + ":".join(hashed_parts)
 
     async def _request(self, endpoint: str, json_data, timeout: Optional[float] = None) -> dict | list:
         # Pre-process json_data to hash keys containing sensitive numeric parts
@@ -69,14 +76,32 @@ class UpstashRedis:
                 if isinstance(json_data, list):
                     for cmd in json_data:
                         if isinstance(cmd, list) and len(cmd) > 1:
-                            cmd[1] = self._hash_key(cmd[1])
-                            if len(cmd) > 2 and isinstance(cmd[0], str) and cmd[0].upper() == "BRPOPLPUSH":
-                                cmd[2] = self._hash_key(cmd[2])
+                            cmd_name = cmd[0].upper() if isinstance(cmd[0], str) else ""
+                            if cmd_name == "EVAL" and len(cmd) > 2:
+                                try:
+                                    num_keys = int(cmd[2])
+                                    for idx in range(3, min(3 + num_keys, len(cmd))):
+                                        cmd[idx] = self._hash_key(cmd[idx])
+                                except ValueError:
+                                    pass
+                            else:
+                                cmd[1] = self._hash_key(cmd[1])
+                                if len(cmd) > 2 and isinstance(cmd[0], str) and cmd[0].upper() == "BRPOPLPUSH":
+                                    cmd[2] = self._hash_key(cmd[2])
             else:
-                if isinstance(json_data, list) and len(json_data) > 1:
-                    json_data[1] = self._hash_key(json_data[1])
-                    if len(json_data) > 2 and isinstance(json_data[0], str) and json_data[0].upper() == "BRPOPLPUSH":
-                        json_data[2] = self._hash_key(json_data[2])
+                if isinstance(json_data, list) and len(json_data) > 0:
+                    cmd_name = json_data[0].upper() if isinstance(json_data[0], str) else ""
+                    if cmd_name == "EVAL" and len(json_data) > 2:
+                        try:
+                            num_keys = int(json_data[2])
+                            for idx in range(3, min(3 + num_keys, len(json_data))):
+                                json_data[idx] = self._hash_key(json_data[idx])
+                        except ValueError:
+                            pass
+                    elif len(json_data) > 1:
+                        json_data[1] = self._hash_key(json_data[1])
+                        if len(json_data) > 2 and isinstance(json_data[0], str) and json_data[0].upper() == "BRPOPLPUSH":
+                            json_data[2] = self._hash_key(json_data[2])
 
         client = self._get_client()
         import sys
@@ -127,16 +152,29 @@ class UpstashRedis:
                 logger.error("Upstash Redis auth error (HTTP %d): %s", status_code, redacted_msg)
                 raise RedisAuthError(redacted_msg) from e
             elif 500 <= status_code < 600:
-                logger.warning("Upstash Redis 5xx error (HTTP %d), retrying in 1s...", status_code)
-                await asyncio.sleep(1.0)
-                try:
-                    resp = await client.post(endpoint, json=json_data, timeout=timeout)
-                    resp.raise_for_status()
-                    return resp.json()
-                except Exception as retry_err:
-                    redacted_retry_msg = self._redact(str(retry_err))
-                    logger.error("Upstash Redis retry failed: %s", redacted_retry_msg)
-                    raise RedisUnavailableError(redacted_retry_msg) from retry_err
+                import random
+                max_retries = 3
+                retry_delay = 1.0
+                last_exc = e
+                for attempt in range(max_retries):
+                    jitter = random.uniform(0.8, 1.2)
+                    sleep_time = min(30.0, retry_delay * jitter)
+                    logger.warning(
+                        "Upstash Redis 5xx error (HTTP %d). Attempt %d/%d. Retrying in %.2fs...",
+                        status_code, attempt + 1, max_retries, sleep_time
+                    )
+                    await asyncio.sleep(sleep_time)
+                    try:
+                        resp = await client.post(endpoint, json=json_data, timeout=timeout)
+                        resp.raise_for_status()
+                        return resp.json()
+                    except Exception as retry_err:
+                        last_exc = retry_err
+                        retry_delay *= 2.0
+                        
+                redacted_retry_msg = self._redact(str(last_exc))
+                logger.error("Upstash Redis retry failed after %d attempts: %s", max_retries, redacted_retry_msg)
+                raise RedisUnavailableError(redacted_retry_msg) from last_exc
             else:
                 logger.error("Upstash Redis HTTP error (HTTP %d): %s", status_code, redacted_msg)
                 raise RedisUnavailableError(redacted_msg) from e
@@ -150,7 +188,7 @@ class UpstashRedis:
         Pushes a value to the head of a list.
         Returns the number of elements in the list after the push.
         """
-        if key == "recall:tasks" and isinstance(value, str):
+        if key == "atrium:tasks" and isinstance(value, str):
             try:
                 import json
                 import structlog

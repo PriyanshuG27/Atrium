@@ -29,7 +29,7 @@ describe('App PWA and Session Tracking', () => {
     vi.restoreAllMocks();
   });
 
-  it('increments recall_visits on new session', () => {
+  it('increments atrium_visits on new session', () => {
     render(
       <ToastProvider>
         <AuthProvider>
@@ -38,13 +38,13 @@ describe('App PWA and Session Tracking', () => {
       </ToastProvider>
     );
 
-    expect(sessionStorage.getItem('recall_session_active')).toBe('true');
-    expect(localStorage.getItem('recall_visits')).toBe('1');
+    expect(sessionStorage.getItem('atrium_session_active')).toBe('true');
+    expect(localStorage.getItem('atrium_visits')).toBe('1');
   });
 
-  it('does not increment recall_visits if session is active', () => {
-    sessionStorage.setItem('recall_session_active', 'true');
-    localStorage.setItem('recall_visits', '5');
+  it('does not increment atrium_visits if session is active', () => {
+    sessionStorage.setItem('atrium_session_active', 'true');
+    localStorage.setItem('atrium_visits', '5');
 
     render(
       <ToastProvider>
@@ -54,7 +54,7 @@ describe('App PWA and Session Tracking', () => {
       </ToastProvider>
     );
 
-    expect(localStorage.getItem('recall_visits')).toBe('5');
+    expect(localStorage.getItem('atrium_visits')).toBe('5');
   });
 
   it('renders splash loading state initially', () => {
@@ -66,10 +66,11 @@ describe('App PWA and Session Tracking', () => {
       </ToastProvider>
     );
 
-    expect(screen.getByText(/Recall\./i)).toBeInTheDocument();
+    expect(screen.getByText(/Atrium\./i)).toBeInTheDocument();
   });
 
   it('redirects unauthenticated users to /login', async () => {
+    vi.stubGlobal('location', { pathname: '/archive', search: '', hash: '' });
     const replaceSpy = vi.spyOn(window.history, 'replaceState');
 
     vi.spyOn(window, 'fetch').mockImplementation(() =>

@@ -63,7 +63,7 @@ def test_auth_telegram_mock_login(client):
         res = client.get("/auth/telegram?mock=true&id=999999")
         assert res.status_code == 200
         assert res.json()["status"] == "ok"
-        assert "recall_session" in res.cookies
+        assert "atrium_session" in res.cookies
 
 def test_auth_telegram_valid_hmac(client):
     now = int(time.time())
@@ -85,7 +85,7 @@ def test_auth_telegram_valid_hmac(client):
         res = client.get(url, follow_redirects=False)
         assert res.status_code == 307
         assert "dashboard" in res.headers["location"]
-        assert "recall_session" in res.cookies
+        assert "atrium_session" in res.cookies
 
 def test_auth_telegram_invalid_hash(client):
     res = client.get("/auth/telegram?id=123456&auth_date=1000000000&hash=invalid_hash")

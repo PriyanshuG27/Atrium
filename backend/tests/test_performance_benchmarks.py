@@ -104,7 +104,7 @@ async def test_queue_latency_performance():
     durations = []
     for _ in range(100):
         start = time.perf_counter()
-        await mock_redis.lpush("recall:tasks", "test_payload")
+        await mock_redis.lpush("atrium:tasks", "test_payload")
         durations.append((time.perf_counter() - start) * 1000.0)
         
     median_duration = statistics.median(durations)

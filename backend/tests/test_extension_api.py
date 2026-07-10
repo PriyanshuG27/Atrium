@@ -405,7 +405,7 @@ def test_pwa_share_target_endpoint(client, mock_db):
     response = client.post(
         "/api/share-target",
         data={"title": "Interesting Article", "text": "Check this out https://example.com/pwa-test"},
-        cookies={"recall_session": jwt_token},
+        cookies={"atrium_session": jwt_token},
         follow_redirects=False
     )
     assert response.status_code == 303

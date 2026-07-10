@@ -122,10 +122,10 @@ def test_rate_limit_exceeded_response(client):
     with mock.patch("backend.services.redis_client.redis.eval", side_effect=db_state.eval):
         # POST /api/search limit = 60 + burst 10 = 70
         for _ in range(70):
-            resp = client.post("/api/search", json={"query": "test"}, cookies={"recall_session": token})
+            resp = client.post("/api/search", json={"query": "test"}, cookies={"atrium_session": token})
             assert resp.status_code == 200
             
-        resp = client.post("/api/search", json={"query": "test"}, cookies={"recall_session": token})
+        resp = client.post("/api/search", json={"query": "test"}, cookies={"atrium_session": token})
         assert resp.status_code == 429
         
         data = resp.json()
@@ -146,10 +146,10 @@ def test_different_limits_search_vs_sync(client):
          mock.patch("backend.services.drive_sync.sync_user_to_drive", new_callable=mock.AsyncMock) as mock_sync:
         # drive/sync has limit = 5 per hour
         for _ in range(5):
-            resp = client.post("/api/drive/sync", cookies={"recall_session": token})
+            resp = client.post("/api/drive/sync", cookies={"atrium_session": token})
             assert resp.status_code == 200 or resp.status_code == 202
 
-        resp = client.post("/api/drive/sync", cookies={"recall_session": token})
+        resp = client.post("/api/drive/sync", cookies={"atrium_session": token})
         assert resp.status_code == 429
         assert resp.json()["error"] == "rate_limit_exceeded"
         assert "rate:sync:42" in db_state.state

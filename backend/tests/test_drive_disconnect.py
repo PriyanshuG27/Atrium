@@ -93,7 +93,7 @@ def test_drive_disconnect_already_null(client):
     payload = {"sub": "42", "chat_id": "123456789"}
     token = generate_jwt(payload, settings.JWT_SECRET)
     
-    resp = client.delete("/api/drive", cookies={"recall_session": token})
+    resp = client.delete("/api/drive", cookies={"atrium_session": token})
     assert resp.status_code == 204
     
     # Verify no UPDATE users SET google_refresh_token = NULL queries were run
@@ -126,7 +126,7 @@ async def test_drive_disconnect_success(client):
     token = generate_jwt(payload, settings.JWT_SECRET)
     
     with mock.patch("httpx.AsyncClient.post", mock_post):
-        resp = client.delete("/api/drive", cookies={"recall_session": token})
+        resp = client.delete("/api/drive", cookies={"atrium_session": token})
         assert resp.status_code == 204
         mock_post.assert_called_once()
         # Verify URL called has the correct plain refresh token
@@ -171,7 +171,7 @@ async def test_drive_disconnect_google_error(client, google_status):
     token = generate_jwt(payload, settings.JWT_SECRET)
     
     with mock.patch("httpx.AsyncClient.post", mock_post):
-        resp = client.delete("/api/drive", cookies={"recall_session": token})
+        resp = client.delete("/api/drive", cookies={"atrium_session": token})
         assert resp.status_code == 204
         mock_post.assert_called_once()
         
@@ -202,7 +202,7 @@ async def test_drive_disconnect_network_error(client):
     token = generate_jwt(payload, settings.JWT_SECRET)
     
     with mock.patch("httpx.AsyncClient.post", mock_post):
-        resp = client.delete("/api/drive", cookies={"recall_session": token})
+        resp = client.delete("/api/drive", cookies={"atrium_session": token})
         assert resp.status_code == 204
         mock_post.assert_called_once()
         

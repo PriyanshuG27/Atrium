@@ -113,7 +113,7 @@ async def test_milestone_unlock_5_nodes():
 
     mock_conn = MockConnection(mock_cur)
     
-    with mock.patch("backend.worker._pool", MockPool(mock_conn)), \
+    with mock.patch("backend.db.connection._pool", MockPool(mock_conn)), \
          mock.patch("backend.worker.send_telegram_message") as mock_send, \
          mock.patch("backend.worker.redis.setex") as mock_redis_set:
         

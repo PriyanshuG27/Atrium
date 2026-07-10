@@ -30,11 +30,11 @@ describe('Network and Offline Error Handling', () => {
     vi.clearAllMocks();
     // Default mocks for auth fetch requests
     vi.spyOn(window, 'fetch').mockImplementation((url) => {
-      if (url === '/auth/me') {
+      if (url === '/auth/me' || url === '/api/me') {
         return Promise.resolve({
           ok: true,
           status: 200,
-          json: () => Promise.resolve({ id: 1, chat_id: '12345' }),
+          json: () => Promise.resolve({ id: 1, chat_id: '12345', streak_count: 0, total_saves: 0 }),
         });
       }
       if (url === '/api/quizzes/due') {

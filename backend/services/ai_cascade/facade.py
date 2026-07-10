@@ -312,6 +312,10 @@ class AICascade:
             except Exception as e:
                 logger.warning("Onboarding cascade via new engine failed: %s. Falling back.", e)
 
+        import time
+        from backend.services.ai_cascade.events.event_bus import event_bus, LLMRequestFinished
+        from backend.services.ai_cascade.telemetry.cost_manager import CostManager
+
         prompt_template = PromptManager.get_prompt("onboarding", "v1")
         messages = [
             {"role": "system", "content": prompt_template},
@@ -324,6 +328,7 @@ class AICascade:
                 providers.remove(settings.COMPUTE_PROVIDER)
             providers.insert(0, settings.COMPUTE_PROVIDER)
 
+        t0 = time.time()
         for provider in providers:
             try:
                 res = None
@@ -333,6 +338,25 @@ class AICascade:
                     prompt = f"{prompt_template}\n\nAnswer: {text}"
                     res = await self._call_gemini_llm(prompt, temperature=0.2)
                 if res:
+                    latency_ms = (time.time() - t0) * 1000.0
+                    prompt_tokens = CostManager.estimate_tokens(prompt_template) + CostManager.estimate_tokens(text)
+                    completion_tokens = CostManager.estimate_tokens(res)
+                    
+                    await event_bus.publish(LLMRequestFinished(
+                        request_id=None,
+                        user_id=None,
+                        provider=provider,
+                        model="groq-onboarding" if provider == "groq" else "gemini-onboarding",
+                        latency_ms=latency_ms,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        success=True,
+                        pipeline="onboarding",
+                        prompt_version="fallback"
+                    ))
+                    
+                    masked_text = mask_pii(text)
+                    logger.info("Onboarding cascade fallback succeeded on provider %s for input: %s", provider, masked_text)
                     return res.strip()
             except Exception as e:
                 logger.warning("Onboarding cascade failed on %s: %s", provider, e)
@@ -909,6 +933,10 @@ class AICascade:
             except Exception as e:
                 logger.warning("Graph RAG via new engine failed: %s. Falling back.", e)
 
+        import time
+        from backend.services.ai_cascade.events.event_bus import event_bus, LLMRequestFinished
+        from backend.services.ai_cascade.telemetry.cost_manager import CostManager
+
         system_instruction = (
             "You are analyzing the user's personal knowledge graph to answer a question they asked about their own thinking.\n"
             "Your job is to answer the user's question by stating specific patterns, tensions, or recurring questions in what they saved.\n"
@@ -944,6 +972,7 @@ class AICascade:
                 providers.remove(settings.COMPUTE_PROVIDER)
             providers.insert(0, settings.COMPUTE_PROVIDER)
 
+        t0 = time.time()
         for provider in providers:
             try:
                 res = None
@@ -971,8 +1000,29 @@ class AICascade:
                     ]
                     res_lower = cleaned_res.lower()
                     if any(re.search(pat, res_lower) for pat in banned_patterns):
-                        logger.warning("RAG answer generation rejected due to banned phrases: %s", cleaned_res)
+                        masked_res = mask_pii(cleaned_res)
+                        logger.warning("RAG answer generation rejected due to banned phrases: %s", masked_res)
                         continue
+                    
+                    latency_ms = (time.time() - t0) * 1000.0
+                    prompt_tokens = CostManager.estimate_tokens(system_instruction) + CostManager.estimate_tokens(user_prompt)
+                    completion_tokens = CostManager.estimate_tokens(cleaned_res)
+                    
+                    await event_bus.publish(LLMRequestFinished(
+                        request_id=None,
+                        user_id=None,
+                        provider=provider,
+                        model=f"{provider}-graph-rag",
+                        latency_ms=latency_ms,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        success=True,
+                        pipeline="graph",
+                        prompt_version="fallback"
+                    ))
+                    
+                    masked_query = mask_pii(query)
+                    logger.info("Conversational RAG fallback succeeded on provider %s for query: %s", provider, masked_query)
                     return cleaned_res
             except Exception as e:
                 logger.warning("Conversational RAG answer generation failed on provider %s: %s", provider, e)
@@ -1161,6 +1211,10 @@ class AICascade:
             except Exception as e:
                 logger.warning("OCR cleanup via new engine failed: %s. Falling back.", e)
 
+        import time
+        from backend.services.ai_cascade.events.event_bus import event_bus, LLMRequestFinished
+        from backend.services.ai_cascade.telemetry.cost_manager import CostManager
+
         prompt_template = PromptManager.get_prompt("ocr_cleanup", "v1")
         user_prompt = f"Raw OCR text:\n{ocr_text}"
         messages = [
@@ -1175,12 +1229,15 @@ class AICascade:
             provider = "gemini"
             
         res = None
+        t0 = time.time()
+        used_provider = provider
         try:
             if provider == "groq" and settings.GROQ_API_KEY:
                 res = await self._call_groq_llm(messages, temperature=0.0, timeout=10.0)
             if not res and settings.GEMINI_API_KEY:
                 prompt = f"{prompt_template}\n\n{user_prompt}"
                 res = await self._call_gemini_llm(prompt, temperature=0.0, timeout=15.0)
+                used_provider = "gemini"
         except Exception as e:
             logger.warning("Failed to extract clean URLs/meta via AI: %s", e)
             
@@ -1206,6 +1263,26 @@ class AICascade:
                         if not u_str.lower().startswith("http"):
                             u_str = "https://" + u_str
                         cleaned.append(u_str)
+                
+                latency_ms = (time.time() - t0) * 1000.0
+                prompt_tokens = CostManager.estimate_tokens(prompt_template) + CostManager.estimate_tokens(user_prompt)
+                completion_tokens = CostManager.estimate_tokens(res)
+                
+                await event_bus.publish(LLMRequestFinished(
+                    request_id=None,
+                    user_id=None,
+                    provider=used_provider,
+                    model=f"{used_provider}-ocr-cleanup",
+                    latency_ms=latency_ms,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    success=True,
+                    pipeline="ocr_cleanup",
+                    prompt_version="fallback"
+                ))
+                
+                masked_ocr = mask_pii(ocr_text)
+                logger.info("OCR cleanup fallback succeeded on provider %s for input: %s", used_provider, masked_ocr)
                 return {"urls": cleaned, "is_only_links": is_only_links}
         except Exception as parse_err:
             logger.warning("Failed to parse AI URL/meta JSON output: %s", parse_err)

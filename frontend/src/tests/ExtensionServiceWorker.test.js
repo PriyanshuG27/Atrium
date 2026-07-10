@@ -87,8 +87,8 @@ describe('Chrome Extension Service Worker', () => {
     onInstalledCallback();
 
     expect(chrome.contextMenus.create).toHaveBeenCalledWith({
-      id: "recall-save-link",
-      title: "Save to Recall",
+      id: "atrium-save-link",
+      title: "Save to Atrium",
       contexts: ["link", "page", "selection"]
     });
   });
@@ -98,14 +98,14 @@ describe('Chrome Extension Service Worker', () => {
     chrome.storage.local.get.mockResolvedValue({});
 
     await onClickedCallback(
-      { menuItemId: "recall-save-link", pageUrl: "https://mysite.com" },
+      { menuItemId: "atrium-save-link", pageUrl: "https://mysite.com" },
       { title: "My Page", url: "https://mysite.com" }
     );
 
     expect(chrome.notifications.create).toHaveBeenCalledWith(
       expect.objectContaining({
         title: "Error",
-        message: "Please log in via the Recall extension first."
+        message: "Please log in via the Atrium extension first."
       }),
       expect.any(Function)
     );
@@ -124,7 +124,7 @@ describe('Chrome Extension Service Worker', () => {
     fetch.mockResolvedValue({ ok: true, status: 201 });
 
     await onClickedCallback(
-      { menuItemId: "recall-save-link", pageUrl: "https://google.com/search" },
+      { menuItemId: "atrium-save-link", pageUrl: "https://google.com/search" },
       { title: "Google Search", url: "https://google.com/search" }
     );
 
@@ -148,7 +148,7 @@ describe('Chrome Extension Service Worker', () => {
 
     expect(chrome.notifications.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        title: "Saved to Recall",
+        title: "Saved to Atrium",
         message: "Google Search"
       }),
       expect.any(Function)
@@ -167,7 +167,7 @@ describe('Chrome Extension Service Worker', () => {
     fetch.mockResolvedValue({ ok: true, status: 201 });
 
     await onClickedCallback(
-      { menuItemId: "recall-save-link", selectionText: "selected text paragraph", pageUrl: "https://wikipedia.org" },
+      { menuItemId: "atrium-save-link", selectionText: "selected text paragraph", pageUrl: "https://wikipedia.org" },
       { title: "Wikipedia", url: "https://wikipedia.org" }
     );
 
@@ -196,7 +196,7 @@ describe('Chrome Extension Service Worker', () => {
     chrome.storage.local.get.mockResolvedValue({ jwt: encryptedToken });
 
     await onClickedCallback(
-      { menuItemId: "recall-save-link", pageUrl: "https://google.com" },
+      { menuItemId: "atrium-save-link", pageUrl: "https://google.com" },
       { title: "Google", url: "https://google.com" }
     );
 

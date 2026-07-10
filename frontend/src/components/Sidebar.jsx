@@ -55,7 +55,7 @@ const ROOMS = [
     id: 'drill',
     path: '/drill',
     label: 'Drill',
-    subtitle: 'Recall as a ritual',
+    subtitle: 'Atrium as a ritual',
     icon: (
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
         <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
@@ -91,8 +91,8 @@ export default function Sidebar({ currentRoom, onNavigate, onMuteChange, onSearc
     const handleMuteToggleEvent = (e) => {
       setMuted(e.detail);
     };
-    window.addEventListener('recall-mute-toggle', handleMuteToggleEvent);
-    return () => window.removeEventListener('recall-mute-toggle', handleMuteToggleEvent);
+    window.addEventListener('atrium-mute-toggle', handleMuteToggleEvent);
+    return () => window.removeEventListener('atrium-mute-toggle', handleMuteToggleEvent);
   }, []);
 
   /* ── Navigate to a room ─────────────────────────────────────────────────── */
@@ -190,8 +190,8 @@ export default function Sidebar({ currentRoom, onNavigate, onMuteChange, onSearc
       />
 
       {/* ── Monogram ── */}
-      <div className="sidebar-monogram" aria-label="Recall">
-        R
+      <div className="sidebar-monogram" aria-label="Atrium">
+        A
       </div>
 
       {/* ── Room navigation icons ── */}

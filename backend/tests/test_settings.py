@@ -102,7 +102,7 @@ def auth_cookie():
         "chat_id": "123456789",
         "exp": int(time.time()) + 3600
     }
-    return {"recall_session": generate_jwt(payload, settings.JWT_SECRET)}
+    return {"atrium_session": generate_jwt(payload, settings.JWT_SECRET)}
 
 def test_get_settings(client, override_db, auth_cookie):
     response = client.get("/api/me", cookies=auth_cookie)
@@ -137,5 +137,5 @@ def test_delete_account(client, override_db, auth_cookie):
     assert delete_query[1][0] == 42
     
     cookies = response.cookies
-    assert "recall_session" not in cookies or cookies["recall_session"] == ""
+    assert "atrium_session" not in cookies or cookies["atrium_session"] == ""
     assert "jwt" not in cookies or cookies["jwt"] == ""

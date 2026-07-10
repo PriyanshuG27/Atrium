@@ -2,7 +2,7 @@ import React from 'react';
 import { MagnifyingGlass, Binoculars, PaperPlane } from '@phosphor-icons/react';
 
 export default function EmptyState({ variant, query }) {
-  const botUsername = import.meta.env.VITE_BOT_USERNAME || 'RecallTestEnvBot';
+  const botUsername = import.meta.env.VITE_BOT_USERNAME || 'AtriumTestEnvBot';
   const botUrl = `https://t.me/${botUsername}`;
 
   if (variant === 'graph') {

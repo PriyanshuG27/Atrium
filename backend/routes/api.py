@@ -305,7 +305,7 @@ async def extension_download():
         raise HTTPException(status_code=404, detail="Extension source files not found.")
 
     temp_dir = tempfile.gettempdir()
-    zip_base = os.path.join(temp_dir, "recall_extension")
+    zip_base = os.path.join(temp_dir, "atrium_extension")
 
     # Run blocking file zipping in a threadpool to keep FastAPI non-blocking
     archive_path = await asyncio.to_thread(shutil.make_archive, zip_base, 'zip', ext_path)
@@ -313,7 +313,7 @@ async def extension_download():
     return FileResponse(
         archive_path,
         media_type="application/zip",
-        filename="recall_extension.zip"
+        filename="atrium_extension.zip"
     )
 
 
@@ -1597,7 +1597,7 @@ async def delete_reminder(
     status_code=status.HTTP_200_OK,
     tags=["drive"],
     summary="Sync Google Drive",
-    description="Triggers a synchronization of Recall items to Google Drive as a Google Doc.",
+    description="Triggers a synchronization of Atrium items to Google Drive as a Google Doc.",
     responses={
         401: {"model": ErrorResponse},
         429: {"model": ErrorResponse, "description": "Sync limit exceeded (max 5 requests per hour)."},
@@ -1693,8 +1693,9 @@ def verify_internal_key(
     x_internal_key: str = fastapi.Header(..., alias="X-Internal-Key")
 ):
     """FastAPI dependency to verify internal key header."""
+    import hmac
     from backend.config import settings
-    if not settings.INTERNAL_API_KEY or x_internal_key != settings.INTERNAL_API_KEY:
+    if not settings.INTERNAL_API_KEY or not hmac.compare_digest(x_internal_key or "", settings.INTERNAL_API_KEY):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Unauthorized: Invalid internal API key."
@@ -1715,7 +1716,7 @@ async def get_admin_queue(
     from backend.worker import worker_semaphore
     
     try:
-        queue_length = await redis.llen("recall:tasks")
+        queue_length = await redis.llen("atrium:tasks")
     except Exception as e:
         logger.error("Failed to fetch Redis queue length: %s", e)
         queue_length = 0
@@ -1756,7 +1757,7 @@ async def get_admin_queue(
     "/admin/dlq/{id}/retry",
     tags=["admin"],
     summary="Retry a DLQ task",
-    description="Pushes the task payload back onto the Redis recall:tasks queue and marks the DLQ entry as retried.",
+    description="Pushes the task payload back onto the Redis atrium:tasks queue and marks the DLQ entry as retried.",
     dependencies=[Depends(verify_internal_key)],
 )
 async def retry_dlq_task(
@@ -1784,7 +1785,7 @@ async def retry_dlq_task(
         else:
             task_payload = task_payload_raw
             
-        await redis.lpush("recall:tasks", json.dumps(task_payload))
+        await redis.lpush("atrium:tasks", json.dumps(task_payload))
         
         await cur.execute("UPDATE dead_letter_queue SET retried = TRUE WHERE id = %s;", (id,))
         await db.commit()
@@ -2098,7 +2099,7 @@ async def delete_user_me(
         await db.commit()
 
     # Clear auth cookies
-    response.delete_cookie("recall_session", httponly=True, secure=True, samesite="lax")
+    response.delete_cookie("atrium_session", httponly=True, secure=True, samesite="lax")
     response.delete_cookie("jwt", httponly=True, secure=True, samesite="lax")
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -2285,7 +2286,7 @@ async def export_user_data(
     # Format Content-Disposition header with current date
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     headers = {
-        "Content-Disposition": f'attachment; filename="recall-export-{date_str}.json"'
+        "Content-Disposition": f'attachment; filename="atrium-export-{date_str}.json"'
     }
 
     return StreamingResponse(
@@ -2784,7 +2785,7 @@ async def export_zip(
     
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     headers = {
-        "Content-Disposition": f'attachment; filename="recall-obsidian-export-{timestamp}.zip"',
+        "Content-Disposition": f'attachment; filename="atrium-obsidian-export-{timestamp}.zip"',
         "Access-Control-Expose-Headers": "Content-Disposition"
     }
     

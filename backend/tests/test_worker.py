@@ -79,7 +79,7 @@ class MockPool:
 async def test_process_text_task(monkeypatch):
     """Verify that a text task is parsed, saved, and acknowledged properly."""
     mock_pool = MockPool()
-    monkeypatch.setattr("backend.worker._pool", mock_pool)
+    monkeypatch.setattr("backend.db.connection._pool", mock_pool)
     
     mock_redis = mock.AsyncMock()
     monkeypatch.setattr("backend.worker.redis", mock_redis)
@@ -120,7 +120,7 @@ async def test_process_text_task(monkeypatch):
 async def test_process_url_task(monkeypatch):
     """Verify that a URL task calls ingest_url and replies to the user."""
     mock_pool = MockPool()
-    monkeypatch.setattr("backend.worker._pool", mock_pool)
+    monkeypatch.setattr("backend.db.connection._pool", mock_pool)
     
     mock_redis = mock.AsyncMock()
     monkeypatch.setattr("backend.worker.redis", mock_redis)
@@ -157,7 +157,7 @@ async def test_process_url_task(monkeypatch):
 async def test_process_url_task_private_google_drive(monkeypatch):
     """Verify that a private Google Drive URL error is handled gracefully with instruction response."""
     mock_pool = MockPool()
-    monkeypatch.setattr("backend.worker._pool", mock_pool)
+    monkeypatch.setattr("backend.db.connection._pool", mock_pool)
     
     mock_redis = mock.AsyncMock()
     monkeypatch.setattr("backend.worker.redis", mock_redis)
@@ -194,7 +194,7 @@ async def test_process_url_task_private_google_drive(monkeypatch):
 async def test_process_pdf_task(monkeypatch):
     """Verify that a PDF task downloads, counts pages, calls ingest_pdf, and replies."""
     mock_pool = MockPool()
-    monkeypatch.setattr("backend.worker._pool", mock_pool)
+    monkeypatch.setattr("backend.db.connection._pool", mock_pool)
     
     mock_redis = mock.AsyncMock()
     monkeypatch.setattr("backend.worker.redis", mock_redis)
@@ -266,7 +266,7 @@ async def test_process_pdf_task(monkeypatch):
 async def test_process_voice_task(monkeypatch):
     """Verify that a voice task calls ingest_voice, decrypts, and replies."""
     mock_pool = MockPool()
-    monkeypatch.setattr("backend.worker._pool", mock_pool)
+    monkeypatch.setattr("backend.db.connection._pool", mock_pool)
     
     mock_redis = mock.AsyncMock()
     monkeypatch.setattr("backend.worker.redis", mock_redis)
@@ -302,7 +302,7 @@ async def test_process_voice_task(monkeypatch):
 async def test_process_task_failure_fallback(monkeypatch):
     """Verify that a task failure writes to DLQ and saves a minimal bookmark fallback."""
     mock_pool = MockPool()
-    monkeypatch.setattr("backend.worker._pool", mock_pool)
+    monkeypatch.setattr("backend.db.connection._pool", mock_pool)
     
     mock_redis = mock.AsyncMock()
     monkeypatch.setattr("backend.worker.redis", mock_redis)
@@ -344,7 +344,7 @@ async def test_process_task_failure_fallback(monkeypatch):
 async def test_process_batch_with_deferred_replies(monkeypatch):
     """Verify that process_batch_task correctly pulls and applies deferred replies from Redis."""
     mock_pool = MockPool()
-    monkeypatch.setattr("backend.worker._pool", mock_pool)
+    monkeypatch.setattr("backend.db.connection._pool", mock_pool)
     
     mock_redis = mock.AsyncMock()
     # Mock lrange to return a deferred context note reply

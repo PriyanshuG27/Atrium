@@ -109,7 +109,7 @@ def test_webhook_security_missing_secret(client, monkeypatch):
     from backend.config import settings
     monkeypatch.setattr(settings, "TELEGRAM_WEBHOOK_SECRET", "super-secret-token")
     
-    payload = {"update_id": 999991, "message": {"chat": {"id": 12345}, "text": "Hello"}}
+    payload = {"update_id": 999995, "message": {"chat": {"id": 12345}, "text": "Hello"}}
     # No header -> should be 403
     res = client.post("/webhook", json=payload)
     assert res.status_code == 403

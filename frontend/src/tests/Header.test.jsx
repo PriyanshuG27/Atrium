@@ -134,7 +134,7 @@ describe('Header', () => {
 
     await waitFor(() => {
       // Logo watermark is present
-      expect(screen.getByText('Recall.')).toBeInTheDocument();
+      expect(screen.getByText('Atrium.')).toBeInTheDocument();
       // Profile trigger button is present
       expect(screen.getByRole('button', { name: /Profile menu/i })).toBeInTheDocument();
     });
@@ -187,7 +187,7 @@ describe('Header', () => {
     fireEvent.click(screen.getByText(/Connect Google Drive/));
     expect(windowOpenSpy).toHaveBeenCalledWith(
       '/auth/google',
-      'recall-drive-auth',
+      'atrium-drive-auth',
       expect.stringContaining('width=600')
     );
   });

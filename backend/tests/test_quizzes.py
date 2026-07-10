@@ -103,7 +103,7 @@ def test_get_due_quizzes_success(client):
     current_cursor = RecordingCursor(user_id=42, fetchall_val=due_quizzes)
     
     token = get_auth_token(user_id=42)
-    response = client.get("/api/quizzes/due", cookies={"recall_session": token})
+    response = client.get("/api/quizzes/due", cookies={"atrium_session": token})
     
     assert response.status_code == 200
     res_data = response.json()
@@ -122,7 +122,7 @@ def test_answer_quiz_success(client):
     
     token = get_auth_token(user_id=42)
     # Answer correct easy (quality = 5)
-    response = client.post("/api/quizzes/1/answer", json={"quality": 5}, cookies={"recall_session": token})
+    response = client.post("/api/quizzes/1/answer", json={"quality": 5}, cookies={"atrium_session": token})
     
     assert response.status_code == 200
     data = response.json()
@@ -152,7 +152,7 @@ def test_answer_quiz_invalid_quality(client):
     token = get_auth_token(user_id=42)
     
     # Quality = 6 is invalid
-    response = client.post("/api/quizzes/1/answer", json={"quality": 6}, cookies={"recall_session": token})
+    response = client.post("/api/quizzes/1/answer", json={"quality": 6}, cookies={"atrium_session": token})
     assert response.status_code in (400, 422)
 
 def test_answer_quiz_not_found_or_forbidden(client):
@@ -162,7 +162,7 @@ def test_answer_quiz_not_found_or_forbidden(client):
     current_cursor = RecordingCursor(user_id=42, fetchone_val=None)
     
     token = get_auth_token(user_id=42)
-    response = client.post("/api/quizzes/1/answer", json={"quality": 4}, cookies={"recall_session": token})
+    response = client.post("/api/quizzes/1/answer", json={"quality": 4}, cookies={"atrium_session": token})
     
     assert response.status_code == 404
     assert response.json()["detail"] == "Quiz not found."

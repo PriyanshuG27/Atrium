@@ -37,7 +37,7 @@ class LoginStatusResponse(BaseModel):
     "/telegram",
     response_model=LoginStatusResponse,
     summary="Telegram login verification",
-    description="Verifies the signature of the Telegram login widget data and sets the recall_session JWT cookie.",
+    description="Verifies the signature of the Telegram login widget data and sets the atrium_session JWT cookie.",
     responses={
         401: {"model": ErrorResponse, "description": "Invalid signature or expired authentication data."},
     },
@@ -64,7 +64,7 @@ async def auth_telegram(
         token = generate_jwt(payload, settings.JWT_SECRET)
         
         response.set_cookie(
-            "recall_session",
+            "atrium_session",
             token,
             httponly=True,
             secure=settings.ENV != "development",
@@ -149,7 +149,7 @@ async def auth_telegram(
     redirect_response = RedirectResponse(url=redirect_url)
     
     redirect_response.set_cookie(
-        "recall_session",
+        "atrium_session",
         token,
         httponly=True,
         secure=settings.ENV != "development",
@@ -171,11 +171,11 @@ async def auth_telegram(
     "/logout",
     response_model=LoginStatusResponse,
     summary="Logout session",
-    description="Clears the recall_session JWT cookie.",
+    description="Clears the atrium_session JWT cookie.",
 )
 async def auth_logout(response: Response):
     """Clear session cookie and log out."""
-    response.delete_cookie("recall_session", httponly=True, secure=True, samesite="lax")
+    response.delete_cookie("atrium_session", httponly=True, secure=True, samesite="lax")
     response.delete_cookie("jwt", httponly=True, secure=True, samesite="lax")
     return {"status": "ok", "message": "Logged out"}
 
@@ -201,7 +201,7 @@ async def auth_me(
     if google_last_sync and google_last_sync.tzinfo is None:
         from datetime import timezone
         google_last_sync = google_last_sync.replace(tzinfo=timezone.utc)
-    token = request.cookies.get("jwt") or request.cookies.get("recall_session")
+    token = request.cookies.get("jwt") or request.cookies.get("atrium_session")
     return {
         "status": "ok",
         "id": user.id,
@@ -379,13 +379,13 @@ async def auth_google_callback(
     is_popup = payload.get("popup", False)
     if is_popup:
         from fastapi.responses import HTMLResponse
-        return HTMLResponse(content="""
+        return HTMLResponse(content=f"""
         <html>
           <body>
             <script>
-              if (window.opener) {
-                window.opener.postMessage("google_connected", "*");
-              }
+              if (window.opener) {{
+                window.opener.postMessage("google_connected", "{settings.WEBSITE_URL}");
+              }}
               window.close();
             </script>
           </body>

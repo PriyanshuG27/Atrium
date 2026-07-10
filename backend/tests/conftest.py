@@ -81,3 +81,37 @@ def reset_ai_cascade_singleton():
     from backend.services.ai_cascade import AICascade
     cascade = AICascade()
     cascade._force_production_llm = False
+
+
+@pytest.fixture(autouse=True)
+def cleanup_test_redis():
+    """
+    Scans for and deletes all keys in the 'test:*' namespace at the end of each test.
+    """
+    yield
+    from backend.services.redis_client import redis
+    from unittest.mock import Mock
+    
+    # Only run actual Redis cleanup if we have an initialized client and are not mocked
+    if hasattr(redis, "_client") and redis._client is not None and not isinstance(redis._request, Mock):
+        try:
+            import asyncio
+            async def run_cleanup():
+                keys_data = await redis._request("", ["KEYS", "test:*"])
+                keys = keys_data.get("result", []) if isinstance(keys_data, dict) else []
+                if keys:
+                    for key in keys:
+                        await redis.delete(key)
+            
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop and loop.is_running():
+                loop.create_task(run_cleanup())
+            else:
+                asyncio.run(run_cleanup())
+        except Exception as e:
+            import sys
+            print(f"Warning: Failed to cleanup test Redis keys: {e}", file=sys.stderr)

@@ -50,7 +50,7 @@ export default function ConnectDriveCard() {
 
     const popup = window.open(
       "/auth/google",
-      "recall-drive-auth",
+      "atrium-drive-auth",
       `width=${width},height=${height},top=${top},left=${left},scrollbars=yes`
     );
     

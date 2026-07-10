@@ -106,7 +106,7 @@ def test_rag_skipped_on_no_sources(client, override_db):
     with mock.patch("backend.services.search_service.hybrid_search", return_value=mock_results) as mock_search, \
          mock.patch("backend.services.ai_cascade.AICascade.answer_question") as mock_answer_question:
          
-         response = client.post("/api/search", json={"query": "fastapi"}, cookies={"recall_session": token})
+         response = client.post("/api/search", json={"query": "fastapi"}, cookies={"atrium_session": token})
          assert response.status_code == 200
          
          data = response.json()
@@ -130,7 +130,7 @@ def test_rag_generated_on_at_least_3_sources(client, override_db):
     token = get_auth_token()
     
     with mock.patch("backend.services.search_service.hybrid_search", return_value=mock_results) as mock_search:
-        response = client.post("/api/search", json={"query": "python"}, cookies={"recall_session": token})
+        response = client.post("/api/search", json={"query": "python"}, cookies={"atrium_session": token})
         assert response.status_code == 200
         
         data = response.json()
@@ -155,7 +155,7 @@ def test_rag_failure_returns_sources_without_answer(client, override_db):
     with mock.patch("backend.services.search_service.hybrid_search", return_value=mock_results), \
          mock.patch("backend.services.ai_cascade.AICascade.answer_question", side_effect=Exception("LLM Timeout")):
          
-        response = client.post("/api/search", json={"query": "ai"}, cookies={"recall_session": token})
+        response = client.post("/api/search", json={"query": "ai"}, cookies={"atrium_session": token})
         assert response.status_code == 200
         
         data = response.json()

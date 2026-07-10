@@ -292,8 +292,8 @@ async def test_mask_pii():
     from backend.services.ai_cascade import mask_pii
     text = "Contact me at user@example.com or +1 (555) 555-1234 or 1234567890."
     masked = mask_pii(text)
-    assert "[MASKED_EMAIL]" in masked
-    assert "[MASKED_PHONE]" in masked
+    assert "[EMAIL_MASKED]" in masked
+    assert "[PHONE_MASKED]" in masked
     assert "user@example.com" not in masked
     assert "555-1234" not in masked
     assert "1234567890" not in masked

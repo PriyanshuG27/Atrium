@@ -19,13 +19,13 @@ function getAudioContext() {
 const AudioEngine = {
   // Sound defaults to muted to align with browser autoplay policy
   isMuted() {
-    const val = localStorage.getItem('recall_muted');
+    const val = localStorage.getItem('atrium_muted');
     return val === null ? true : val === 'true';
   },
 
   setMuted(muted) {
-    localStorage.setItem('recall_muted', muted ? 'true' : 'false');
-    window.dispatchEvent(new CustomEvent('recall-mute-toggle', { detail: muted }));
+    localStorage.setItem('atrium_muted', muted ? 'true' : 'false');
+    window.dispatchEvent(new CustomEvent('atrium-mute-toggle', { detail: muted }));
     // Resume audio context if unmuting
     if (!muted) {
       try {

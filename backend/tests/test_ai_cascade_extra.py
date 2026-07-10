@@ -7,7 +7,7 @@ def test_mask_pii():
 
     text = "Contact user at john.doe@example.com or call +1 555 123 4567."
     masked = mask_pii(text)
-    assert "[MASKED_EMAIL]" in masked
+    assert "[EMAIL_MASKED]" in masked
     assert "john.doe@example.com" not in masked
 
 def test_check_prompt_injection():

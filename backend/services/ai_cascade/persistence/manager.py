@@ -11,6 +11,7 @@ class PersistenceManager:
     def __init__(self):
         # Local record log for Phase 1 verification
         self.persisted_records = []
+        self.persistence_background_tasks = set()
 
     def save_result(
         self,
@@ -53,8 +54,13 @@ class PersistenceManager:
         # Async PostgreSQL Write and Event Publishing
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(self._async_db_write(result, user_id, execution_context))
-            loop.create_task(self._publish_domain_events(result, user_id, execution_context))
+            t1 = loop.create_task(self._async_db_write(result, user_id, execution_context))
+            self.persistence_background_tasks.add(t1)
+            t1.add_done_callback(self.persistence_background_tasks.discard)
+
+            t2 = loop.create_task(self._publish_domain_events(result, user_id, execution_context))
+            self.persistence_background_tasks.add(t2)
+            t2.add_done_callback(self.persistence_background_tasks.discard)
         except RuntimeError:
             pass
 

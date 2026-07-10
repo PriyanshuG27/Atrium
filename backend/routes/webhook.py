@@ -99,7 +99,11 @@ def detect_content_type(message: dict) -> Tuple[str, Optional[str], Optional[str
 # ---------------------------------------------------------------------------
 # Global HTTP Client Session for Connection Pooling
 # ---------------------------------------------------------------------------
-http_client = httpx.AsyncClient(timeout=15.0)
+from backend.services.http_client import get_http_client
+class _HttpProxy:
+    def __getattr__(self, name):
+        return getattr(get_http_client(), name)
+http_client = _HttpProxy()
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +260,7 @@ async def telegram_webhook(
                 data.startswith("onboarding_drive_disconnect:") or
                 data.startswith("onboarding_skip:") or
                 data.startswith("onboarding_opt:") or
+                data.startswith("onboarding_tz_set:") or
                 data.startswith("candidate_confirm:") or
                 data.startswith("candidate_drift:")
             )
@@ -270,48 +275,28 @@ async def telegram_webhook(
             
             if data.startswith("candidate_confirm:"):
                 cand_id = int(data.split(":")[1])
-                async with db.cursor() as cur:
-                    await cur.execute(
-                        "UPDATE insight_candidates SET status = 'confirmed', expires_at = NULL WHERE id = %s AND user_id = %s;",
-                        (cand_id, user_id)
-                    )
-                    await db.commit()
-                await redis.zrem("reminders:active", f"drift:{cand_id}")
-                
                 orig_text = callback_query.get("message", {}).get("text", "")
-                clean_text = orig_text.split("💡")[0].strip()
-                confirm_msg = f"{clean_text}\n\n🔗 *Connection saved permanently to your Mind Map!* ✓"
-                
-                url_edit = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/editMessageText"
-                await http_client.post(url_edit, json={
-                    "chat_id": chat_id,
-                    "message_id": callback_query.get("message", {}).get("message_id"),
-                    "text": confirm_msg,
-                    "parse_mode": "Markdown"
-                })
+                background_tasks.add_task(
+                    process_candidate_confirm_background,
+                    cand_id,
+                    user_id,
+                    chat_id,
+                    callback_query.get("message", {}).get("message_id"),
+                    orig_text
+                )
                 return {"status": "ok"}
                 
             elif data.startswith("candidate_drift:"):
                 cand_id = int(data.split(":")[1])
-                async with db.cursor() as cur:
-                    await cur.execute(
-                        "UPDATE insight_candidates SET status = 'expired' WHERE id = %s AND user_id = %s;",
-                        (cand_id, user_id)
-                    )
-                    await db.commit()
-                await redis.zrem("reminders:active", f"drift:{cand_id}")
-                
                 orig_text = callback_query.get("message", {}).get("text", "")
-                clean_text = orig_text.split("💡")[0].strip()
-                drift_msg = f"{clean_text}\n\n💨 *Connection dissolved (let it drift).* ✓"
-                
-                url_edit = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/editMessageText"
-                await http_client.post(url_edit, json={
-                    "chat_id": chat_id,
-                    "message_id": callback_query.get("message", {}).get("message_id"),
-                    "text": drift_msg,
-                    "parse_mode": "Markdown"
-                })
+                background_tasks.add_task(
+                    process_candidate_drift_background,
+                    cand_id,
+                    user_id,
+                    chat_id,
+                    callback_query.get("message", {}).get("message_id"),
+                    orig_text
+                )
                 return {"status": "ok"}
 
             if data == "quiz:next":
@@ -478,35 +463,14 @@ async def telegram_webhook(
                     except ValueError:
                         offset_minutes = 0
                         
-                    async with db.cursor() as cur:
-                        await cur.execute(
-                            "UPDATE users SET timezone_offset = %s WHERE id = %s;",
-                            (offset_minutes, user_id)
-                        )
-                        await db.commit()
-                        
-                    url_ans = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
-                    try:
-                        await http_client.post(url_ans, json={"callback_query_id": callback_query_id, "text": "Timezone updated! ⏰"})
-                    except Exception as ans_err:
-                        logger.error("Failed to answer callback query: %s", ans_err)
-                    
-                    sign = "+" if offset_minutes >= 0 else "-"
-                    hours = abs(offset_minutes) // 60
-                    mins = abs(offset_minutes) % 60
-                    tz_str = f"GMT{sign}{hours:02d}:{mins:02d}"
-                    status_banner = f"✅ *Timezone configured successfully to {tz_str}!*"
-                    
-                    settings_msg, markup = await get_onboarding_settings_payload(chat_id, user_id, status_banner)
-                    url_edit = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/editMessageText"
-                    payload_edit = {
-                        "chat_id": chat_id,
-                        "message_id": callback_query["message"]["message_id"],
-                        "text": settings_msg,
-                        "parse_mode": "Markdown",
-                        "reply_markup": markup
-                    }
-                    background_tasks.add_task(http_client.post, url_edit, json=payload_edit)
+                    background_tasks.add_task(
+                        process_timezone_set_background,
+                        offset_minutes,
+                        user_id,
+                        chat_id,
+                        callback_query["message"]["message_id"],
+                        base_url
+                    )
                 return {"status": "ok", "detail": "timezone_set_processed"}
 
             elif data == "onboarding_tz_custom":
@@ -563,45 +527,13 @@ async def telegram_webhook(
             elif data.startswith("onboarding_drive_disconnect:"):
                 parts = data.split(":", 1)
                 cb_base_url = parts[1] if len(parts) > 1 else ""
-                async with db.cursor() as cur:
-                    await cur.execute(
-                        "SELECT google_refresh_token FROM users WHERE id = %s;",
-                        (user_id,)
-                    )
-                    row = await cur.fetchone()
-                    google_refresh_token = row[0] if row else None
-
-                if google_refresh_token:
-                    from backend.services.encryption import decrypt
-                    try:
-                        decrypted_token = decrypt(google_refresh_token)
-                    except Exception:
-                        decrypted_token = None
-
-                    if decrypted_token:
-                        try:
-                            url_revoke = f"https://oauth2.googleapis.com/revoke?token={decrypted_token}"
-                            background_tasks.add_task(http_client.post, url_revoke)
-                        except Exception as e:
-                            logger.error("Google token revoke failed: %s", e)
-
-                    async with db.cursor() as cur:
-                        await cur.execute(
-                            "UPDATE users SET google_refresh_token = NULL, google_last_sync = NULL WHERE id = %s;",
-                            (user_id,)
-                        )
-                        await db.commit()
-
-                settings_msg, markup = await get_onboarding_settings_payload(chat_id, user_id, "🔌 *Google Drive disconnected successfully.*", cb_base_url)
-                url_edit = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/editMessageText"
-                payload_edit = {
-                    "chat_id": chat_id,
-                    "message_id": callback_query["message"]["message_id"],
-                    "text": settings_msg,
-                    "parse_mode": "Markdown",
-                    "reply_markup": markup
-                }
-                background_tasks.add_task(http_client.post, url_edit, json=payload_edit)
+                background_tasks.add_task(
+                    process_drive_disconnect_background,
+                    user_id,
+                    chat_id,
+                    callback_query["message"]["message_id"],
+                    cb_base_url
+                )
                 return {"status": "ok", "detail": "drive_disconnected"}
                 
             elif data.startswith("onboarding_opt:"):
@@ -625,12 +557,12 @@ async def telegram_webhook(
                         elif choice == "done":
                             note_text = "Already done its job"
                             
-                        async with db.cursor() as cur:
-                            await cur.execute(
-                                "UPDATE items SET context_note = %s WHERE id = %s AND user_id = %s;",
-                                (note_text, item_id, user_id)
-                            )
-                            await db.commit()
+                        background_tasks.add_task(
+                            process_onboarding_opt_background,
+                            note_text,
+                            item_id,
+                            user_id
+                        )
                             
                         url_ans = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
                         background_tasks.add_task(http_client.post, url_ans, json={"callback_query_id": callback_query_id, "text": "Preference saved! ✓"})
@@ -701,7 +633,11 @@ async def telegram_webhook(
                             "callback_query_id": callback_query_id,
                             "text": "Correct! 🎉" if is_correct else "Incorrect. ❌"
                         }
-                        await http_client.post(url_ans, json=payload_ans)
+                        background_tasks.add_task(
+                            http_client.post,
+                            url_ans,
+                            json=payload_ans
+                        )
                         
                         background_tasks.add_task(
                             process_quiz_answer_db_and_ui,
@@ -715,8 +651,7 @@ async def telegram_webhook(
                             correct_index,
                             explanation,
                             options,
-                            callback_query["message"]["message_id"],
-                            db
+                            callback_query["message"]["message_id"]
                         )
                         logger.info("Processed callback_query answer instantly, background task queued for quiz %d, user %d", quiz_id, user_id)
 
@@ -1566,6 +1501,9 @@ async def telegram_webhook(
                 return {"status": "ok", "detail": "onboarding_input_too_short"}
                 
             # Queue onboarding task
+            import uuid
+            import structlog
+            correlation_id = structlog.contextvars.get_contextvars().get("correlation_id") or str(uuid.uuid4())
             task = {
                 "update_id": update_id_str,
                 "chat_id": chat_id,
@@ -1573,9 +1511,10 @@ async def telegram_webhook(
                 "text": text_content,
                 "is_onboarding": True,
                 "onboarding_step": step,
-                "message_id": message.get("message_id")
+                "message_id": message.get("message_id"),
+                "correlation_id": correlation_id
             }
-            background_tasks.add_task(redis.lpush, "recall:tasks", json.dumps(task))
+            background_tasks.add_task(redis.lpush, "atrium:tasks", json.dumps(task))
             
             ack_msg = "Got it! Summarizing and adding to your graph..."
             background_tasks.add_task(send_telegram_ack, chat_id, ack_msg, None, message.get("message_id"))
@@ -2087,8 +2026,7 @@ async def send_onboarding_settings_card(chat_id: str, user_id: int, status_banne
         "reply_markup": markup
     }
     
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        await client.post(url, json=payload)
+    await http_client.post(url, json=payload)
 
 
 async def background_drive_sync(user_id: int, chat_id: str, base_url: str = ""):
@@ -2105,8 +2043,7 @@ async def background_drive_sync(user_id: int, chat_id: str, base_url: str = ""):
                 "chat_id": chat_id,
                 "text": "✅ *Google Drive backup sync completed successfully!*"
             }
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                await client.post(url, json=payload)
+            await http_client.post(url, json=payload)
                 
             await send_onboarding_settings_card(chat_id, user_id, base_url=base_url)
     except Exception as e:
@@ -2116,8 +2053,7 @@ async def background_drive_sync(user_id: int, chat_id: str, base_url: str = ""):
             "chat_id": chat_id,
             "text": "⚠️ *Google Drive backup sync failed. Please try again later.*"
         }
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            await client.post(url, json=payload)
+        await http_client.post(url, json=payload)
 
 
 async def trigger_first_session_magic(chat_id: str, user_id: int, base_url: str = ""):
@@ -2249,14 +2185,18 @@ async def wait_and_process_batch(chat_id: str, user_id: int, expected_time: str)
 
     items = [json.loads(x) for x in raw_items]
     
+    import uuid
+    import structlog
+    correlation_id = structlog.contextvars.get_contextvars().get("correlation_id") or str(uuid.uuid4())
     batch_task = {
         "chat_id": chat_id,
         "user_id": user_id,
         "is_batch": True,
-        "items": items
+        "items": items,
+        "correlation_id": correlation_id
     }
     
-    await redis.lpush("recall:tasks", json.dumps(batch_task))
+    await redis.lpush("atrium:tasks", json.dumps(batch_task))
     logger.info("Consolidated batch task of %d items queued for chat_id %s", len(items), chat_id)
 
 
@@ -2357,38 +2297,40 @@ async def process_quiz_answer_db_and_ui(
     correct_index: int,
     explanation: str,
     options: Any,
-    message_id: int,
-    db: psycopg.AsyncConnection
+    message_id: int
 ):
     from backend.services.sm2 import update_sm2
     from datetime import date, timedelta
     import httpx
     import json
+    import backend.db.connection as db_conn
     
     quality = 5 if is_correct else 2
     new_ef, new_interval = update_sm2(ease_factor, interval_days, quality)
     new_next_review = date.today() + timedelta(days=new_interval)
     
     try:
-        async with db.cursor() as cur:
-            await cur.execute(
-                """
-                UPDATE quizzes
-                SET ease_factor = %s,
-                    interval_days = %s,
-                    next_review = %s
-                WHERE id = %s;
-                """,
-                (new_ef, new_interval, new_next_review, quiz_id)
-            )
-            await cur.execute(
-                """
-                INSERT INTO quiz_answers (user_id, quiz_id, quality)
-                VALUES (%s, %s, %s);
-                """,
-                (user_id, quiz_id, quality)
-            )
-            await db.commit()
+        conn_ctx = await db_conn.get_background_db_connection()
+        async with conn_ctx as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    UPDATE quizzes
+                    SET ease_factor = %s,
+                        interval_days = %s,
+                        next_review = %s
+                    WHERE id = %s;
+                    """,
+                    (new_ef, new_interval, new_next_review, quiz_id)
+                )
+                await cur.execute(
+                    """
+                    INSERT INTO quiz_answers (user_id, quiz_id, quality)
+                    VALUES (%s, %s, %s);
+                    """,
+                    (user_id, quiz_id, quality)
+                )
+                await conn.commit()
                     
         if isinstance(options, str):
             opts = json.loads(options)
@@ -2419,6 +2361,156 @@ async def process_quiz_answer_db_and_ui(
             
     except Exception as e:
         logger.error("Failed to save quiz answer for quiz_id %d in background: %s", quiz_id, e)
+
+
+async def process_candidate_confirm_background(cand_id: int, user_id: int, chat_id: str, message_id: int, orig_text: str):
+    import backend.db.connection as db_conn
+    try:
+        conn_ctx = await db_conn.get_background_db_connection()
+        async with conn_ctx as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "UPDATE insight_candidates SET status = 'confirmed', expires_at = NULL WHERE id = %s AND user_id = %s;",
+                    (cand_id, user_id)
+                )
+                await conn.commit()
+        await redis.zrem("reminders:active", f"drift:{cand_id}")
+        
+        clean_text = orig_text.split("💡")[0].strip()
+        confirm_msg = f"{clean_text}\n\n🔗 *Connection saved permanently to your Mind Map!* ✓"
+        
+        url_edit = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/editMessageText"
+        await http_client.post(url_edit, json={
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": confirm_msg,
+            "parse_mode": "Markdown"
+        })
+    except Exception as e:
+        logger.error("Failed to process candidate confirm in background for candidate %d: %s", cand_id, e)
+
+
+async def process_candidate_drift_background(cand_id: int, user_id: int, chat_id: str, message_id: int, orig_text: str):
+    import backend.db.connection as db_conn
+    try:
+        conn_ctx = await db_conn.get_background_db_connection()
+        async with conn_ctx as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "UPDATE insight_candidates SET status = 'expired' WHERE id = %s AND user_id = %s;",
+                    (cand_id, user_id)
+                )
+                await conn.commit()
+        await redis.zrem("reminders:active", f"drift:{cand_id}")
+        
+        clean_text = orig_text.split("💡")[0].strip()
+        drift_msg = f"{clean_text}\n\n💨 *Connection dissolved (let it drift).* ✓"
+        
+        url_edit = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/editMessageText"
+        await http_client.post(url_edit, json={
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": drift_msg,
+            "parse_mode": "Markdown"
+        })
+    except Exception as e:
+        logger.error("Failed to process candidate drift in background for candidate %d: %s", cand_id, e)
+
+
+async def process_timezone_set_background(offset_minutes: int, user_id: int, chat_id: str, message_id: int, base_url: str):
+    import backend.db.connection as db_conn
+    try:
+        conn_ctx = await db_conn.get_background_db_connection()
+        async with conn_ctx as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "UPDATE users SET timezone_offset = %s WHERE id = %s;",
+                    (offset_minutes, user_id)
+                )
+                await conn.commit()
+                
+        sign = "+" if offset_minutes >= 0 else "-"
+        hours = abs(offset_minutes) // 60
+        mins = abs(offset_minutes) % 60
+        tz_str = f"GMT{sign}{hours:02d}:{mins:02d}"
+        status_banner = f"✅ *Timezone configured successfully to {tz_str}!*"
+        
+        settings_msg, markup = await get_onboarding_settings_payload(chat_id, user_id, status_banner, base_url)
+        url_edit = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/editMessageText"
+        payload_edit = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": settings_msg,
+            "parse_mode": "Markdown",
+            "reply_markup": markup
+        }
+        await http_client.post(url_edit, json=payload_edit)
+    except Exception as e:
+        logger.error("Failed to process timezone set in background for user %d: %s", user_id, e)
+
+
+async def process_drive_disconnect_background(user_id: int, chat_id: str, message_id: int, cb_base_url: str):
+    import backend.db.connection as db_conn
+    try:
+        google_refresh_token = None
+        conn_ctx = await db_conn.get_background_db_connection()
+        async with conn_ctx as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT google_refresh_token FROM users WHERE id = %s;",
+                    (user_id,)
+                )
+                row = await cur.fetchone()
+                google_refresh_token = row[0] if row else None
+
+            if google_refresh_token:
+                from backend.services.encryption import decrypt
+                try:
+                    decrypted_token = decrypt(google_refresh_token)
+                except Exception:
+                    decrypted_token = None
+
+                if decrypted_token:
+                    try:
+                        url_revoke = f"https://oauth2.googleapis.com/revoke?token={decrypted_token}"
+                        await http_client.post(url_revoke)
+                    except Exception as e:
+                        logger.error("Google token revoke failed: %s", e)
+
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        "UPDATE users SET google_refresh_token = NULL, google_last_sync = NULL WHERE id = %s;",
+                        (user_id,)
+                    )
+                    await conn.commit()
+
+        settings_msg, markup = await get_onboarding_settings_payload(chat_id, user_id, "🔌 *Google Drive disconnected successfully.*", cb_base_url)
+        url_edit = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/editMessageText"
+        payload_edit = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": settings_msg,
+            "parse_mode": "Markdown",
+            "reply_markup": markup
+        }
+        await http_client.post(url_edit, json=payload_edit)
+    except Exception as e:
+        logger.error("Failed to process drive disconnect in background for user %d: %s", user_id, e)
+
+
+async def process_onboarding_opt_background(note_text: str, item_id: int, user_id: int):
+    import backend.db.connection as db_conn
+    try:
+        conn_ctx = await db_conn.get_background_db_connection()
+        async with conn_ctx as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "UPDATE items SET context_note = %s WHERE id = %s AND user_id = %s;",
+                    (note_text, item_id, user_id)
+                )
+                await conn.commit()
+    except Exception as e:
+        logger.error("Failed to process onboarding option save in background for user %d: %s", user_id, e)
 
 
 

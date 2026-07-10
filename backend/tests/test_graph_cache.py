@@ -146,7 +146,7 @@ async def test_graph_caching_hit_miss(client, override_db):
          mock.patch("backend.services.redis_client.redis.delete", side_effect=mock_delete):
          
         # --- First call (Cache Miss) ---
-        response1 = client.get("/api/graph", cookies={"recall_session": token})
+        response1 = client.get("/api/graph", cookies={"atrium_session": token})
         assert response1.status_code == 200
         data1 = response1.json()
         assert len(data1["nodes"]) == 2
@@ -162,7 +162,7 @@ async def test_graph_caching_hit_miss(client, override_db):
         current_cursor.item_rows = []
         current_cursor.edge_rows = []
         
-        response2 = client.get("/api/graph", cookies={"recall_session": token})
+        response2 = client.get("/api/graph", cookies={"atrium_session": token})
         assert response2.status_code == 200
         data2 = response2.json()
         # Verify it still returns the cached data (2 nodes, 1 edge) rather than empty DB
@@ -176,7 +176,7 @@ async def test_graph_caching_hit_miss(client, override_db):
         with mock.patch("backend.services.ai_cascade.AICascade.summarise", return_value={"summary": "Neon sum", "tags": []}), \
              mock.patch("backend.services.search_service.embed_text", return_value=[0.1]*384):
              
-            response_create = client.post("/api/items", json=create_payload, cookies={"recall_session": token})
+            response_create = client.post("/api/items", json=create_payload, cookies={"atrium_session": token})
             assert response_create.status_code == 201
             
             # Cache must be invalidated (removed from mock_redis_store)
@@ -204,7 +204,7 @@ def test_graph_edge_deduplication(client, override_db):
     with mock.patch("backend.services.redis_client.redis.get", return_value=None), \
          mock.patch("backend.services.redis_client.redis.setex", return_value=True):
          
-        response = client.get("/api/graph", cookies={"recall_session": token})
+        response = client.get("/api/graph", cookies={"atrium_session": token})
         assert response.status_code == 200
         data = response.json()
         
@@ -241,7 +241,7 @@ def test_graph_performance_target_500_nodes(client, override_db):
          mock.patch("backend.services.redis_client.redis.setex", return_value=True):
          
         start_time = time.perf_counter()
-        response = client.get("/api/graph", cookies={"recall_session": token})
+        response = client.get("/api/graph", cookies={"atrium_session": token})
         end_time = time.perf_counter()
         
         assert response.status_code == 200

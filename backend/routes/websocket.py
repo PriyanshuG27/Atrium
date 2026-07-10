@@ -74,7 +74,7 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = None):
     # Try getting token from cookies if not in path
     jwt_token = token
     if not jwt_token:
-        jwt_token = websocket.cookies.get("recall_session") or websocket.cookies.get("jwt")
+        jwt_token = websocket.cookies.get("atrium_session") or websocket.cookies.get("jwt")
     
     if not jwt_token:
         await websocket.close(code=4001)

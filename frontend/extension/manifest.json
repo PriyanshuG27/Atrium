@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Recall",
+  "name": "Atrium",
   "version": "1.0.0",
-  "description": "Save the current page to Recall",
+  "description": "Save the current page to Atrium",
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
@@ -36,7 +36,7 @@
         "default": "Ctrl+Shift+S",
         "mac": "Alt+Shift+S"
       },
-      "description": "Save current page to Recall"
+      "description": "Save current page to Atrium"
     }
   },
   "content_security_policy": {

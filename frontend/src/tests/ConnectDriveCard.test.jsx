@@ -73,7 +73,7 @@ describe('ConnectDriveCard Component', () => {
     const connectBtn = screen.getByRole('button', { name: /Connect Google Drive/i });
     fireEvent.click(connectBtn);
 
-    expect(openSpy).toHaveBeenCalledWith('/auth/google', 'recall-drive-auth', expect.any(String));
+    expect(openSpy).toHaveBeenCalledWith('/auth/google', 'atrium-drive-auth', expect.any(String));
   });
 
   it('handles sync and disconnect error branches in connected state', async () => {

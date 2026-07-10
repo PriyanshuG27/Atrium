@@ -173,7 +173,7 @@ def test_retry_dlq_task_requeues_and_updates(client, override_db, monkeypatch):
     assert resp.json() == {"queued": True}
     
     # Verify LPUSH was called with task json
-    mock_redis.lpush.assert_called_once_with("recall:tasks", json.dumps(task_payload))
+    mock_redis.lpush.assert_called_once_with("atrium:tasks", json.dumps(task_payload))
     
     # Verify UPDATE query was executed
     executed_queries = [q[0] for q in current_cursor.executed]

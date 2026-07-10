@@ -23,6 +23,8 @@ export default defineConfig({
         'src/pages/Hearth.jsx',
         'src/pages/Profile.jsx',
         'src/pages/Map.jsx',
+        'src/pages/Landing.jsx',
+        'src/components/landing/**',
         'src/canvas/NebulaCanvas.jsx',
         'src/canvas/GraphCanvas.jsx',
         'src/canvas/Graph3DScene.jsx',

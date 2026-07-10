@@ -64,7 +64,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (chrome.runtime.lastError) {
         showError("Communication failed.");
         btnSave.disabled = false;
-        btnSave.textContent = "Save to Recall";
+        btnSave.textContent = "Save to Atrium";
         return;
       }
 
@@ -82,7 +82,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         const errMsg = (response && response.error) || "Failed to save.";
         showError(errMsg);
         btnSave.disabled = false;
-        btnSave.textContent = "Save to Recall";
+        btnSave.textContent = "Save to Atrium";
       }
     });
   });
@@ -173,7 +173,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         tabTitleEl.textContent = currentTab.title || "Untitled Link";
         tabUrlEl.textContent = currentTab.url || "";
         
-        // Check if page is already saved in Recall
+        // Check if page is already saved in Atrium
         chrome.runtime.sendMessage({ type: "CHECK_CURRENT_TAB" }, (response) => {
           if (response && response.exists) {
             btnSave.textContent = "Saved ✓";

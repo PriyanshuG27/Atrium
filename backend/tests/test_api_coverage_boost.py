@@ -101,7 +101,7 @@ def client(mock_db):
 
 def get_auth_cookie():
     payload = {"sub": "42", "chat_id": "123456"}
-    return {"recall_session": generate_jwt(payload, settings.JWT_SECRET)}
+    return {"atrium_session": generate_jwt(payload, settings.JWT_SECRET)}
 
 def test_api_me_endpoint(client):
     with mock.patch("backend.services.user_service.get_and_update_user_streak", new_callable=mock.AsyncMock, return_value=5):

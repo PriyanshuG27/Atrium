@@ -20,7 +20,7 @@ from typing import Optional, Dict, Any, List, Union
 
 from backend.config import settings
 from backend.exceptions import DuplicateItemException
-from backend.db.connection import _pool
+import backend.db.connection as db_conn
 from backend.services.user_service import upsert_user
 from backend.services.redis_client import redis
 from backend.services.dlq import write_to_dlq, send_failure_message
@@ -411,7 +411,7 @@ async def save_minimal_bookmark(user_id: int, source_type: str, file_id: Optiona
 async def check_user_milestones(user_id: int, chat_id: str) -> None:
     """Checks the user's total node count and processes milestone unlocks and alerts."""
     try:
-        async with _pool.connection() as conn:
+        async with db_conn._pool.connection() as conn:
             async with conn.cursor() as cur:
                 # 1. Fetch total node count
                 await cur.execute("SELECT COUNT(*) FROM items WHERE user_id = %s;", (user_id,))
@@ -469,7 +469,7 @@ async def check_user_milestones(user_id: int, chat_id: str) -> None:
                                     continue
                                     
                                 from backend.scheduler.scheduler import run_nightly_mind_type_for_user
-                                await run_nightly_mind_type_for_user(user_id, _pool)
+                                await run_nightly_mind_type_for_user(user_id, db_conn._pool)
                                 
                                 await cur.execute("SELECT mind_type FROM users WHERE id = %s;", (user_id,))
                                 mt_row = await cur.fetchone()
@@ -516,123 +516,130 @@ async def check_user_milestones(user_id: int, chat_id: str) -> None:
                                     await send_telegram_message(chat_id, trajectory_alert)
                                     logger.info("Generated initial Mind Type profile for user %d", user_id)
                             except Exception as init_err:
-                                logger.error("Failed to generate initial Mind Type profile: %s", init_err)
+                                logger.error(
+                                    "mind_type_profile_generation_failed",
+                                    user_id=user_id,
+                                    error=str(init_err),
+                                    exc_info=True
+                                )
     except Exception as milestone_err:
-        logger.error("Failed to run check_user_milestones for user %d: %s", user_id, milestone_err)
+        logger.error(
+            "milestone_check_failed",
+            user_id=user_id,
+            error=str(milestone_err),
+            exc_info=True
+        )
 
 
-async def process_task(task: Dict[str, Any], task_json: Optional[str] = None) -> None:
-    """Processes a single task context inside the concurrency semaphore."""
-    global worker_semaphore
-    if worker_semaphore is None:
-        worker_semaphore = asyncio.Semaphore(3)
+async def process_task(task: Dict[str, Any], task_json: Optional[str] = None, semaphore: Optional[asyncio.Semaphore] = None) -> None:
+    """Processes a single task context. Semaphore slot is assumed to be acquired by caller if passed."""
+    from structlog.contextvars import bind_contextvars, clear_contextvars
+    chat_id = str(task.get("chat_id"))
+    correlation_id = task.get("correlation_id") or str(uuid.uuid4())
+    
+    clear_contextvars()
+    bind_contextvars(correlation_id=correlation_id, chat_id=chat_id)
+    
+    try:
+        update_id = task.get("update_id")
+        content_type = task.get("content_type")
+        file_id = task.get("file_id")
+        text_content = task.get("text")
         
-    async with worker_semaphore:
-        from structlog.contextvars import bind_contextvars, clear_contextvars
-        chat_id = str(task.get("chat_id"))
-        correlation_id = task.get("correlation_id") or str(uuid.uuid4())
+        logger.info("Processing task: update_id=%s, type=%s", update_id, content_type)
         
-        clear_contextvars()
-        bind_contextvars(correlation_id=correlation_id, chat_id=chat_id)
+        # Verify pool is open
+        if db_conn._pool is None:
+            logger.error("Database connection pool is not initialized.")
+            return
+            
+        user_id = None
         
         try:
-            update_id = task.get("update_id")
-            content_type = task.get("content_type")
-            file_id = task.get("file_id")
-            text_content = task.get("text")
+            # 1. Resolve user_id in a short, dedicated connection checkout
+            async with db_conn._pool.connection() as conn:
+                await conn.execute("SET statement_timeout = '30s'")
+                user_id = await upsert_user(chat_id, conn)
+                await conn.commit()
             
-            logger.info("Processing task: update_id=%s, type=%s", update_id, content_type)
-            
-            # Verify pool is open
-            if _pool is None:
-                logger.error("Database connection pool is not initialized.")
-                return
-                
-            user_id = None
-            
-            try:
-                # 1. Resolve user_id in a short, dedicated connection checkout
-                async with _pool.connection() as conn:
-                    await conn.execute("SET statement_timeout = '30s'")
-                    user_id = await upsert_user(chat_id, conn)
-                    await conn.commit()
-                
-                bind_contextvars(correlation_id=correlation_id, chat_id=chat_id, user_id=user_id)
+            bind_contextvars(correlation_id=correlation_id, chat_id=chat_id, user_id=user_id)
 
-                # Check for previous ignore once before starting steady-state ingestion
-                prev_pending = await redis.get(f"pending_context:{chat_id}")
-                if prev_pending and isinstance(prev_pending, (str, bytes)):
-                    await redis.delete(f"pending_context:{chat_id}")
-                    await redis.delete(f"pending_context_variant:{chat_id}")
+            # Check for previous ignore once before starting steady-state ingestion
+            prev_pending = await redis.get(f"pending_context:{chat_id}")
+            if prev_pending and isinstance(prev_pending, (str, bytes)):
+                await redis.delete(f"pending_context:{chat_id}")
+                await redis.delete(f"pending_context_variant:{chat_id}")
+                
+                ignore_count_resp = await redis._request("", ["INCR", f"context_prompt:ignore_count:{chat_id}"])
+                ignore_count = 0
+                if isinstance(ignore_count_resp, dict) and "result" in ignore_count_resp:
+                    ignore_count = int(ignore_count_resp["result"] or 0)
+                elif isinstance(ignore_count_resp, (int, str)):
+                    ignore_count = int(ignore_count_resp)
                     
-                    ignore_count_resp = await redis._request("", ["INCR", f"context_prompt:ignore_count:{chat_id}"])
-                    ignore_count = 0
-                    if isinstance(ignore_count_resp, dict) and "result" in ignore_count_resp:
-                        ignore_count = int(ignore_count_resp["result"] or 0)
-                    elif isinstance(ignore_count_resp, (int, str)):
-                        ignore_count = int(ignore_count_resp)
-                        
-                    if ignore_count >= 3:
-                        await redis.setex(f"context_prompt:pause_saves:{chat_id}", 86400, "5")
-                        await redis.delete(f"context_prompt:ignore_count:{chat_id}")
-                        logger.info("User %d ignored context prompt 3 consecutive times. Paused for 5 saves.", user_id)
+                if ignore_count >= 3:
+                    await redis.setex(f"context_prompt:pause_saves:{chat_id}", 86400, "5")
+                    await redis.delete(f"context_prompt:ignore_count:{chat_id}")
+                    logger.info("User %d ignored context prompt 3 consecutive times. Paused for 5 saves.", user_id)
 
-                # 2. Onboarding flow routing
-                is_new = False
-                if task.get("is_onboarding"):
-                    await process_onboarding_task(task, user_id, chat_id)
-                    is_new = True
-                # 3. Batch flow routing
-                elif task.get("is_batch"):
-                    is_new = await process_batch_task(task, user_id, chat_id)
+            # 2. Onboarding flow routing
+            is_new = False
+            if task.get("is_onboarding"):
+                await process_onboarding_task(task, user_id, chat_id)
+                is_new = True
+            # 3. Batch flow routing
+            elif task.get("is_batch"):
+                is_new = await process_batch_task(task, user_id, chat_id)
+            else:
+                # 4. Standard single-item processing routing
+                res = await process_single_item(task, user_id, chat_id, is_batch_item=False)
+                if isinstance(res, tuple):
+                    _, is_new = res
                 else:
-                    # 4. Standard single-item processing routing
-                    res = await process_single_item(task, user_id, chat_id, is_batch_item=False)
-                    if isinstance(res, tuple):
-                        _, is_new = res
-                    else:
-                        is_new = (res is not None)
+                    is_new = (res is not None)
 
-                # Run milestone checks after successful item processing
-                if is_new:
-                    await check_user_milestones(user_id, chat_id)
+            # Run milestone checks after successful item processing
+            if is_new:
+                await check_user_milestones(user_id, chat_id)
 
-            except Exception as exc:
-                logger.exception("Task worker encountered exception processing update_id=%s:", update_id)
-                error_message = str(exc)
-                
-                # Fallback flow using a fresh connection checkout
-                if user_id:
-                    try:
-                        task_payload = {
-                            "chat_id": chat_id,
-                            "content_type": content_type or "unknown",
-                            "file_id": file_id,
-                            "update_id": update_id or "unknown",
-                            "attempted_tiers": [0],
-                            "last_error": error_message
-                        }
-                        # Checkout a clean connection to guarantee write success even if primary timed out
-                        async with _pool.connection() as fallback_conn:
-                            await fallback_conn.execute("SET statement_timeout = '30s'")
-                            await write_to_dlq(user_id, task_payload, error_message, fallback_conn)
-                            await save_minimal_bookmark(user_id, content_type or "unknown", file_id, text_content, fallback_conn)
-                            try:
-                                from backend.services.streak_service import update_streak
-                                await update_streak(user_id, fallback_conn)
-                            except Exception as streak_err:
-                                logger.error("Failed to update fallback user streak: %s", streak_err)
-                            await fallback_conn.commit()
-                            
-                        await send_failure_message(chat_id, content_type or "unknown")
-                    except Exception as dlq_err:
-                        logger.error("Failed to complete fallback DLQ/bookmark flow: %s", dlq_err)
-        finally:
-            if task_json:
+        except Exception as exc:
+            logger.exception("Task worker encountered exception processing update_id=%s:", update_id)
+            error_message = str(exc)
+            
+            # Fallback flow using a fresh connection checkout
+            if user_id:
                 try:
-                    await redis.lrem("recall:processing", 1, task_json)
-                except Exception as clean_err:
-                    logger.error("Failed to clean task from processing queue: %s", clean_err)
+                    task_payload = {
+                        "chat_id": chat_id,
+                        "content_type": content_type or "unknown",
+                        "file_id": file_id,
+                        "update_id": update_id or "unknown",
+                        "attempted_tiers": [0],
+                        "last_error": error_message
+                    }
+                    # Checkout a clean connection to guarantee write success even if primary timed out
+                    async with db_conn._pool.connection() as fallback_conn:
+                        await fallback_conn.execute("SET statement_timeout = '30s'")
+                        await write_to_dlq(user_id, task_payload, error_message, fallback_conn)
+                        await save_minimal_bookmark(user_id, content_type or "unknown", file_id, text_content, fallback_conn)
+                        try:
+                            from backend.services.streak_service import update_streak
+                            await update_streak(user_id, fallback_conn)
+                        except Exception as streak_err:
+                            logger.error("Failed to update fallback user streak: %s", streak_err)
+                        await fallback_conn.commit()
+                        
+                    await send_failure_message(chat_id, content_type or "unknown")
+                except Exception as dlq_err:
+                    logger.error("Failed to complete fallback DLQ/bookmark flow: %s", dlq_err)
+    finally:
+        if task_json:
+            try:
+                await redis.lrem("atrium:processing", 1, task_json)
+            except Exception as clean_err:
+                logger.error("Failed to clean task from processing queue: %s", clean_err)
+        if semaphore is not None:
+            semaphore.release()
 
 
 async def process_onboarding_task(task: Dict[str, Any], user_id: int, chat_id: str) -> None:
@@ -664,7 +671,7 @@ async def process_onboarding_task(task: Dict[str, Any], user_id: int, chat_id: s
     encrypted_raw_text = encrypt(text_content)
     content_hash = hashlib.sha256(text_content.encode()).hexdigest()[:16]
     
-    async with _pool.connection() as conn:
+    async with db_conn._pool.connection() as conn:
         await conn.execute("SET statement_timeout = '30s'")
         async with conn.cursor() as cur:
             await cur.execute(
@@ -691,7 +698,7 @@ async def process_onboarding_task(task: Dict[str, Any], user_id: int, chat_id: s
         await send_telegram_message(chat_id, bot_reply, reply_to_message_id=task.get("message_id"))
         
         from backend.routes.webhook import advance_onboarding_step
-        async with _pool.connection() as conn:
+        async with db_conn._pool.connection() as conn:
             await advance_onboarding_step(chat_id, user_id, step, conn, None)
 
 
@@ -738,7 +745,7 @@ async def process_batch_task(task: Dict[str, Any], user_id: int, chat_id: str) -
         return False
         
     saved_nodes = []
-    async with _pool.connection() as conn:
+    async with db_conn._pool.connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
                 """
@@ -846,10 +853,10 @@ async def process_batch_task(task: Dict[str, Any], user_id: int, chat_id: str) -
                 if url:
                     urls.append(url)
                 else:
-                    urls.append(f"recall:item:{it['id']}")
+                    urls.append(f"atrium:item:{it['id']}")
             joint_source_url = json.dumps(urls)
             
-            async with _pool.connection() as conn:
+            async with db_conn._pool.connection() as conn:
                 await conn.execute("SET statement_timeout = '30s'")
                 async with conn.cursor() as cur:
                     await cur.execute(
@@ -885,7 +892,7 @@ async def process_batch_task(task: Dict[str, Any], user_id: int, chat_id: str) -
                 })
                 
                 original_ids = [it["id"] for it in group_items]
-                async with _pool.connection() as conn:
+                async with db_conn._pool.connection() as conn:
                     await conn.execute("SET statement_timeout = '30s'")
                     async with conn.cursor() as cur:
                         await cur.execute("DELETE FROM item_chunks WHERE item_id = ANY(%s) AND user_id = %s;", (original_ids, user_id))
@@ -914,7 +921,7 @@ async def process_batch_task(task: Dict[str, Any], user_id: int, chat_id: str) -
                         chunk_excerpt = chunk_text_prefixed[:500]
                         chunk_emb = await embed_text(chunk_text_prefixed)
                         
-                        async with _pool.connection() as conn:
+                        async with db_conn._pool.connection() as conn:
                             await conn.execute("SET statement_timeout = '30s'")
                             async with conn.cursor() as cur:
                                 await cur.execute(
@@ -927,7 +934,7 @@ async def process_batch_task(task: Dict[str, Any], user_id: int, chat_id: str) -
                                 await conn.commit()
                         chunk_idx += 1
                         
-    async with _pool.connection() as streak_conn:
+    async with db_conn._pool.connection() as streak_conn:
         await streak_conn.execute("SET statement_timeout = '30s'")
         from backend.services.streak_service import update_streak
         await update_streak(user_id, streak_conn)
@@ -955,7 +962,7 @@ async def process_batch_task(task: Dict[str, Any], user_id: int, chat_id: str) -
                                 tags = re.findall(r"#([a-zA-Z0-9_-]+)", text_val)
                                 if tags:
                                     normalized_tags = [t.strip().lower() for t in tags]
-                                    async with _pool.connection() as conn:
+                                    async with db_conn._pool.connection() as conn:
                                         await conn.execute("SET statement_timeout = '30s'")
                                         async with conn.cursor() as cur:
                                             await cur.execute("SELECT tags FROM items WHERE id = %s AND user_id = %s;", (save["id"], user_id))
@@ -969,7 +976,7 @@ async def process_batch_task(task: Dict[str, Any], user_id: int, chat_id: str) -
                                             await conn.commit()
                                             save["tags"] = new_tags
                                 else:
-                                    async with _pool.connection() as conn:
+                                    async with db_conn._pool.connection() as conn:
                                         await conn.execute("SET statement_timeout = '30s'")
                                         async with conn.cursor() as cur:
                                             await cur.execute(
@@ -1021,7 +1028,7 @@ async def process_batch_task(task: Dict[str, Any], user_id: int, chat_id: str) -
         priority = {"combined": 5, "url": 4, "youtube": 4, "pdf": 4, "voice": 4, "text": 3, "image": 2}
         primary_save = max(final_saves, key=lambda s: priority.get(s.get("source_type", "image"), 1))
         try:
-            async with _pool.connection() as conn:
+            async with db_conn._pool.connection() as conn:
                 async with conn.cursor() as cur:
                     await cur.execute("SELECT context_prompt FROM items WHERE id = %s AND user_id = %s;", (primary_save["id"], user_id))
                     row = await cur.fetchone()
@@ -1074,7 +1081,7 @@ async def process_single_item(task: Dict[str, Any], user_id: int, chat_id: str, 
             raise ValueError("Text content missing in task")
         
         content_hash = hashlib.sha256(text_content.encode()).hexdigest()[:16]
-        async with _pool.connection() as conn:
+        async with db_conn._pool.connection() as conn:
             await conn.execute("SET statement_timeout = '30s'")
             async with conn.cursor() as cur:
                 await cur.execute("SELECT id, created_at FROM items WHERE user_id=%s AND content_hash=%s LIMIT 1", (user_id, content_hash))
@@ -1100,7 +1107,7 @@ async def process_single_item(task: Dict[str, Any], user_id: int, chat_id: str, 
         encrypted_raw_text = encrypt(text_content)
         title = text_content[:80].strip() or "Text Note"
         
-        async with _pool.connection() as conn:
+        async with db_conn._pool.connection() as conn:
             await conn.execute("SET statement_timeout = '30s'")
             async with conn.cursor() as cur:
                 await cur.execute(
@@ -1125,7 +1132,7 @@ async def process_single_item(task: Dict[str, Any], user_id: int, chat_id: str, 
         if not text_content:
             raise ValueError("URL content missing in task")
         
-        async with _pool.connection() as conn:
+        async with db_conn._pool.connection() as conn:
             await conn.execute("SET statement_timeout = '30s'")
             async with conn.cursor() as cur:
                 await cur.execute("SELECT id, title, created_at FROM items WHERE user_id=%s AND source_url=%s LIMIT 1", (user_id, text_content))
@@ -1141,13 +1148,13 @@ async def process_single_item(task: Dict[str, Any], user_id: int, chat_id: str, 
         is_instagram = "instagram.com" in text_content.lower() or "instagr.am" in text_content.lower()
         if is_youtube:
             from backend.services.youtube_ingester import ingest_youtube
-            item_id = await ingest_youtube(text_content, user_id, _pool, user_context=user_context)
+            item_id = await ingest_youtube(text_content, user_id, db_conn._pool, user_context=user_context)
         elif is_instagram:
             from backend.services.youtube_ingester import ingest_instagram
-            item_id = await ingest_instagram(text_content, user_id, _pool, user_context=user_context)
+            item_id = await ingest_instagram(text_content, user_id, db_conn._pool, user_context=user_context)
         else:
             try:
-                item_id = await ingest_url(text_content, user_id, _pool, user_context=user_context)
+                item_id = await ingest_url(text_content, user_id, db_conn._pool, user_context=user_context)
             except ValueError as e:
                 if "private Google Drive link" in str(e):
                     if not is_batch_item:
@@ -1156,7 +1163,7 @@ async def process_single_item(task: Dict[str, Any], user_id: int, chat_id: str, 
                     return None, False
                 raise
         
-        async with _pool.connection() as conn:
+        async with db_conn._pool.connection() as conn:
             await conn.execute("SET statement_timeout = '30s'")
             async with conn.cursor() as cur:
                 await cur.execute("SELECT title, summary, tags FROM items WHERE id = %s AND user_id = %s;", (item_id, user_id))
@@ -1198,7 +1205,7 @@ async def process_single_item(task: Dict[str, Any], user_id: int, chat_id: str, 
             filename = file_path.split("/")[-1] if "/" in file_path else "document.pdf"
             
             try:
-                item_id = await ingest_pdf(temp_path, user_id, filename, file_id, _pool, user_context=user_context)
+                item_id = await ingest_pdf(temp_path, user_id, filename, file_id, db_conn._pool, user_context=user_context)
             except DuplicateItemException as dup_exc:
                 saved_date = getattr(dup_exc, "saved_date", None)
                 if saved_date and hasattr(saved_date, "strftime"):
@@ -1210,7 +1217,7 @@ async def process_single_item(task: Dict[str, Any], user_id: int, chat_id: str, 
                     await send_telegram_message(chat_id, bot_reply)
                 return getattr(dup_exc, "item_id", None), False
             
-            async with _pool.connection() as conn:
+            async with db_conn._pool.connection() as conn:
                 await conn.execute("SET statement_timeout = '30s'")
                 async with conn.cursor() as cur:
                     await cur.execute("SELECT summary, tags FROM items WHERE id = %s AND user_id = %s;", (item_id, user_id))
@@ -1234,7 +1241,7 @@ async def process_single_item(task: Dict[str, Any], user_id: int, chat_id: str, 
             raise ValueError("Voice file_id missing in task")
         
         try:
-            item_id = await ingest_voice(file_id, user_id, chat_id, _pool, user_context=user_context)
+            item_id = await ingest_voice(file_id, user_id, chat_id, db_conn._pool, user_context=user_context)
         except DuplicateItemException as dup_exc:
             saved_date = getattr(dup_exc, "saved_date", None)
             if saved_date and hasattr(saved_date, "strftime"):
@@ -1246,7 +1253,7 @@ async def process_single_item(task: Dict[str, Any], user_id: int, chat_id: str, 
                 await send_telegram_message(chat_id, bot_reply)
             return getattr(dup_exc, "item_id", None), False
         
-        async with _pool.connection() as conn:
+        async with db_conn._pool.connection() as conn:
             await conn.execute("SET statement_timeout = '30s'")
             async with conn.cursor() as cur:
                 await cur.execute("SELECT summary, tags FROM items WHERE id = %s AND user_id = %s;", (item_id, user_id))
@@ -1267,7 +1274,7 @@ async def process_single_item(task: Dict[str, Any], user_id: int, chat_id: str, 
             raise ValueError("Image file_id missing in task")
             
         try:
-            res = await ingest_image(file_id, user_id, chat_id, _pool, user_context=user_context)
+            res = await ingest_image(file_id, user_id, chat_id, db_conn._pool, user_context=user_context)
         except DuplicateItemException as dup_exc:
             saved_date = getattr(dup_exc, "saved_date", None)
             if saved_date and hasattr(saved_date, "strftime"):
@@ -1281,7 +1288,7 @@ async def process_single_item(task: Dict[str, Any], user_id: int, chat_id: str, 
             
         primary_id = res[0] if isinstance(res, list) else res
         
-        async with _pool.connection() as conn:
+        async with db_conn._pool.connection() as conn:
             await conn.execute("SET statement_timeout = '30s'")
             async with conn.cursor() as cur:
                 await cur.execute("SELECT summary, tags FROM items WHERE id = %s AND user_id = %s;", (primary_id, user_id))
@@ -1304,7 +1311,7 @@ async def process_single_item(task: Dict[str, Any], user_id: int, chat_id: str, 
         
     if item_id:
         try:
-            async with _pool.connection() as conn:
+            async with db_conn._pool.connection() as conn:
                 await conn.execute("SET statement_timeout = '30s'")
                 async with conn.cursor() as cur:
                     passive_ctx = await compute_passive_context(user_id, content_type or "unknown", conn)
@@ -1321,7 +1328,7 @@ async def process_single_item(task: Dict[str, Any], user_id: int, chat_id: str, 
             # Standard post-save updates
             try:
                 from backend.services.streak_service import update_streak
-                async with _pool.connection() as streak_conn:
+                async with db_conn._pool.connection() as streak_conn:
                     await streak_conn.execute("SET statement_timeout = '30s'")
                     await update_streak(user_id, streak_conn)
                     await streak_conn.commit()
@@ -1335,7 +1342,7 @@ async def process_single_item(task: Dict[str, Any], user_id: int, chat_id: str, 
                 
             try:
                 from backend.routes.websocket import broadcast
-                async with _pool.connection() as conn:
+                async with db_conn._pool.connection() as conn:
                     async with conn.cursor() as cur:
                         await cur.execute(
                             "SELECT id, title, source_type, created_at FROM items WHERE id = %s AND user_id = %s;",
@@ -1358,7 +1365,7 @@ async def process_single_item(task: Dict[str, Any], user_id: int, chat_id: str, 
 
             # Dynamic Context Note
             try:
-                async with _pool.connection() as conn:
+                async with db_conn._pool.connection() as conn:
                     async with conn.cursor() as cur:
                         await cur.execute("SELECT context_prompt FROM items WHERE id = %s AND user_id = %s;", (item_id, user_id))
                         tag_row = await cur.fetchone()
@@ -1370,7 +1377,7 @@ async def process_single_item(task: Dict[str, Any], user_id: int, chat_id: str, 
 
         # Trigger Entity & Relationship Extraction
         try:
-            async with _pool.connection() as conn:
+            async with db_conn._pool.connection() as conn:
                 async with conn.cursor() as cur:
                     await cur.execute("SELECT raw_text, summary FROM items WHERE id = %s AND user_id = %s;", (item_id, user_id))
                     item_row = await cur.fetchone()
@@ -1386,38 +1393,61 @@ async def process_single_item(task: Dict[str, Any], user_id: int, chat_id: str, 
                 content_text = decrypted_text if decrypted_text else (summary or "")
                 
                 from backend.services.entity_extractor import extract_and_resolve_entities
-                await extract_and_resolve_entities(item_id, user_id, content_text, _pool)
+                await extract_and_resolve_entities(item_id, user_id, content_text, db_conn._pool)
         except Exception as ext_err:
             logger.error("Failed to run entity extraction on item %d: %s", item_id, ext_err)
 
     return item_id, True
 
+# Global task ownership registry and shutdown event
+worker_background_tasks = set()
+shutdown_event = asyncio.Event()
+
 async def start_worker_task() -> None:
     """Runs the worker continuous loop polling Upstash Redis."""
+    global worker_background_tasks, shutdown_event
     redis_fail_start = None
     
     logger.info("Recall background worker thread started.")
     
     # Recover leftovers from previous run
     try:
-        leftovers = await redis.lrange("recall:processing", 0, -1)
+        leftovers = await redis.lrange("atrium:processing", 0, -1)
         if leftovers:
-            logger.info("Found %d unprocessed tasks in recall:processing queue. Recovering...", len(leftovers))
+            logger.info("Found %d unprocessed tasks in atrium:processing queue. Recovering...", len(leftovers))
             pipeline_cmds = []
             for task_str in leftovers:
-                pipeline_cmds.append(["LPUSH", "recall:tasks", task_str])
-                pipeline_cmds.append(["LREM", "recall:processing", "1", task_str])
+                pipeline_cmds.append(["LPUSH", "atrium:tasks", task_str])
+                pipeline_cmds.append(["LREM", "atrium:processing", "1", task_str])
             await redis.pipeline(pipeline_cmds)
-            logger.info("Recovered %d tasks back to recall:tasks.", len(leftovers))
+            logger.info("Recovered %d tasks back to atrium:tasks.", len(leftovers))
     except Exception as recovery_err:
-        logger.error("Failed to recover tasks from recall:processing: %s", recovery_err)
+        logger.error("Failed to recover tasks from atrium:processing: %s", recovery_err)
     
     idle_sleep = 1.0
-    while True:
+    
+    # Initialize the concurrency semaphore explicitly
+    global worker_semaphore
+    semaphore = asyncio.Semaphore(3)
+    worker_semaphore = semaphore
+    
+    holding_semaphore = False
+    while not shutdown_event.is_set():
+        try:
+            await semaphore.acquire()
+            holding_semaphore = True
+        except asyncio.CancelledError:
+            logger.info("Worker semaphore acquire cancelled.")
+            break
+
+        if shutdown_event.is_set():
+            semaphore.release()
+            holding_semaphore = False
+            break
+
         try:
             # Poll Upstash Redis using BRPOPLPUSH with 2s timeout
-            # brpoplpush atomically pops from recall:tasks and pushes to recall:processing
-            task_json = await redis.brpoplpush("recall:tasks", "recall:processing", timeout=2)
+            task_json = await redis.brpoplpush("atrium:tasks", "atrium:processing", timeout=2)
             
             # Reset Redis failure tracking if reachable
             if redis_fail_start is not None:
@@ -1425,25 +1455,42 @@ async def start_worker_task() -> None:
                 redis_fail_start = None
                 
             if task_json:
-                # Reset idle backoff immediately upon receiving a task
                 idle_sleep = 1.0
                 try:
                     task = json.loads(task_json)
-                    # Process asynchronously inside the semaphore
-                    asyncio.create_task(process_task(task, task_json))
-                except Exception as parse_err:
-                    logger.error("Failed to parse task JSON: %s. Value: %s", parse_err, task_json)
-                    # If parsing fails, remove it from the processing queue to avoid loops
                     try:
-                        await redis.lrem("recall:processing", 1, task_json)
+                        t = asyncio.create_task(process_task(task, task_json, semaphore))
+                        worker_background_tasks.add(t)
+                        t.add_done_callback(worker_background_tasks.discard)
+                        holding_semaphore = False
+                    except Exception as spawn_err:
+                        logger.error("Failed to spawn process_task task: %s", spawn_err)
+                        semaphore.release()
+                        holding_semaphore = False
+                except json.JSONDecodeError as parse_err:
+                    logger.error("Failed to parse task JSON: %s. Value: %s", parse_err, task_json)
+                    try:
+                        await redis.lrem("atrium:processing", 1, task_json)
                     except Exception as clean_err:
                         logger.error("Failed to clean invalid task from processing queue: %s", clean_err)
+                    semaphore.release()
+                    holding_semaphore = False
             else:
-                # No task was returned: Sleep with exponential backoff to preserve Upstash daily free quota limits
+                semaphore.release()
+                holding_semaphore = False
                 await asyncio.sleep(idle_sleep)
                 idle_sleep = min(idle_sleep * 1.5, 30.0)
                     
+        except asyncio.CancelledError:
+            if holding_semaphore:
+                semaphore.release()
+                holding_semaphore = False
+            logger.info("Worker polling loop cancelled.")
+            break
         except Exception as redis_err:
+            if holding_semaphore:
+                semaphore.release()
+                holding_semaphore = False
             if redis_fail_start is None:
                 redis_fail_start = time.perf_counter()
                 logger.warning("Upstash Redis became unreachable in worker loop: %s", redis_err)
@@ -1455,7 +1502,6 @@ async def start_worker_task() -> None:
                         elapsed
                     )
             
-            # Brief sleep before retrying on connection failure
             await asyncio.sleep(5.0)
 
 
@@ -1524,12 +1570,41 @@ if __name__ == "__main__":
     async def main():
         await open_pool()
         try:
-            await start_worker_task()
+            worker_task = asyncio.create_task(start_worker_task())
+            
+            import signal
+            def handle_shutdown():
+                logger.info("Shutdown signal received. Initiating graceful shutdown...")
+                shutdown_event.set()
+                
+            loop = asyncio.get_running_loop()
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                try:
+                    loop.add_signal_handler(sig, handle_shutdown)
+                except NotImplementedError:
+                    pass
+            
+            await worker_task
+        except asyncio.CancelledError:
+            logger.info("Worker main task cancelled.")
         finally:
+            if worker_background_tasks:
+                logger.info("Awaiting %d active tasks to complete (max 15s timeout)...", len(worker_background_tasks))
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*worker_background_tasks, return_exceptions=True),
+                        timeout=15.0
+                    )
+                    logger.info("All active tasks completed gracefully.")
+                except asyncio.TimeoutError:
+                    logger.warning("Graceful shutdown timed out. Cancelling remaining %d tasks...", len(worker_background_tasks))
+                    for task in list(worker_background_tasks):
+                        task.cancel()
+                    await asyncio.gather(*worker_background_tasks, return_exceptions=True)
             await close_pool()
             
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("Worker stopped by user.")
+        logger.info("Worker stopped by KeyboardInterrupt.")
 

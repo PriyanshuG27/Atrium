@@ -10,7 +10,7 @@ async def test_worker_process_task_unknown_type():
         "update_id": "u_invalid"
     }
     with mock.patch("backend.worker.upsert_user", new_callable=mock.AsyncMock, return_value=1), \
-         mock.patch("backend.worker._pool") as mock_pool, \
+         mock.patch("backend.db.connection._pool") as mock_pool, \
          mock.patch("backend.worker.send_telegram_message", new_callable=mock.AsyncMock) as mock_send:
         
         conn = mock.MagicMock()
@@ -31,7 +31,7 @@ async def test_worker_process_task_text_flow():
         "update_id": "u_text"
     }
     with mock.patch("backend.worker.upsert_user", new_callable=mock.AsyncMock, return_value=1), \
-         mock.patch("backend.worker._pool") as mock_pool, \
+         mock.patch("backend.db.connection._pool") as mock_pool, \
          mock.patch("backend.worker.send_telegram_message", new_callable=mock.AsyncMock) as mock_send, \
          mock.patch("backend.worker.embed_text", new_callable=mock.AsyncMock, return_value=[0.1]*384), \
          mock.patch("backend.worker.redis.get", new_callable=mock.AsyncMock, return_value=None), \

@@ -15,6 +15,7 @@ import asyncio
 from concurrent.futures import ProcessPoolExecutor
 from typing import Union, Optional
 from PIL import Image
+from backend.config import settings
 
 # Set env vars before any paddle import (must be done at module level in
 # the *worker* process — these are inherited when the pool is forked/spawned).

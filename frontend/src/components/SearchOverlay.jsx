@@ -150,7 +150,7 @@ export default function SearchOverlay({ onClose, onItemSelect, dueCount = 0 }) {
   const [savingNote,   setSavingNote]   = useState(false);
 
   const [recentSearches, setRecentSearches] = useState(() => {
-    const saved = localStorage.getItem('recall-recent-searches');
+    const saved = localStorage.getItem('atrium-recent-searches');
     return saved ? JSON.parse(saved) : [];
   });
 
@@ -203,7 +203,7 @@ export default function SearchOverlay({ onClose, onItemSelect, dueCount = 0 }) {
     setRecentSearches(prev => {
       const filtered = prev.filter(x => x.toLowerCase() !== q.trim().toLowerCase());
       const next = [q.trim(), ...filtered].slice(0, 5);
-      localStorage.setItem('recall-recent-searches', JSON.stringify(next));
+      localStorage.setItem('atrium-recent-searches', JSON.stringify(next));
       return next;
     });
   }, []);
@@ -212,14 +212,14 @@ export default function SearchOverlay({ onClose, onItemSelect, dueCount = 0 }) {
     e.stopPropagation();
     setRecentSearches(prev => {
       const next = prev.filter(x => x !== q);
-      localStorage.setItem('recall-recent-searches', JSON.stringify(next));
+      localStorage.setItem('atrium-recent-searches', JSON.stringify(next));
       return next;
     });
   }, []);
 
   const clearAllSearches = useCallback(() => {
     setRecentSearches([]);
-    localStorage.removeItem('recall-recent-searches');
+    localStorage.removeItem('atrium-recent-searches');
   }, []);
 
   /* ── Debounced search ── */
@@ -337,7 +337,7 @@ export default function SearchOverlay({ onClose, onItemSelect, dueCount = 0 }) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `recall-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.download = `atrium-backup-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
       addToast?.('Exported backup file successfully', 'success');

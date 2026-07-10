@@ -42,12 +42,12 @@ describe('AudioEngine Utility', () => {
     
     AudioEngine.setMuted(false);
     expect(AudioEngine.isMuted()).toBe(false);
-    expect(localStorage.getItem('recall_muted')).toBe('false');
+    expect(localStorage.getItem('atrium_muted')).toBe('false');
     
-    // Should dispatch custom recall-mute-toggle event
+    // Should dispatch custom atrium-mute-toggle event
     expect(dispatchSpy).toHaveBeenCalled();
     const event = dispatchSpy.mock.calls[0][0];
-    expect(event.type).toBe('recall-mute-toggle');
+    expect(event.type).toBe('atrium-mute-toggle');
     expect(event.detail).toBe(false);
   });
 

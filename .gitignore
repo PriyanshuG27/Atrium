@@ -13,6 +13,9 @@
 .envrc
 secrets/
 cookies.json           # Scraping cookies — gitignored explicitly
+Recall Backup.md
+Recall Decrypted.md
+
 
 # ----------------------------------------------------------------
 # PYTHON
@@ -241,3 +244,5 @@ Next version/
 deployment_profile.json
 deployment_profile.csv
 remote_ai_deployment_profile.json
+
+audit_results.json

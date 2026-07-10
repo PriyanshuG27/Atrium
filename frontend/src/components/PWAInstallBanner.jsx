@@ -13,7 +13,7 @@ export default function PWAInstallBanner() {
       e.preventDefault();
       setDeferredPrompt(e);
       // Show banner if not dismissed in session
-      const dismissed = sessionStorage.getItem('recall_pwa_banner_dismissed');
+      const dismissed = sessionStorage.getItem('atrium_pwa_banner_dismissed');
       if (!dismissed) {
         setVisible(true);
       }
@@ -43,7 +43,7 @@ export default function PWAInstallBanner() {
 
   const handleClose = () => {
     setVisible(false);
-    sessionStorage.setItem('recall_pwa_banner_dismissed', 'true');
+    sessionStorage.setItem('atrium_pwa_banner_dismissed', 'true');
   };
 
   if (!visible) return null;
@@ -90,7 +90,7 @@ export default function PWAInstallBanner() {
             flexShrink: 0
           }}
         >
-          R
+          A
         </div>
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           <span
@@ -102,7 +102,7 @@ export default function PWAInstallBanner() {
               lineHeight: 1.2
             }}
           >
-            Install Recall
+            Install Atrium
           </span>
           <span
             style={{
@@ -112,7 +112,7 @@ export default function PWAInstallBanner() {
               lineHeight: 1.3
             }}
           >
-            {window.location.hostname || 'recall.onrender.com'}
+            {window.location.hostname || 'atrium.onrender.com'}
           </span>
         </div>
       </div>

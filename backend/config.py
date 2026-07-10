@@ -183,38 +183,50 @@ class Settings(BaseSettings):
         if not re.match(r"^\d+:[A-Za-z0-9_-]{35}$", self.TELEGRAM_BOT_TOKEN):
             raise ValueError("TELEGRAM_BOT_TOKEN must match format '\\d+:[A-Za-z0-9_-]{35}'")
 
+        # 4. Production-only verification checks
+        import sys
+        if self.ENV == "production" and "pytest" not in sys.modules:
+            if not self.TELEGRAM_WEBHOOK_SECRET or self.TELEGRAM_WEBHOOK_SECRET.strip() == "":
+                raise ValueError("TELEGRAM_WEBHOOK_SECRET must be configured in production environment")
+            if not self.INTERNAL_API_KEY or self.INTERNAL_API_KEY == "dev_internal_api_key":
+                raise ValueError("INTERNAL_API_KEY must be overridden and cannot be empty or default 'dev_internal_api_key' in production environment")
+            if not self.LOG_HASH_SECRET or self.LOG_HASH_SECRET == "default_observability_secret_salt":
+                raise ValueError("LOG_HASH_SECRET must be overridden and cannot be default 'default_observability_secret_salt' in production environment")
+
 
 # Central settings singleton
 class SecretMaskingFilter(logging.Filter):
     def __init__(self, secrets: list[str] = None):
         super().__init__()
+        import re
+        self.telegram_pattern = re.compile(r"bot\d+:[A-Za-z0-9_-]+")
         self.secrets = sorted([s for s in (secrets or []) if s], key=len, reverse=True)
 
-    def filter(self, record: logging.LogRecord) -> bool:
-        if not self.secrets:
-            return True
-            
-        def mask_string(val: str) -> str:
-            if not isinstance(val, str):
-                return val
-            masked = val
-            for secret in self.secrets:
-                if len(secret) > 4:
-                    masked = masked.replace(secret, "[REDACTED]")
-            return masked
+    def mask_string(self, val: str) -> str:
+        if not isinstance(val, str):
+            return val
+        masked = self.telegram_pattern.sub("bot<REDACTED>", val)
+        for secret in self.secrets:
+            if len(secret) > 4:
+                masked = masked.replace(secret, "<REDACTED>")
+        return masked
 
+    def filter(self, record: logging.LogRecord) -> bool:
         if isinstance(record.msg, str):
-            record.msg = mask_string(record.msg)
+            record.msg = self.mask_string(record.msg)
             
         if record.args:
             if isinstance(record.args, dict):
-                record.args = {k: (mask_string(v) if isinstance(v, str) else v) for k, v in record.args.items()}
+                record.args = {k: (self.mask_string(v) if isinstance(v, str) else v) for k, v in record.args.items()}
             elif isinstance(record.args, tuple):
-                record.args = tuple(mask_string(v) if isinstance(v, str) else v for v in record.args)
+                record.args = tuple(self.mask_string(v) if isinstance(v, str) else v for v in record.args)
                 
         return True
 
+mask_filter = None
+
 def setup_logging(settings_obj: Settings) -> None:
+    global mask_filter
     secrets = []
     if settings_obj:
         for field in [
@@ -227,16 +239,20 @@ def setup_logging(settings_obj: Settings) -> None:
             if val and isinstance(val, str):
                 secrets.append(val)
                 
+        db_url = settings_obj.DATABASE_URL
+        if db_url:
+            import re
+            match = re.search(r":([^@:]+)@", db_url)
+            if match:
+                secrets.append(match.group(1))
+                
     mask_filter = SecretMaskingFilter(secrets)
     
-    # Configure basic logger root
-    logging.basicConfig(level=logging.INFO)
     root = logging.getLogger()
     root.addFilter(mask_filter)
     for h in root.handlers:
         h.addFilter(mask_filter)
         
-    # Apply to existing loggers
     for logger_name in logging.root.manager.loggerDict:
         log = logging.getLogger(logger_name)
         log.addFilter(mask_filter)

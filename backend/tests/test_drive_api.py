@@ -89,7 +89,7 @@ def test_disconnect_drive_success(client, mock_db_connection):
     payload = {"sub": "42", "chat_id": "123456789"}
     token = generate_jwt(payload, settings.JWT_SECRET)
     
-    resp = client.delete("/api/drive", cookies={"recall_session": token})
+    resp = client.delete("/api/drive", cookies={"atrium_session": token})
     assert resp.status_code == 204
     
     # Verify update query was executed to set refresh token to NULL
@@ -103,7 +103,7 @@ def test_sync_drive_success(client, mock_db_connection):
     token = generate_jwt(payload, settings.JWT_SECRET)
     
     with mock.patch("backend.services.drive_sync.sync_user_to_drive") as mock_sync:
-        resp = client.post("/api/drive/sync", cookies={"recall_session": token})
+        resp = client.post("/api/drive/sync", cookies={"atrium_session": token})
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
         mock_sync.assert_called_once()

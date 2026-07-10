@@ -127,7 +127,7 @@ describe('SearchOverlay Component', () => {
   });
 
   it('handles recent search queries clicking and clearing', async () => {
-    localStorage.setItem('recall-recent-searches', JSON.stringify(['previous query']));
+    localStorage.setItem('atrium-recent-searches', JSON.stringify(['previous query']));
 
     render(<SearchOverlay onClose={vi.fn()} onItemSelect={vi.fn()} />);
 
@@ -136,6 +136,6 @@ describe('SearchOverlay Component', () => {
     // Clear all recent searches
     const clearAllBtn = screen.getByRole('button', { name: /Clear All/i });
     fireEvent.click(clearAllBtn);
-    expect(localStorage.getItem('recall-recent-searches')).toBe(null);
+    expect(localStorage.getItem('atrium-recent-searches')).toBe(null);
   });
 });

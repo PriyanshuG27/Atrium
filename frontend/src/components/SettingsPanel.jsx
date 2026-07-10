@@ -108,8 +108,8 @@ export default function SettingsPanel({ isOpen, onClose }) {
     const handleMuteToggle = (e) => {
       setAudioMuted(e.detail);
     };
-    window.addEventListener('recall-mute-toggle', handleMuteToggle);
-    return () => window.removeEventListener('recall-mute-toggle', handleMuteToggle);
+    window.addEventListener('atrium-mute-toggle', handleMuteToggle);
+    return () => window.removeEventListener('atrium-mute-toggle', handleMuteToggle);
   }, []);
 
   // Keyboard navigation & Escape key listener
@@ -209,7 +209,7 @@ export default function SettingsPanel({ isOpen, onClose }) {
     setExporting(true);
     try {
       const response = await axios.get('/api/export', { responseType: 'blob' });
-      const filename = `recall-export-${new Date().toISOString().split('T')[0]}.json`;
+      const filename = `atrium-export-${new Date().toISOString().split('T')[0]}.json`;
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;

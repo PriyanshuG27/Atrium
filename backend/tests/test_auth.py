@@ -144,7 +144,7 @@ def test_login_widget_success(client):
     
     # Assert cookies are set properly and are httpOnly
     cookies = response.cookies
-    assert "recall_session" in cookies
+    assert "atrium_session" in cookies
     assert "jwt" in cookies
     
     # TestClient doesn't expose cookie flags directly in response.cookies easily,
@@ -163,7 +163,7 @@ def test_login_widget_invalid_hash(client):
     response = client.get("/auth/telegram", params=params)
     assert response.status_code == 401
     assert response.json()["detail"] == "Authentication failed"
-    assert "recall_session" not in response.cookies
+    assert "atrium_session" not in response.cookies
 
 def test_login_widget_stale_auth_date(client):
     """Case 3: auth_date > 1 day old -> returns 401."""
@@ -173,7 +173,7 @@ def test_login_widget_stale_auth_date(client):
     response = client.get("/auth/telegram", params=params)
     assert response.status_code == 401
     assert response.json()["detail"] == "Authentication failed"
-    assert "recall_session" not in response.cookies
+    assert "atrium_session" not in response.cookies
 
 def test_protected_route_with_valid_jwt(client):
     """Case 4: JWT on protected route with valid cookie -> returns 200."""
@@ -184,7 +184,7 @@ def test_protected_route_with_valid_jwt(client):
     }
     token = generate_jwt(payload, settings.JWT_SECRET)
     
-    response = client.get("/test-auth/widget-jwt", cookies={"recall_session": token})
+    response = client.get("/test-auth/widget-jwt", cookies={"atrium_session": token})
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "user_id": 42, "chat_id": "12345"}
 
@@ -197,16 +197,16 @@ def test_protected_route_with_expired_jwt(client):
     }
     token = generate_jwt(payload, settings.JWT_SECRET)
     
-    response = client.get("/test-auth/widget-jwt", cookies={"recall_session": token})
+    response = client.get("/test-auth/widget-jwt", cookies={"atrium_session": token})
     assert response.status_code == 401
     assert "Not authenticated" in response.json()["detail"]
     
-    # Assert that the recall_session and jwt cookies are deleted in the response
+    # Assert that the atrium_session and jwt cookies are deleted in the response
     set_cookie_headers = response.headers.get_list("set-cookie")
     session_deleted = False
     jwt_deleted = False
     for cookie_header in set_cookie_headers:
-        if "recall_session=" in cookie_header and 'Max-Age=0' in cookie_header:
+        if "atrium_session=" in cookie_header and 'Max-Age=0' in cookie_header:
             session_deleted = True
         if "jwt=" in cookie_header and 'Max-Age=0' in cookie_header:
             jwt_deleted = True
@@ -223,7 +223,7 @@ def test_protected_route_with_tampered_jwt(client):
     # Sign token with wrong secret
     token = generate_jwt(payload, "wrong_jwt_secret_12345678901234567890")
     
-    response = client.get("/test-auth/widget-jwt", cookies={"recall_session": token})
+    response = client.get("/test-auth/widget-jwt", cookies={"atrium_session": token})
     assert response.status_code == 401
     assert "Not authenticated" in response.json()["detail"]
 
@@ -263,7 +263,7 @@ def test_google_oauth_initiate_authenticated(client):
     }
     token = generate_jwt(payload, settings.JWT_SECRET)
     
-    response = client.get("/auth/google", cookies={"recall_session": token}, follow_redirects=False)
+    response = client.get("/auth/google", cookies={"atrium_session": token}, follow_redirects=False)
     assert response.status_code in [302, 303, 307]
     location = response.headers["location"]
     assert "accounts.google.com/o/oauth2/v2/auth" in location

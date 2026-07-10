@@ -92,7 +92,7 @@ export default function SplashScreen() {
           margin: 0,
           letterSpacing: '-0.04em',
         }}>
-          Recall.
+          Atrium.
         </h2>
         <p style={{
           fontFamily: 'var(--font-mono, monospace)',

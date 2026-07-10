@@ -1,7 +1,7 @@
 import logging
 from typing import Dict, Any, List, Optional
-from fastapi import APIRouter, Depends, Query, HTTPException
-
+from fastapi import APIRouter, Depends, Query, HTTPException, Header
+from backend.config import settings
 import psycopg
 from backend.db.connection import get_db
 from backend.middleware.twa_auth import get_current_user, UserContext
@@ -188,4 +188,75 @@ async def get_providers_metrics(
     except Exception as err:
         logger.error("Failed to retrieve providers metrics: %s", err)
         raise HTTPException(status_code=500, detail="Failed to retrieve providers metrics.")
+
+
+@router.get("/system")
+async def get_system_metrics(
+    x_internal_key: Optional[str] = Header(default=None, alias="X-Internal-Key"),
+    db: psycopg.AsyncConnection = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Exposes global system metrics (queue depth, active workers, latencies, cache hit ratio).
+    Strictly restricted to internal systems via X-Internal-Key.
+    """
+    import hmac
+    if not settings.INTERNAL_API_KEY or not hmac.compare_digest(x_internal_key or "", settings.INTERNAL_API_KEY):
+        raise HTTPException(status_code=401, detail="Unauthorized metrics access.")
+
+    try:
+        # 1. Queue depth
+        queue_depth = await redis.llen("atrium:tasks")
+        
+        # 2. Active workers/processing count
+        active_workers = await redis.llen("atrium:processing")
+        
+        # 3. Cache hit ratio
+        hits_str = await redis.get("metrics:system:cache_hits")
+        misses_str = await redis.get("metrics:system:cache_misses")
+        hits = int(hits_str) if hits_str else 0
+        misses = int(misses_str) if misses_str else 0
+        total_cache_requests = hits + misses
+        cache_hit_ratio = hits / total_cache_requests if total_cache_requests > 0 else 0.0
+        
+        # 4. Webhook latency (average of last 50 requests stored in Redis)
+        webhook_latencies_str = await redis.lrange("metrics:system:webhook_latencies", 0, 49)
+        webhook_latencies = [float(val) for val in webhook_latencies_str if val]
+        avg_webhook_latency_ms = sum(webhook_latencies) / len(webhook_latencies) if webhook_latencies else 0.0
+        
+        # 5. AI request latency (average of last 24 hours from DB logs)
+        async with db.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT attempts
+                FROM ai_decision_logs
+                WHERE created_at >= NOW() - INTERVAL '24 hours'
+                """
+            )
+            rows = await cur.fetchall()
+        
+        ai_latencies = []
+        for row in rows:
+            attempts = row[0] or []
+            for att in attempts:
+                latency = att.get("latency_ms", 0.0)
+                if latency > 0:
+                    ai_latencies.append(latency)
+        avg_ai_latency_ms = sum(ai_latencies) / len(ai_latencies) if ai_latencies else 0.0
+
+        return {
+            "queue_depth": queue_depth,
+            "active_workers": active_workers,
+            "cache": {
+                "hits": hits,
+                "misses": misses,
+                "hit_ratio": round(cache_hit_ratio, 4)
+            },
+            "latencies": {
+                "avg_webhook_latency_ms": round(avg_webhook_latency_ms, 2),
+                "avg_ai_latency_ms": round(avg_ai_latency_ms, 2)
+            }
+        }
+    except Exception as err:
+        logger.error("Failed to compile system metrics: %s", err)
+        raise HTTPException(status_code=500, detail="Failed to compile system metrics.")
 

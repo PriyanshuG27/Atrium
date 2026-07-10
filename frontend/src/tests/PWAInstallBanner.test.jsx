@@ -25,7 +25,7 @@ describe('PWAInstallBanner Component', () => {
       window.dispatchEvent(mockPromptEvent);
     });
 
-    expect(screen.getByText('Install Recall')).toBeInTheDocument();
+    expect(screen.getByText('Install Atrium')).toBeInTheDocument();
 
     const installBtn = screen.getByRole('button', { name: 'Install' });
     await act(async () => {
@@ -49,7 +49,7 @@ describe('PWAInstallBanner Component', () => {
     const closeBtn = screen.getByRole('button', { name: 'Close' });
     fireEvent.click(closeBtn);
 
-    expect(sessionStorage.getItem('recall_pwa_banner_dismissed')).toBe('true');
-    expect(screen.queryByText('Install Recall')).not.toBeInTheDocument();
+    expect(sessionStorage.getItem('atrium_pwa_banner_dismissed')).toBe('true');
+    expect(screen.queryByText('Install Atrium')).not.toBeInTheDocument();
   });
 });

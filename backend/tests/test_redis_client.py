@@ -66,7 +66,9 @@ async def test_redis_timeout_exception():
         with pytest.raises(RedisUnavailableError):
             await redis._request("", ["PING"])
 
-def test_redis_hash_key():
+def test_redis_hash_key(monkeypatch):
+    from backend.config import settings
+    monkeypatch.setattr(settings, "ENV", "development")
     client = UpstashRedis()
     # Non-numeric keys shouldn't hash
     assert client._hash_key("mykey") == "mykey"
@@ -86,7 +88,9 @@ def test_redis_hash_key():
     assert len(h3.split(":")[-1]) == 16
 
 @pytest.mark.asyncio
-async def test_redis_request_hashing():
+async def test_redis_request_hashing(monkeypatch):
+    from backend.config import settings
+    monkeypatch.setattr(settings, "ENV", "development")
     client = UpstashRedis()
     mock_http_client = mock.Mock()
     mock_resp = mock.Mock()

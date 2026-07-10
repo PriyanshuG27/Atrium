@@ -166,35 +166,35 @@ def test_idor_cross_user_isolation(client, token_user_A, token_user_B, user_A_it
     
     # Verify User A CAN retrieve their own item (item_id = 999)
     current_cursor = PenTestingCursor(user_id=100)
-    res = client.get(f"/api/items/{user_A_item_id}", cookies={"recall_session": token_user_A})
+    res = client.get(f"/api/items/{user_A_item_id}", cookies={"atrium_session": token_user_A})
     assert res.status_code == 200
     assert res.json()["id"] == 999
     
     # 1. User B attempts GET /api/items/{user_A_item_id} -> 404 Not Found
     current_cursor = PenTestingCursor(user_id=200)
-    res = client.get(f"/api/items/{user_A_item_id}", cookies={"recall_session": token_user_B})
+    res = client.get(f"/api/items/{user_A_item_id}", cookies={"atrium_session": token_user_B})
     assert res.status_code == 404
     
     # 2. User B attempts DELETE /api/items/{user_A_item_id} -> 404 Not Found
     current_cursor = PenTestingCursor(user_id=200)
-    res = client.delete(f"/api/items/{user_A_item_id}", cookies={"recall_session": token_user_B})
+    res = client.delete(f"/api/items/{user_A_item_id}", cookies={"atrium_session": token_user_B})
     assert res.status_code == 404
     
     # 3. User B attempts POST /api/quizzes/{user_A_quiz_id}/answer -> 404 Not Found
     # user_A_quiz_id = 888
     current_cursor = PenTestingCursor(user_id=200)
-    res = client.post("/api/quizzes/888/answer", json={"quality": 4}, cookies={"recall_session": token_user_B})
+    res = client.post("/api/quizzes/888/answer", json={"quality": 4}, cookies={"atrium_session": token_user_B})
     assert res.status_code == 404
     
     # 4. User B attempts DELETE /api/reminders/{user_A_reminder_id} -> 404 Not Found
     # user_A_reminder_id = 777
     current_cursor = PenTestingCursor(user_id=200)
-    res = client.delete("/api/reminders/777", cookies={"recall_session": token_user_B})
+    res = client.delete("/api/reminders/777", cookies={"atrium_session": token_user_B})
     assert res.status_code == 404
     
     # 5. User B attempts GET /api/graph -> returns ONLY User B's nodes (node 1200), zero nodes belonging to User A (node 1100)
     current_cursor = PenTestingCursor(user_id=200)
-    res = client.get("/api/graph", cookies={"recall_session": token_user_B})
+    res = client.get("/api/graph", cookies={"atrium_session": token_user_B})
     assert res.status_code == 200
     nodes = res.json()["nodes"]
     assert len(nodes) == 1
@@ -202,7 +202,7 @@ def test_idor_cross_user_isolation(client, token_user_A, token_user_B, user_A_it
     
     # 6. User B attempts GET /api/pulse -> returns ONLY User B's mind portrait metrics
     current_cursor = PenTestingCursor(user_id=200)
-    res = client.get("/api/pulse", cookies={"recall_session": token_user_B})
+    res = client.get("/api/pulse", cookies={"atrium_session": token_user_B})
     assert res.status_code == 200
     profile = res.json()
     assert profile["pulse_score"] == 85
@@ -219,7 +219,7 @@ def test_sql_injection_search_endpoint(client, token_user_A):
     # The database query must utilize parameterized bindings (%s).
     payload = {"query": "' OR 1=1; DROP TABLE items; --"}
     
-    res = client.post("/api/search", json=payload, cookies={"recall_session": token_user_A})
+    res = client.post("/api/search", json=payload, cookies={"atrium_session": token_user_A})
     assert res.status_code == 200
     assert isinstance(res.json().get("sources"), list)
 

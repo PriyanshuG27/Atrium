@@ -150,7 +150,7 @@ def test_get_tags_endpoint(client, override_db):
     current_cursor = RecordingCursor(rows=mock_rows)
     
     token = get_auth_token()
-    response = client.get("/api/tags", cookies={"recall_session": token})
+    response = client.get("/api/tags", cookies={"atrium_session": token})
     
     assert response.status_code == 200
     data = response.json()
@@ -178,7 +178,7 @@ def test_get_items_filtered_by_tag(client, override_db):
     current_cursor = RecordingCursor(total_count=1, rows=mock_rows)
     
     token = get_auth_token()
-    response = client.get("/api/items?tag=python", cookies={"recall_session": token})
+    response = client.get("/api/items?tag=python", cookies={"atrium_session": token})
     
     assert response.status_code == 200
     data = response.json()
@@ -249,7 +249,7 @@ def test_create_item_with_autotags(client, override_db):
     with mock.patch("backend.services.ai_cascade.AICascade.summarise", return_value=mock_ai_response) as mock_summarise, \
          mock.patch("backend.services.search_service.embed_text", return_value=[0.1]*384):
         
-        response = client.post("/api/items", json=payload, cookies={"recall_session": token})
+        response = client.post("/api/items", json=payload, cookies={"atrium_session": token})
         assert response.status_code == 201
         
         data = response.json()

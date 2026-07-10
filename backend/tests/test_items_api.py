@@ -109,7 +109,7 @@ def test_get_items_basic_pagination(client):
     current_cursor = RecordingCursor(total_count=100, rows=mock_rows)
     
     token = get_auth_token()
-    response = client.get("/api/items?page=2&limit=5", cookies={"recall_session": token})
+    response = client.get("/api/items?page=2&limit=5", cookies={"atrium_session": token})
     
     assert response.status_code == 200
     data = response.json()
@@ -154,7 +154,7 @@ def test_get_items_limit_clamping_and_validation(client):
     global current_cursor
     current_cursor = RecordingCursor()
     token = get_auth_token()
-    response = client.get("/api/items?limit=51", cookies={"recall_session": token})
+    response = client.get("/api/items?limit=51", cookies={"atrium_session": token})
     assert response.status_code == 400
     assert "Limit cannot exceed 50" in response.json()["detail"]
 
@@ -167,7 +167,7 @@ def test_get_items_filters_composition(client):
     
     response = client.get(
         "/api/items?source_type=voice&tag=rust&from_date=2026-06-01&to_date=2026-06-25",
-        cookies={"recall_session": token}
+        cookies={"atrium_session": token}
     )
     assert response.status_code == 200
     

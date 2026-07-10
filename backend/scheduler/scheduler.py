@@ -1195,7 +1195,9 @@ async def partition_creator() -> None:
     try:
         from backend.db.connection import ensure_partitions
         pool = await get_pool()
-        await ensure_partitions(pool)
+        async with pool.connection() as conn:
+            await ensure_partitions(conn)
+            await conn.commit()
     except Exception as e:
         logger.critical("Partition creation failed: %s", e, exc_info=True)
 
@@ -2401,7 +2403,7 @@ async def recall_moment_dispatcher() -> None:
     try:
         async with pool.connection() as conn:
             async with conn.cursor() as cur:
-                await cur.execute("SELECT id, telegram_chat_id as chat_id, timezone_offset, last_recall_moment_at FROM users")
+                await cur.execute("SELECT id, telegram_chat_id as chat_id, timezone_offset, last_atrium_moment_at FROM users")
                 users = await cur.fetchall()
     except Exception as e:
         logger.error("Failed to fetch users in Recall Moment dispatcher: %s", e)
@@ -2479,7 +2481,7 @@ async def recall_moment_dispatcher() -> None:
                                 (insight, cand_id)
                             )
                             await cur.execute(
-                                "UPDATE users SET last_recall_moment_at = %s WHERE id = %s;",
+                                "UPDATE users SET last_atrium_moment_at = %s WHERE id = %s;",
                                 (now_utc, user_id)
                             )
                             await conn.commit()
@@ -2951,11 +2953,11 @@ async def observability_metrics_logger() -> None:
     logger = structlog.get_logger()
     try:
         # 1. Queue depth and oldest task age (assuming FIFO)
-        queue_len = await redis.llen("recall:tasks")
+        queue_len = await redis.llen("atrium:tasks")
         
         oldest_age_seconds = 0.0
         if queue_len > 0:
-            tail_element = await redis.lindex("recall:tasks", -1)
+            tail_element = await redis.lindex("atrium:tasks", -1)
             if tail_element:
                 try:
                     payload = json.loads(tail_element)

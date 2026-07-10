@@ -124,7 +124,7 @@ def test_graph_api_user_isolation(client, override_db):
     current_cursor = MockCursor(user_id=42, item_rows=[], hub_rows=[])
     token = get_auth_token(user_id=42)
     
-    response = client.get("/api/graph", cookies={"recall_session": token})
+    response = client.get("/api/graph", cookies={"atrium_session": token})
     assert response.status_code == 200
     
     # Assert all database queries executed filtered by the user_id (which should be 42)
@@ -155,7 +155,7 @@ def test_graph_api_schema_and_hub_validation(client, override_db):
     current_cursor = MockCursor(user_id=42, item_rows=item_rows, hub_rows=hub_rows, edge_rows=[(1, 2, 0.1)])
     token = get_auth_token(user_id=42)
     
-    response = client.get("/api/graph", cookies={"recall_session": token})
+    response = client.get("/api/graph", cookies={"atrium_session": token})
     assert response.status_code == 200
     
     data = response.json()
@@ -220,7 +220,7 @@ def test_graph_api_edge_limit_cutoff(client, override_db):
     current_cursor = MockCursor(user_id=42, item_rows=item_rows, hub_rows=hub_rows)
     token = get_auth_token(user_id=42)
     
-    response = client.get("/api/graph", cookies={"recall_session": token})
+    response = client.get("/api/graph", cookies={"atrium_session": token})
     assert response.status_code == 200
     
     data = response.json()
@@ -237,7 +237,7 @@ def test_graph_api_edge_limit_cutoff(client, override_db):
         (10, "Similar Hub", [2, 4]) # item 2 [1,0,0] and item 4 [1,0,0], similarity = 1.0 > 0.75
     ]
     current_cursor = MockCursor(user_id=42, item_rows=item_rows, hub_rows=hub_rows_similar, edge_rows=[(2, 4, 0.0)])
-    response_similar = client.get("/api/graph", cookies={"recall_session": token})
+    response_similar = client.get("/api/graph", cookies={"atrium_session": token})
     data_similar = response_similar.json()
     
     # We should have exactly 1 edge because 2 and 4 share the same hub and are similar
@@ -266,7 +266,7 @@ def test_graph_api_performance_target(client, override_db):
     token = get_auth_token(user_id=42)
     
     start_time = time.perf_counter()
-    response = client.get("/api/graph", cookies={"recall_session": token})
+    response = client.get("/api/graph", cookies={"atrium_session": token})
     end_time = time.perf_counter()
     
     assert response.status_code == 200

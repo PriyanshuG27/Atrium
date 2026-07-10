@@ -158,11 +158,11 @@ def test_export_zip_success(client, mock_db_connection):
         (102, "text", None, None, "summary 2", "title 2", None, datetime.now(timezone.utc), None),
     ]
 
-    resp = client.get("/api/export/zip", cookies={"recall_session": token})
+    resp = client.get("/api/export/zip", cookies={"atrium_session": token})
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "application/zip"
     assert "attachment" in resp.headers["content-disposition"]
-    assert "recall-obsidian-export-" in resp.headers["content-disposition"]
+    assert "atrium-obsidian-export-" in resp.headers["content-disposition"]
 
     # Parse zip
     zip_bytes = resp.content
@@ -186,7 +186,7 @@ def test_import_zip_invalid_file(client, mock_db_connection):
     token = generate_jwt(payload, settings.JWT_SECRET)
 
     files = {"file": ("test.txt", b"some plain text", "text/plain")}
-    resp = client.post("/api/import/zip", files=files, cookies={"recall_session": token})
+    resp = client.post("/api/import/zip", files=files, cookies={"atrium_session": token})
     assert resp.status_code == 400
     assert "must be a ZIP archive" in resp.json()["detail"]
 
@@ -228,7 +228,7 @@ Stoicism teaches self-control and fortitude.
          mock.patch("backend.services.redis_client.redis.delete", new=mock_redis_delete):
         
         files = {"file": ("obsidian_vault.zip", zip_bytes, "application/zip")}
-        resp = client.post("/api/import/zip", files=files, cookies={"recall_session": token})
+        resp = client.post("/api/import/zip", files=files, cookies={"atrium_session": token})
         
         assert resp.status_code == 200
         assert resp.json() == {"status": "success", "imported_count": 2}
@@ -249,7 +249,7 @@ def test_import_zip_invalid_magic_bytes(client, mock_db_connection):
     token = generate_jwt(payload, settings.JWT_SECRET)
 
     files = {"file": ("malicious.zip", b"not a zip file content header", "application/zip")}
-    resp = client.post("/api/import/zip", files=files, cookies={"recall_session": token})
+    resp = client.post("/api/import/zip", files=files, cookies={"atrium_session": token})
     assert resp.status_code == 400
     assert "magic bytes mismatch" in resp.json()["detail"]
 
@@ -260,6 +260,6 @@ def test_import_zip_payload_too_large(client, mock_db_connection):
 
     large_content = b"a" * (25 * 1024 * 1024 + 1)
     files = {"file": ("huge.zip", large_content, "application/zip")}
-    resp = client.post("/api/import/zip", files=files, cookies={"recall_session": token})
+    resp = client.post("/api/import/zip", files=files, cookies={"atrium_session": token})
     assert resp.status_code == 413
     assert "exceeds the maximum size limit" in resp.json()["detail"]

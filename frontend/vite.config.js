@@ -9,8 +9,8 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       manifest: {
-        name: 'Recall',
-        short_name: 'Recall',
+        name: 'Atrium',
+        short_name: 'Atrium',
         description: 'Your AI knowledge constellation',
         theme_color: '#030307',
         background_color: '#030307',

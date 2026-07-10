@@ -214,7 +214,7 @@ async def sweep_test_state():
     try:
         await redis.delete("batch:1001")
         await redis.delete("batch_last:1001")
-        await redis.delete("recall:tasks")
+        await redis.delete("atrium:tasks")
         await redis.delete("onboarding_step:1001")
     except Exception as e:
         print(f"Sweep Redis failed: {e}")
@@ -238,7 +238,7 @@ def test_full_instagram_reels_save_flow(client, mock_cobalt_and_ai, mock_websock
         # Open connection pool inside this event loop
         await open_pool()
         import backend.worker
-        backend.worker._pool = backend.db.connection._pool
+        # backend.worker._pool removed (uses db_conn._pool dynamically)
         
         try:
             # Perform initial sweep of any lingering test data
@@ -337,7 +337,7 @@ def test_ai_cascade_fallback_and_dlq(client, mock_websocket_broadcast):
         # Open connection pool inside this event loop
         await open_pool()
         import backend.worker
-        backend.worker._pool = backend.db.connection._pool
+        # backend.worker._pool removed (uses db_conn._pool dynamically)
         
         try:
             # Perform initial sweep of any lingering test data

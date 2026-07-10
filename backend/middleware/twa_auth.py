@@ -25,7 +25,7 @@ class UserContext(BaseModel):
 class CookieDict(dict):
     def items(self):
         return [
-            ("Set-Cookie", "recall_session=; Max-Age=0; Path=/; SameSite=lax; HttpOnly; Secure"),
+            ("Set-Cookie", "atrium_session=; Max-Age=0; Path=/; SameSite=lax; HttpOnly; Secure"),
             ("Set-Cookie", "jwt=; Max-Age=0; Path=/; SameSite=lax; HttpOnly; Secure")
         ]
 
@@ -205,7 +205,7 @@ async def get_jwt_user_by_token(
                 }
                 new_token = generate_jwt(new_payload, settings.JWT_SECRET)
                 response.set_cookie(
-                    "recall_session",
+                    "atrium_session",
                     new_token,
                     httponly=True,
                     secure=settings.ENV != "development",
@@ -229,8 +229,8 @@ async def get_jwt_user(
     response: Response,
     db: psycopg.AsyncConnection = Depends(get_db)
 ) -> UserContext:
-    """FastAPI dependency for verifying JWT stored in 'recall_session' or 'jwt' cookie."""
-    token = request.cookies.get("recall_session") or request.cookies.get("jwt")
+    """FastAPI dependency for verifying JWT stored in 'atrium_session' or 'jwt' cookie."""
+    token = request.cookies.get("atrium_session") or request.cookies.get("jwt")
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
     return await get_jwt_user_by_token(token, request, response, db, set_cookies=True)
@@ -247,7 +247,7 @@ async def get_current_user(
     Tries JWT cookie first; if missing, tries TWA header or Bearer header; if all missing: 401.
     """
     # 1. Try JWT cookie first
-    jwt_cookie = request.cookies.get("recall_session") or request.cookies.get("jwt")
+    jwt_cookie = request.cookies.get("atrium_session") or request.cookies.get("jwt")
     if jwt_cookie is not None:
         return await get_jwt_user_by_token(jwt_cookie, request, response, db, set_cookies=True)
         

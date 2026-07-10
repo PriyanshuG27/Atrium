@@ -116,6 +116,11 @@ async def check_rate_limit(
         raise
     except Exception as e:
         # Fail open: log error but do not crash webhook or block user if Redis fails
+        import logging
+        logging.getLogger("backend.security").error(
+            "Security telemetry: event=RATE_LIMIT_FAIL_OPEN prefix=%s identifier=%s error=%s",
+            key_prefix, user_id, str(e)
+        )
         logger.exception("Rate limiter error for key %s. Failing open: %s", key, e)
         return True
 
@@ -163,7 +168,7 @@ def rate_limit_by_route(
             # 1. Try JWT cookie or Bearer header
             token = (
                 request.cookies.get("jwt")
-                or request.cookies.get("recall_session")
+                or request.cookies.get("atrium_session")
             )
             auth_header = request.headers.get("Authorization")
             if not token and auth_header and auth_header.startswith("Bearer "):

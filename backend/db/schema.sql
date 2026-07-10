@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS users (
     onboarding_day       INT DEFAULT 0,     -- Day 1-5 onboarding sequence tracking
     onboarding_last_sent TIMESTAMP DEFAULT NULL,
     near_miss_lower_bound NUMERIC(4, 3) DEFAULT 0.710,
-    last_recall_moment_at TIMESTAMP WITH TIME ZONE,
+    last_atrium_moment_at TIMESTAMP WITH TIME ZONE,
     self_description     TEXT,
     mind_type            VARCHAR(50),
     mind_type_summary    TEXT,
@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS items (
     context_note TEXT,                      -- User-provided context note
     context_prompt TEXT,                    -- AI-generated custom context prompt question
     passive_context JSONB,                  -- Captured ingest event metadata
+    save_time_bucket VARCHAR(20) DEFAULT NULL, -- Time of day category bucket
     category     VARCHAR(100),              -- AI-classified topic category
     created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id, created_at)

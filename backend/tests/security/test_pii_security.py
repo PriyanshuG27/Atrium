@@ -122,7 +122,7 @@ async def test_pii_masking_db_store_original():
                     resp = client.post(
                         "/api/items",
                         json={"url": None, "raw_text": raw_payload_text, "title": "PII Test"},
-                        cookies={"recall_session": token},
+                        cookies={"atrium_session": token},
                         headers=headers
                     )
                     

@@ -291,7 +291,8 @@ async def accept_invite(
             SELECT id, inviter_id FROM journey_invites
             WHERE invite_code = %s
               AND status = 'pending'
-              AND expires_at > NOW();
+              AND expires_at > NOW()
+            FOR UPDATE;
             """,
             (body.invite_code,),
         )

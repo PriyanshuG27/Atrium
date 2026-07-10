@@ -28,64 +28,7 @@ from fastapi.responses import JSONResponse
 # ---------------------------------------------------------------------------
 # Logging — structured, nothing sensitive
 # ---------------------------------------------------------------------------
-class SecretMaskingFilter(logging.Filter):
-    """
-    Filters all log messages and redacts sensitive information such as
-    the Telegram Bot Token, Fernet key, JWT secret, database passwords,
-    and other API keys.
-    """
-    def __init__(self):
-        super().__init__()
-        self.telegram_pattern = re.compile(r"bot\d+:[A-Za-z0-9_-]+")
-
-    def mask_text(self, text: str) -> str:
-        # Mask Telegram bot tokens in URLs (e.g., bot8764400085:AAFo3...)
-        text = self.telegram_pattern.sub("bot<REDACTED>", text)
-        
-        try:
-            from backend.config import settings
-            if settings:
-                secrets = [
-                    settings.TELEGRAM_BOT_TOKEN,
-                    settings.FERNET_KEY,
-                    settings.JWT_SECRET,
-                    settings.UPSTASH_REDIS_REST_TOKEN,
-                ]
-                
-                # Extract and mask DB password if present
-                db_url = settings.DATABASE_URL
-                if db_url:
-                    # Match password component in connection string
-                    match = re.search(r":([^@:]+)@", db_url)
-                    if match:
-                        secrets.append(match.group(1))
-                
-                # Mask other optional API keys/secrets
-                for key in ["MODAL_API_TOKEN", "GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "NVIDIA_API_KEY"]:
-                    val = getattr(settings, key, None)
-                    if val:
-                        secrets.append(val)
-                
-                for secret in secrets:
-                    if secret and len(secret) > 4:
-                        text = text.replace(secret, "<REDACTED>")
-        except Exception:
-            pass
-            
-        return text
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        if isinstance(record.msg, str):
-            record.msg = self.mask_text(record.msg)
-        if record.args:
-            new_args = []
-            for arg in record.args:
-                if isinstance(arg, str):
-                    new_args.append(self.mask_text(arg))
-                else:
-                    new_args.append(arg)
-            record.args = tuple(new_args)
-        return True
+from backend.config import mask_filter
 
 # Custom premium formatter for logging
 class BeautifulLoggerFormatter(logging.Formatter):
@@ -132,14 +75,15 @@ class BeautifulLoggerFormatter(logging.Formatter):
 logging.basicConfig(level=logging.INFO)
 
 # Apply secret masking filter and the premium BeautifulLoggerFormatter to all handlers
-mask_filter = SecretMaskingFilter()
 root_logger = logging.getLogger()
-root_logger.addFilter(mask_filter)
+if mask_filter:
+    root_logger.addFilter(mask_filter)
 
 beautiful_formatter = BeautifulLoggerFormatter()
 
 for handler in root_logger.handlers:
-    handler.addFilter(mask_filter)
+    if mask_filter:
+        handler.addFilter(mask_filter)
     handler.setFormatter(beautiful_formatter)
 
 
@@ -213,7 +157,7 @@ async def lifespan(app: FastAPI):
 
     # Validate cryptographic keys — raises ValueError on bad format
     settings.validate_crypto_keys()
-    logger.info("Recall API started — crypto keys validated.")
+    logger.info("Atrium API started — crypto keys validated.")
 
     # Initialize Event Bus
     from backend.services.ai_cascade.events.event_bus import event_bus
@@ -237,7 +181,7 @@ async def lifespan(app: FastAPI):
     if settings.ENV != "test" and "pytest" not in sys.modules and settings.RUN_WORKER_INLINE:
         from backend.worker import start_worker_task
         app.state.worker_task = asyncio.create_task(start_worker_task())
-        logger.info("Recall task worker loop started in background (inline).")
+        logger.info("Atrium task worker loop started in background (inline).")
 
     # Auto-retry recent DLQ tasks on startup (limit 5, failed < 24h ago)
     try:
@@ -265,7 +209,7 @@ async def lifespan(app: FastAPI):
                         else:
                             payload = payload_raw
                             
-                        await redis.lpush("recall:tasks", json.dumps(payload))
+                        await redis.lpush("atrium:tasks", json.dumps(payload))
                         await cur.execute("UPDATE dead_letter_queue SET retried = TRUE WHERE id = %s;", (dlq_id,))
                         requeued_count += 1
                         
@@ -278,7 +222,7 @@ async def lifespan(app: FastAPI):
     if settings.ENV != "test" and "pytest" not in sys.modules:
         from backend.scheduler.scheduler import start_scheduler
         await start_scheduler(app)
-        logger.info("Recall background scheduler started.")
+        logger.info("Atrium background scheduler started.")
 
     yield  # ← application runs here
 
@@ -294,7 +238,29 @@ async def lifespan(app: FastAPI):
             await app.state.worker_task
         except asyncio.CancelledError:
             pass
-        logger.info("Recall task worker loop stopped.")
+        logger.info("Atrium task worker loop stopped.")
+        
+        # Await outstanding background worker tasks (max 30s timeout)
+        try:
+            from backend.worker import worker_background_tasks
+            if worker_background_tasks:
+                logger.info("Awaiting %d active background worker tasks...", len(worker_background_tasks))
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*worker_background_tasks, return_exceptions=True),
+                        timeout=30.0
+                    )
+                    logger.info("All background worker tasks completed gracefully.")
+                except asyncio.TimeoutError:
+                    logger.warning("Timed out waiting for background worker tasks to complete. Cancelling remaining %d tasks...", len(worker_background_tasks))
+                    for task in list(worker_background_tasks):
+                        if not task.done():
+                            task.cancel()
+                    await asyncio.gather(*worker_background_tasks, return_exceptions=True)
+                    logger.info("All cancelled background worker tasks terminated.")
+        except Exception as shutdown_err:
+            logger.error("Error during graceful shutdown of worker tasks: %s", shutdown_err)
+
 
     # Close shared HTTP client
     from backend.services.http_client import close_http_client
@@ -312,7 +278,7 @@ async def lifespan(app: FastAPI):
     from backend.services.ai_cascade.events.event_bus import event_bus
     event_bus.shutdown()
     
-    logger.info("Recall API shutdown complete.")
+    logger.info("Atrium API shutdown complete.")
 
 
 # ---------------------------------------------------------------------------
@@ -341,10 +307,10 @@ def _get_redoc_url() -> str | None:
 
 
 app = FastAPI(
-    title="Recall API",
+    title="Atrium API",
     version="0.1.0",
     description=(
-        "Recall — AI-powered second brain. "
+        "Atrium — AI-powered second brain. "
         "Ingest links, voice notes, PDFs and images via Telegram. "
         "Search, map, and quiz your knowledge via the web dashboard."
     ),
@@ -450,6 +416,65 @@ async def health() -> dict:
     }
 
 
+@app.get(
+    "/health/readiness",
+    tags=["ops"],
+    summary="Readiness check",
+    response_description="Downstream dependencies are ready",
+)
+async def readiness() -> dict:
+    """
+    Readiness probe verifying DB and Redis availability.
+    Target response time: < 10 ms (when warm).
+    """
+    import asyncio
+    import backend.db.connection as db_conn
+    from backend.services.redis_client import redis
+    from fastapi import HTTPException
+    
+    # 1. Verify PostgreSQL connection with a 2-second timeout
+    pg_ok = False
+    if db_conn._pool is not None:
+        try:
+            async def check_pg():
+                async with db_conn._pool.connection() as conn:
+                    async with conn.cursor() as cur:
+                        await cur.execute("SELECT 1;")
+                        await cur.fetchone()
+                return True
+            pg_ok = await asyncio.wait_for(check_pg(), timeout=2.0)
+        except Exception as e:
+            logger.error("Readiness check: PostgreSQL connection failed: %s", e)
+            pg_ok = False
+            
+    # 2. Verify Upstash Redis connection with a 1-second timeout
+    redis_ok = False
+    try:
+        async def check_redis():
+            return await redis.ping()
+        redis_ok = await asyncio.wait_for(check_redis(), timeout=1.0)
+    except Exception as e:
+        logger.error("Readiness check: Upstash Redis connection failed: %s", e)
+        redis_ok = False
+
+    if not pg_ok or not redis_ok:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "status": "fail",
+                "postgres": "ok" if pg_ok else "fail",
+                "redis": "ok" if redis_ok else "fail",
+            }
+        )
+        
+    return {
+        "status": "ok",
+        "postgres": "ok",
+        "redis": "ok",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 # ---------------------------------------------------------------------------
 # OpenAPI Customisation & Security Definitions
 # ---------------------------------------------------------------------------
@@ -461,10 +486,10 @@ def custom_openapi():
         return app.openapi_schema
         
     openapi_schema = get_openapi(
-        title="Recall API",
+        title="Atrium API",
         version="0.1.0",
         description=(
-            "Recall — AI-powered second brain. "
+            "Atrium — AI-powered second brain. "
             "Ingest links, voice notes, PDFs and images via Telegram. "
             "Search, map, and quiz your knowledge via the web dashboard."
         ),
@@ -476,8 +501,8 @@ def custom_openapi():
         "bearerAuth": {
             "type": "apiKey",
             "in": "cookie",
-            "name": "recall_session",
-            "description": "JWT stored in the httpOnly 'recall_session' cookie.",
+            "name": "atrium_session",
+            "description": "JWT stored in the httpOnly 'atrium_session' cookie.",
         },
         "telegramInitData": {
             "type": "apiKey",

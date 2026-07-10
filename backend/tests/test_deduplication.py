@@ -28,7 +28,7 @@ async def test_text_deduplication_found(mock_db_connection):
     with patch("backend.worker.upsert_user", new_callable=AsyncMock) as mock_upsert, \
          patch("backend.worker.send_telegram_message", new_callable=AsyncMock) as mock_send, \
          patch("backend.worker.AICascade") as mock_cascade, \
-         patch("backend.worker._pool") as mock_pool:
+         patch("backend.db.connection._pool") as mock_pool:
          
         mock_upsert.return_value = 1
         
@@ -66,7 +66,7 @@ async def test_url_deduplication_found(mock_db_connection):
     with patch("backend.worker.upsert_user", new_callable=AsyncMock) as mock_upsert, \
          patch("backend.worker.send_telegram_message", new_callable=AsyncMock) as mock_send, \
          patch("backend.worker.ingest_url", new_callable=AsyncMock) as mock_ingest, \
-         patch("backend.worker._pool") as mock_pool:
+         patch("backend.db.connection._pool") as mock_pool:
          
         mock_upsert.return_value = 1
         conn, cursor = mock_db_connection
@@ -99,7 +99,7 @@ async def test_voice_deduplication_exception_handled(mock_db_connection):
     with patch("backend.worker.upsert_user", new_callable=AsyncMock) as mock_upsert, \
          patch("backend.worker.send_telegram_message", new_callable=AsyncMock) as mock_send, \
          patch("backend.worker.ingest_voice", new_callable=AsyncMock) as mock_ingest_voice, \
-         patch("backend.worker._pool") as mock_pool:
+         patch("backend.db.connection._pool") as mock_pool:
          
         mock_upsert.return_value = 1
         conn, cursor = mock_db_connection
@@ -127,7 +127,7 @@ async def test_image_deduplication_exception_handled(mock_db_connection):
     with patch("backend.worker.upsert_user", new_callable=AsyncMock) as mock_upsert, \
          patch("backend.worker.send_telegram_message", new_callable=AsyncMock) as mock_send, \
          patch("backend.worker.ingest_image", new_callable=AsyncMock) as mock_ingest_image, \
-         patch("backend.worker._pool") as mock_pool:
+         patch("backend.db.connection._pool") as mock_pool:
          
         mock_upsert.return_value = 1
         conn, cursor = mock_db_connection
@@ -155,7 +155,7 @@ async def test_pdf_deduplication_exception_handled(mock_db_connection):
     with patch("backend.worker.upsert_user", new_callable=AsyncMock) as mock_upsert, \
          patch("backend.worker.send_telegram_message", new_callable=AsyncMock) as mock_send, \
          patch("backend.worker.ingest_pdf", new_callable=AsyncMock) as mock_ingest_pdf, \
-         patch("backend.worker._pool") as mock_pool, \
+         patch("backend.db.connection._pool") as mock_pool, \
          patch("backend.services.telegram_downloader.download_telegram_file_robust", new_callable=AsyncMock) as mock_download, \
          patch("fitz.open") as mock_fitz_open:
          

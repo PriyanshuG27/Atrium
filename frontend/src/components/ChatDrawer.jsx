@@ -202,12 +202,12 @@ function LiquidOrb({ onClick }) {
       ctx.lineWidth = 2;
       ctx.stroke();
 
-      // Paint stylized golden "R" logo inside the orb center
+      // Paint stylized golden "A" logo inside the orb center
       ctx.beginPath();
       ctx.lineWidth = 2;
       ctx.strokeStyle = hoverRef.current ? '#dfb375' : '#cfa365';
       
-      // Calculate dynamic attraction shift for the "R" monogram
+      // Calculate dynamic attraction shift for the "A" monogram
       let shiftX = 0;
       let shiftY = 0;
       if (mDist < 80) {
@@ -217,21 +217,20 @@ function LiquidOrb({ onClick }) {
         shiftY = Math.sin(angle) * shiftRatio;
       }
       
-      const rx = cx - 4 + shiftX;
+      const rx = cx - 4.5 + shiftX;
       const ry = cy - 7 + shiftY;
       
-      // Vertical left stem of R
+      // Left leg of A
       ctx.moveTo(rx, ry + 14);
-      ctx.lineTo(rx, ry);
+      ctx.lineTo(rx + 4.5, ry);
       
-      // Top loop of R
-      ctx.lineTo(rx + 5, ry);
-      ctx.quadraticCurveTo(rx + 9, ry + 3, rx + 5, ry + 7);
-      ctx.lineTo(rx, ry + 7);
+      // Right leg of A
+      ctx.moveTo(rx + 4.5, ry);
+      ctx.lineTo(rx + 9, ry + 14);
       
-      // Diagonal leg of R
-      ctx.moveTo(rx + 2, ry + 7);
-      ctx.lineTo(rx + 8, ry + 14);
+      // Crossbar of A
+      ctx.moveTo(rx + 1.8, ry + 8);
+      ctx.lineTo(rx + 7.2, ry + 8);
       
       ctx.stroke();
 

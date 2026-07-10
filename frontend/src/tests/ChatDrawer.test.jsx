@@ -135,9 +135,9 @@ describe('ChatDrawer RAG Assistant', () => {
         sources: [
           {
             id: 103,
-            title: 'Recall Github Repository',
+            title: 'Atrium Github Repository',
             summary: 'Github repo holding the code.',
-            source_url: 'https://github.com/PriyanshuG27/Recall',
+            source_url: 'https://github.com/PriyanshuG27/Atrium',
             tags: ['git']
           }
         ]
@@ -152,17 +152,17 @@ describe('ChatDrawer RAG Assistant', () => {
     fireEvent.click(screen.getByText('[ SEND ]'));
 
     await waitFor(() => {
-      expect(screen.getByText('Recall Github Repository')).toBeInTheDocument();
+      expect(screen.getByText('Atrium Github Repository')).toBeInTheDocument();
     });
 
     // Check that title has clickable link class and external arrow
-    const titleEl = screen.getByText(/Recall Github Repository/);
+    const titleEl = screen.getByText(/Atrium Github Repository/);
     expect(titleEl).toHaveClass('clickable-link');
     expect(screen.getByText('↗')).toBeInTheDocument();
 
     // Click the title and verify window.open is called
     fireEvent.click(titleEl);
-    expect(window.open).toHaveBeenCalledWith('https://github.com/PriyanshuG27/Recall', '_blank');
+    expect(window.open).toHaveBeenCalledWith('https://github.com/PriyanshuG27/Atrium', '_blank');
   });
 
   it('triggers onItemSelect when a source card is clicked', async () => {

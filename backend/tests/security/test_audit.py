@@ -48,7 +48,7 @@ async def test_audit_log_delete_item(client):
     try:
         # DELETE /api/items/101
         headers = {"x-request-id": "test-req-999"}
-        resp = client.delete("/api/items/101", cookies={"recall_session": token}, headers=headers)
+        resp = client.delete("/api/items/101", cookies={"atrium_session": token}, headers=headers)
         
         # Verify response code
         assert resp.status_code == 204
@@ -111,7 +111,7 @@ async def test_audit_log_update_settings(client):
         # PATCH /api/me to change settings
         headers = {"x-request-id": "test-req-777"}
         req_payload = {"timezone_offset": 3.0, "digest_enabled": False}
-        resp = client.patch("/api/me", json=req_payload, cookies={"recall_session": token}, headers=headers)
+        resp = client.patch("/api/me", json=req_payload, cookies={"atrium_session": token}, headers=headers)
         
         assert resp.status_code == 200
         
@@ -160,7 +160,7 @@ async def test_audit_log_hearth_actions(client):
             None
         ]
         
-        resp = client.post("/api/hearth/invite", cookies={"recall_session": token})
+        resp = client.post("/api/hearth/invite", cookies={"atrium_session": token})
         assert resp.status_code == 200
         
         # Verify log_audit database write for change_permissions / hearth_invite_created

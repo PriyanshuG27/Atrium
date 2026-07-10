@@ -189,7 +189,7 @@ def test_search_api_endpoint_success(client):
     current_cursor = RecordingCursor(user_id=42, vector_rows=mock_vector, text_rows=mock_text)
     token = get_auth_token(user_id=42)
     
-    response = client.post("/api/search", json={"query": "fastapi"}, cookies={"recall_session": token})
+    response = client.post("/api/search", json={"query": "fastapi"}, cookies={"atrium_session": token})
     
     assert response.status_code == 200
     data = response.json()
@@ -236,7 +236,7 @@ def test_search_cross_user_isolation(client):
     current_cursor = RecordingCursor(user_id=100)
     
     token = get_auth_token(user_id=100)
-    response = client.post("/api/search", json={"query": "test"}, cookies={"recall_session": token})
+    response = client.post("/api/search", json={"query": "test"}, cookies={"atrium_session": token})
     
     assert response.status_code == 200
     
@@ -265,8 +265,10 @@ async def test_embed_text_cascades():
     
     patch_get = mock.patch("backend.services.redis_client.redis.get", return_value=None)
     patch_setex = mock.patch("backend.services.redis_client.redis.setex", return_value=True)
+    patch_request = mock.patch("backend.services.redis_client.redis._request", return_value={"result": "OK"})
     patch_get.start()
     patch_setex.start()
+    patch_request.start()
     
     try:
         # Mock ENV to be production so it goes past the test check
@@ -429,6 +431,7 @@ async def test_embed_text_cascades():
         # Stop patches
         patch_get.stop()
         patch_setex.stop()
+        patch_request.stop()
         # Restore settings
         settings.ENV = orig_env
         settings.MODAL_API_TOKEN = orig_modal_token
