@@ -41,14 +41,27 @@ function useDemoGraph(canvasRef) {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Place nodes in a nice layout
-    const W = canvas.width;
-    const H = canvas.height;
-    const cx = W / 2;
-    const cy = H / 2;
+    // 1. Set canvas resolution to container size immediately before placing nodes
+    canvas.width  = canvas.offsetWidth || 800;
+    canvas.height = canvas.offsetHeight || 600;
 
-    // Hub positions (spiral seeded)
-    const hubPositions = [
+    let W = canvas.width;
+    let H = canvas.height;
+    let cx = W / 2;
+    let cy = H / 2;
+
+    const resize = () => {
+      canvas.width  = canvas.offsetWidth;
+      canvas.height = canvas.offsetHeight;
+      W = canvas.width;
+      H = canvas.height;
+      cx = W / 2;
+      cy = H / 2;
+    };
+    window.addEventListener('resize', resize);
+
+    // Hub positions (dynamic based on current center)
+    const getHubPositions = () => [
       { x: cx - 130, y: cy - 60 },  // 0 Research
       { x: cx + 140, y: cy + 50 },  // 6 Ideas
       { x: cx - 20,  y: cy + 150 }, // 10 Projects
@@ -57,6 +70,7 @@ function useDemoGraph(canvasRef) {
     const nodes = DEMO_NODES.map((n, i) => {
       let x, y;
       if (n.type === 'hub') {
+        const hubPositions = getHubPositions();
         const hi = [0,6,10].indexOf(n.id);
         x = hubPositions[hi]?.x ?? cx;
         y = hubPositions[hi]?.y ?? cy;
@@ -166,6 +180,7 @@ function useDemoGraph(canvasRef) {
 
     return () => {
       cancelAnimationFrame(rafId);
+      window.removeEventListener('resize', resize);
     };
   }, [canvasRef]);
 }
@@ -193,19 +208,6 @@ export default function Login() {
       if (i >= fullText.length) clearInterval(iv);
     }, 42);
     return () => clearInterval(iv);
-  }, []);
-
-  // Set canvas size on mount
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const resize = () => {
-      canvas.width  = canvas.offsetWidth;
-      canvas.height = canvas.offsetHeight;
-    };
-    resize();
-    window.addEventListener('resize', resize);
-    return () => window.removeEventListener('resize', resize);
   }, []);
 
   // Telegram widget
