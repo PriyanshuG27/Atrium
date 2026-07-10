@@ -243,19 +243,46 @@ export default function Login() {
     return () => clearInterval(iv);
   }, []);
 
-  // Telegram widget
+  // Telegram widget — callback mode (NOT redirect mode which breaks SPAs)
   useEffect(() => {
+    // Define the global callback BEFORE the script loads
+    window.onTelegramAuth = async (user) => {
+      try {
+        // user = { id, first_name, username, photo_url, auth_date, hash }
+        const params = new URLSearchParams(
+          Object.entries(user).map(([k, v]) => [k, String(v)])
+        );
+        const res = await fetch(`/auth/telegram?${params.toString()}`);
+        if (res.ok) {
+          // Cookie is now set — check /auth/me to get the user profile
+          const check = await fetch('/auth/me');
+          if (check.ok) {
+            const profile = await check.json();
+            login({ id: profile.id, chat_id: profile.chat_id, drive_connected: profile.drive_connected, google_last_sync: profile.google_last_sync });
+          }
+        } else {
+          const body = await res.json().catch(() => ({}));
+          setError(`Login failed: ${body.detail || res.status}`);
+        }
+      } catch (err) {
+        setError('Login failed. Please try again.');
+      }
+    };
+
     const script = document.createElement('script');
-    script.src = 'https://telegram.org/js/telegram-widget.js';
+    script.src = 'https://telegram.org/js/telegram-widget.js?22';
     script.setAttribute('data-telegram-login', import.meta.env.VITE_BOT_USERNAME || '');
     script.setAttribute('data-size', 'large');
     script.setAttribute('data-radius', '4');
-    script.setAttribute('data-auth-url', `${window.location.origin}/auth/telegram`);
+    script.setAttribute('data-onauth', 'onTelegramAuth(user)');
     script.async = true;
     const container = document.getElementById('tg-widget');
     if (container) container.appendChild(script);
-    return () => { if (container) container.innerHTML = ''; };
-  }, []);
+    return () => {
+      if (container) container.innerHTML = '';
+      delete window.onTelegramAuth;
+    };
+  }, [login]);
 
   const handleDeveloperBypass = async () => {
     try {
@@ -483,7 +510,7 @@ export default function Login() {
                 Open in Telegram
               </a>
               <div style={{ fontFamily: '"Inter", sans-serif', fontSize: 10, color: 'rgba(244,239,235,0.2)', marginTop: '0.4rem' }}>
-                Opens bot → tap "Open App" → instant login
+                Opens bot → send /start → tap "Open Atrium 🧠"
               </div>
             </div>
           </div>

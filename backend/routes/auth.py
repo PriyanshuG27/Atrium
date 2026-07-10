@@ -136,36 +136,34 @@ async def auth_telegram(
             await db.commit()
             logger.info("Updated Telegram profile details for user %d", user_id)
     
-    # Issue JWT: {sub: users.id, chat_id: telegram_chat_id, exp: +7 days}
+    # Issue JWT
     payload = {
         "sub": str(user_id),
         "chat_id": str(telegram_chat_id),
         "exp": now + 7 * 86400
     }
     token = generate_jwt(payload, settings.JWT_SECRET)
-    
-    # Redirect the authenticated user to WEBSITE_URL/dashboard
-    redirect_url = f"{settings.WEBSITE_URL}/dashboard"
-    redirect_response = RedirectResponse(url=redirect_url)
-    
-    redirect_response.set_cookie(
-        "atrium_session",
-        token,
-        httponly=True,
-        secure=settings.ENV != "development",
-        samesite="lax",
-        max_age=604800
-    )
-    redirect_response.set_cookie(
-        "jwt",
-        token,
-        httponly=True,
-        secure=settings.ENV != "development",
-        samesite="lax",
-        max_age=604800
-    )
-    logger.info("User %d logged in via Telegram login widget.", user_id)
-    return redirect_response
+    cookie_secure = settings.ENV != "development"
+
+    # Detect callback vs redirect mode:
+    # Widget callback mode calls this via fetch() — no Accept: text/html header
+    accept = request.headers.get("Accept", "")
+    is_fetch = "text/html" not in accept
+
+    if is_fetch:
+        # Callback mode: return JSON, set cookie on response object
+        response.set_cookie("atrium_session", token, httponly=True, secure=cookie_secure, samesite="lax", max_age=604800)
+        response.set_cookie("jwt", token, httponly=True, secure=cookie_secure, samesite="lax", max_age=604800)
+        logger.info("User %d logged in via Telegram widget (callback mode).", user_id)
+        return {"status": "ok", "user_id": user_id}
+    else:
+        # Redirect mode (legacy): redirect browser to dashboard
+        redirect_url = f"{settings.WEBSITE_URL}/dashboard"
+        redirect_response = RedirectResponse(url=redirect_url)
+        redirect_response.set_cookie("atrium_session", token, httponly=True, secure=cookie_secure, samesite="lax", max_age=604800)
+        redirect_response.set_cookie("jwt", token, httponly=True, secure=cookie_secure, samesite="lax", max_age=604800)
+        logger.info("User %d logged in via Telegram widget (redirect mode).", user_id)
+        return redirect_response
 
 @router.post(
     "/logout",
