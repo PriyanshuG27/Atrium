@@ -171,46 +171,20 @@ export default function Settings() {
     }
   };
 
-  const handleExportData = async () => {
+  const handleExportData = () => {
+    AudioEngine.playClick();
     setExporting(true);
-    try {
-      const response = await axios.get('/api/export', { responseType: 'blob' });
-      const filename = `recall-export-${new Date().toISOString().split('T')[0]}.json`;
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', filename);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      addToast('Data export downloaded', 'success');
-    } catch (err) {
-      console.error('Failed to export data:', err);
-      addToast('Failed to export data', 'error');
-    } finally {
-      setExporting(false);
-    }
+    addToast('Starting GDPR data export...', 'info');
+    window.location.href = '/api/export';
+    setTimeout(() => setExporting(false), 2000);
   };
 
-  const handleExportZip = async () => {
+  const handleExportZip = () => {
+    AudioEngine.playClick();
     setExportingZip(true);
-    try {
-      const response = await axios.get('/api/export/zip', { responseType: 'blob' });
-      const filename = `recall-obsidian-export-${new Date().toISOString().split('T')[0]}.zip`;
-      const url = window.URL.createObjectURL(response.data);
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', filename);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      addToast('Obsidian Vault ZIP downloaded successfully', 'success');
-    } catch (err) {
-      console.error('Failed to export Obsidian ZIP:', err);
-      addToast('Failed to export Obsidian ZIP', 'error');
-    } finally {
-      setExportingZip(false);
-    }
+    addToast('Generating Obsidian Vault export...', 'info');
+    window.location.href = '/api/export/zip';
+    setTimeout(() => setExportingZip(false), 2000);
   };
 
   const handleImportZip = async (e) => {
@@ -646,7 +620,8 @@ export default function Settings() {
               <button
                 onClick={() => {
                   AudioEngine.playClick();
-                  window.open('/api/extension/download', '_blank');
+                  addToast('Downloading extension ZIP...', 'info');
+                  window.location.href = '/api/extension/download';
                 }}
                 style={{
                   width: '100%',

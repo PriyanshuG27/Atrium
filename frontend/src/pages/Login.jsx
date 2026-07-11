@@ -343,6 +343,9 @@ export default function Login() {
         .bypass-input:focus { border-color: rgba(207,163,101,0.4) !important; outline: none; }
         .bypass-btn:hover { opacity: 0.8; }
         .back-link {
+          position: absolute;
+          top: 2rem;
+          left: 2.5rem;
           background: none;
           border: none;
           color: rgba(244,239,235,0.45);
@@ -354,6 +357,7 @@ export default function Login() {
           gap: 6px;
           padding: 0;
           transition: color 0.2s;
+          z-index: 20;
         }
         .back-link:hover {
           color: #CFA365 !important;
@@ -402,7 +406,7 @@ export default function Login() {
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'center',
-        padding: '2rem 3rem 2rem 2.5rem',
+        padding: '4.5rem 3rem 2rem 2.5rem',
         position: 'relative',
         zIndex: 10,
         borderLeft: '1px solid rgba(244,239,235,0.05)',
@@ -412,17 +416,16 @@ export default function Login() {
       }}>
 
         {/* Back Button */}
-        <div className="login-step" style={{ animationDelay: '0.02s', marginBottom: '1.5rem' }}>
-          <button 
-            className="back-link"
-            onClick={() => {
-              window.history.pushState({}, '', '/');
-              window.dispatchEvent(new PopStateEvent('popstate'));
-            }}
-          >
-            ← Back to Atrium
-          </button>
-        </div>
+        <button 
+          className="back-link login-step"
+          style={{ animationDelay: '0.02s' }}
+          onClick={() => {
+            window.history.pushState({}, '', '/');
+            window.dispatchEvent(new PopStateEvent('popstate'));
+          }}
+        >
+          ← Back to Atrium
+        </button>
 
         {/* TWA overlay — visible inside Telegram */}
         {twaDebug && twaDebug.step === 'initData empty' && (

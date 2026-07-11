@@ -99,10 +99,12 @@ describe('Settings Page Component', () => {
   });
 
   it('handles exporting data backup', async () => {
+    const locationStub = { href: '' };
+    vi.stubGlobal('location', locationStub);
+
     axios.get.mockImplementation((url) => {
       if (url === '/api/me') return Promise.resolve({ data: {} });
       if (url === '/api/reminders') return Promise.resolve({ data: [] });
-      if (url === '/api/export') return Promise.resolve({ data: new Blob(['{}']) });
       return Promise.resolve({ data: {} });
     });
 
@@ -126,7 +128,9 @@ describe('Settings Page Component', () => {
     fireEvent.click(exportBtn);
 
     await waitFor(() => {
-      expect(axios.get).toHaveBeenCalledWith('/api/export', expect.anything());
+      expect(locationStub.href).toBe('/api/export');
     });
+
+    vi.unstubAllGlobals();
   });
 });
