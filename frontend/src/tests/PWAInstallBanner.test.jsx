@@ -52,4 +52,32 @@ describe('PWAInstallBanner Component', () => {
     expect(sessionStorage.getItem('atrium_pwa_banner_dismissed')).toBe('true');
     expect(screen.queryByText('Install Atrium')).not.toBeInTheDocument();
   });
+
+  it('renders custom installation prompt on iOS', () => {
+    const originalUserAgent = navigator.userAgent;
+    Object.defineProperty(navigator, 'userAgent', {
+      value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)',
+      configurable: true
+    });
+    
+    Object.defineProperty(window.navigator, 'standalone', {
+      value: false,
+      configurable: true
+    });
+
+    render(<PWAInstallBanner />);
+
+    expect(screen.getByText('Install Atrium')).toBeInTheDocument();
+    expect(screen.getByText(/Tap Share/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Install' })).not.toBeInTheDocument();
+
+    const closeBtn = screen.getByRole('button', { name: 'Close' });
+    fireEvent.click(closeBtn);
+
+    expect(sessionStorage.getItem('atrium_pwa_banner_dismissed')).toBe('true');
+    expect(screen.queryByText('Install Atrium')).not.toBeInTheDocument();
+
+    Object.defineProperty(navigator, 'userAgent', { value: originalUserAgent, configurable: true });
+    Object.defineProperty(window.navigator, 'standalone', { value: undefined, configurable: true });
+  });
 });

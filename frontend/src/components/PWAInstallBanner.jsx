@@ -7,8 +7,14 @@ import React, { useState, useEffect } from 'react';
 export default function PWAInstallBanner() {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [visible, setVisible] = useState(false);
+  const [isIOS, setIsIOS] = useState(false);
 
   useEffect(() => {
+    // Detect iOS
+    const userAgent = window.navigator.userAgent || '';
+    const ios = /iPad|iPhone|iPod/.test(userAgent) && !window.MSStream;
+    setIsIOS(ios);
+
     const handleBeforeInstallPrompt = (e) => {
       e.preventDefault();
       setDeferredPrompt(e);
@@ -21,8 +27,14 @@ export default function PWAInstallBanner() {
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
 
-    // Hide if already in standalone display mode
-    if (window.matchMedia('(display-mode: standalone)').matches) {
+    // If iOS and not already standalone, show custom install instruction
+    const isStandalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
+    if (ios && !isStandalone) {
+      const dismissed = sessionStorage.getItem('atrium_pwa_banner_dismissed');
+      if (!dismissed) {
+        setVisible(true);
+      }
+    } else if (isStandalone) {
       setVisible(false);
     }
 
@@ -112,30 +124,38 @@ export default function PWAInstallBanner() {
               lineHeight: 1.3
             }}
           >
-            {window.location.hostname || 'atrium.onrender.com'}
+            {isIOS ? (
+              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                Tap Share <span role="img" aria-label="share">📤</span> and "Add to Home Screen"
+              </span>
+            ) : (
+              window.location.hostname || 'atrium.onrender.com'
+            )}
           </span>
         </div>
       </div>
 
       {/* Right section: Action Buttons */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '1.15rem' }}>
-        <button
-          onClick={handleInstall}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: '#a3e635',
-            fontWeight: 700,
-            fontSize: '0.9375rem',
-            cursor: 'pointer',
-            padding: 0,
-            transition: 'opacity 0.2s'
-          }}
-          onMouseEnter={(e) => (e.target.style.opacity = '0.8')}
-          onMouseLeave={(e) => (e.target.style.opacity = '1.0')}
-        >
-          Install
-        </button>
+        {!isIOS && (
+          <button
+            onClick={handleInstall}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: '#a3e635',
+              fontWeight: 700,
+              fontSize: '0.9375rem',
+              cursor: 'pointer',
+              padding: 0,
+              transition: 'opacity 0.2s'
+            }}
+            onMouseEnter={(e) => (e.target.style.opacity = '0.8')}
+            onMouseLeave={(e) => (e.target.style.opacity = '1.0')}
+          >
+            Install
+          </button>
+        )}
         <button
           onClick={handleClose}
           style={{

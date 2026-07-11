@@ -169,7 +169,7 @@ function App() {
     return () => { setToastHandler(null); setUnauthorizedHandler(null); };
   }, [addToast, logout]);
 
-  /* ── PWA install prompt ────────────────────────────────── */
+  /* ── PWA install prompt / visits tracking ──────────────── */
   useEffect(() => {
     const isActive = sessionStorage.getItem('atrium_session_active');
     if (!isActive) {
@@ -177,40 +177,7 @@ function App() {
       const v = parseInt(localStorage.getItem('atrium_visits') || '0', 10);
       localStorage.setItem('atrium_visits', (v + 1).toString());
     }
-
-    let deferred = null;
-    let toastId  = null;
-
-    const onPrompt = (e) => {
-      e.preventDefault();
-      deferred = e;
-      const visits = parseInt(localStorage.getItem('atrium_visits') || '0', 10);
-      if (visits >= 3) {
-        const doInstall = async () => {
-          if (!deferred) return;
-          deferred.prompt();
-          const { outcome } = await deferred.userChoice;
-          deferred = null;
-          if (toastId) removeToast(toastId);
-        };
-        toastId = addToast(
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', justifyContent: 'space-between', width: '100%' }}>
-            <span>Add Atrium to your homescreen?</span>
-            <button onClick={doInstall} className="btn" style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem', minHeight: 28, background: 'var(--accent-gold)', color: '#000', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 700 }}>
-              Install
-            </button>
-          </div>,
-          'info', { persistent: true }
-        );
-      }
-    };
-
-    window.addEventListener('beforeinstallprompt', onPrompt);
-    return () => {
-      window.removeEventListener('beforeinstallprompt', onPrompt);
-      if (toastId) removeToast(toastId);
-    };
-  }, [addToast, removeToast]);
+  }, []);
 
   /* ── Online / Offline ──────────────────────────────────── */
   useEffect(() => {
@@ -339,9 +306,12 @@ function App() {
   /* ── Landing page (public) ──────────────────────── */
   if (currentRoom === 'landing') {
     return (
-      <Suspense fallback={<SplashScreen />}>
-        <Landing />
-      </Suspense>
+      <>
+        <Suspense fallback={<SplashScreen />}>
+          <Landing />
+        </Suspense>
+        <PWAInstallBanner />
+      </>
     );
   }
 
@@ -351,6 +321,7 @@ function App() {
       <>
         <CustomCursor />
         <Login />
+        <PWAInstallBanner />
       </>
     );
   }
@@ -527,8 +498,8 @@ function App() {
         />
       )}
 
-      {/* PWA Floating Install Banner */}
-      <PWAInstallBanner />
+      {/* PWA Floating Install Banner — only on home page (archive) */}
+      {currentRoom === 'archive' && <PWAInstallBanner />}
       </div>
     </PerfProvider>
     </RoomStateProvider>

@@ -11,27 +11,21 @@ const CAMERA_Z = 9;
 
 function BackgroundGrid() {
   const meshRef = useRef();
+  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768;
+
   useFrame(({ clock }) => {
+    if (isMobile) return;
     if (meshRef.current) meshRef.current.rotation.z = Math.sin(clock.getElapsedTime() * 0.05) * 0.02;
   });
+
+  if (isMobile) return null;
+
   return (
     <mesh ref={meshRef} position={[0, 0, -8]}>
       <planeGeometry args={[40, 30, 20, 15]} />
       <meshBasicMaterial color="#CFA365" wireframe transparent opacity={0.025} />
     </mesh>
   );
-}
-
-function CursorFlashlight() {
-  const lightRef = useRef();
-  const { mouse, viewport } = useThree();
-  useFrame(() => {
-    if (lightRef.current) {
-      lightRef.current.position.x = (mouse.x * viewport.width) / 2;
-      lightRef.current.position.y = (mouse.y * viewport.height) / 2;
-    }
-  });
-  return <pointLight ref={lightRef} color="#CFA365" intensity={0.6} distance={8} decay={2} position={[0, 0, 5]} />;
 }
 
 function CylinderScene({ items, matchingIds, onCardClick, hasSelection, selectedItemId, searchQuery, initialScrollIndex }) {
@@ -44,6 +38,7 @@ function CylinderScene({ items, matchingIds, onCardClick, hasSelection, selected
     activeIndexRef.current = Math.round(initialScrollIndex || 0);
   }
   const [activeIndex, setActiveIndex] = useState(() => Math.round(initialScrollIndex || 0));
+  const [scrollVal, setScrollVal] = useState(() => initialScrollIndex || 0);
 
   // Automatically scroll/transition the cylinder to target card when it is selected
   useEffect(() => {
@@ -157,9 +152,15 @@ function CylinderScene({ items, matchingIds, onCardClick, hasSelection, selected
 
   useFrame(() => {
     if (items.length === 0) return;
-    scrollProgress.current = THREE.MathUtils.lerp(scrollProgress.current, targetScrollProgress.current, 0.1);
+    
+    const nextVal = THREE.MathUtils.lerp(scrollProgress.current, targetScrollProgress.current, 0.1);
+    const delta = Math.abs(nextVal - scrollProgress.current);
+    if (delta > 0.0001) {
+      scrollProgress.current = nextVal;
+      setScrollVal(nextVal);
+    }
 
-    // Only setState when index actually changes (avoids re-rendering every frame)
+    // Only setState when index actually changes
     const newActive = Math.round(scrollProgress.current);
     if (newActive !== activeIndexRef.current) {
       activeIndexRef.current = newActive;
@@ -179,7 +180,7 @@ function CylinderScene({ items, matchingIds, onCardClick, hasSelection, selected
   return (
     <group ref={groupRef}>
       {items.map((item, i) => {
-        const dist = i - scrollProgress.current;
+        const dist = i - scrollVal;
         const absDist = Math.abs(dist);
 
         // Cull cards that are far away from active view
@@ -222,6 +223,8 @@ function CylinderScene({ items, matchingIds, onCardClick, hasSelection, selected
 
 export default function ArchiveCylinder({ items, matchingIds, loading, onCardClick, hasSelection, selectedItemId, searchQuery, initialScrollIndex }) {
   const { lowPerf } = usePerf();
+  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768;
+  const useAntialias = !isMobile && !lowPerf;
 
   return (
     <div style={{ position: 'absolute', inset: 0, background: 'var(--bg-void)', overflow: 'hidden' }}>
@@ -239,13 +242,20 @@ export default function ArchiveCylinder({ items, matchingIds, loading, onCardCli
         </div>
       )}
       
-      <Canvas camera={{ position: [0, 0, CAMERA_Z], fov: 50 }} style={{ background: 'transparent', width: '100%', height: '100%' }} gl={{ antialias: !lowPerf, alpha: true }}>
-        <ambientLight intensity={0.15} color="#F4EFEB" />
-        {!lowPerf && <CursorFlashlight />}
+      <Canvas 
+        camera={{ position: [0, 0, CAMERA_Z], fov: 50 }} 
+        style={{ background: 'transparent', width: '100%', height: '100%' }} 
+        gl={{ 
+          antialias: useAntialias, 
+          alpha: true, 
+          powerPreference: 'high-performance' 
+        }}
+      >
         <BackgroundGrid />
         {items.length > 0 && <CylinderScene items={items} matchingIds={matchingIds} onCardClick={onCardClick} hasSelection={hasSelection} selectedItemId={selectedItemId} searchQuery={searchQuery} initialScrollIndex={initialScrollIndex} />}
       </Canvas>
     </div>
   );
 }
+
 
