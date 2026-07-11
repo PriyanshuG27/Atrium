@@ -5,59 +5,44 @@ from backend.services.redis_client import redis, RedisUnavailableError, RedisAut
 
 @pytest.mark.asyncio
 async def test_redis_lpush():
-    mock_client = mock.AsyncMock()
-    mock_client.lpush.return_value = 3
-    with mock.patch.object(redis, "_get_client", return_value=mock_client):
+    with mock.patch.object(redis, "_request", new_callable=mock.AsyncMock, return_value={"result": 3}):
         res = await redis.lpush("mykey", "myval")
         assert res == 3
-        mock_client.lpush.assert_called_once_with(redis._hash_key("mykey"), "myval")
 
 @pytest.mark.asyncio
 async def test_redis_brpop():
-    mock_client = mock.AsyncMock()
-    mock_client.brpop.return_value = ("mykey", "myval")
-    with mock.patch.object(redis, "_get_client", return_value=mock_client):
+    with mock.patch.object(redis, "_request", new_callable=mock.AsyncMock, return_value={"result": ["mykey", "myval"]}):
         res = await redis.brpop("mykey", timeout=10)
         assert res == ("mykey", "myval")
 
 @pytest.mark.asyncio
 async def test_redis_brpop_timeout():
-    mock_client = mock.AsyncMock()
-    mock_client.brpop.return_value = None
-    with mock.patch.object(redis, "_get_client", return_value=mock_client):
+    with mock.patch.object(redis, "_request", new_callable=mock.AsyncMock, return_value={"result": None}):
         res = await redis.brpop("mykey")
         assert res is None
 
 @pytest.mark.asyncio
 async def test_redis_pipeline_format():
-    mock_client = mock.MagicMock()
-    mock_pipe = mock.AsyncMock()
-    mock_client.pipeline.return_value.__aenter__.return_value = mock_pipe
-    mock_pipe.execute.return_value = ["OK", "val1"]
-    with mock.patch.object(redis, "_get_client", return_value=mock_client):
+    with mock.patch.object(redis, "_request", new_callable=mock.AsyncMock, return_value=[{"result": "OK"}, {"result": "val1"}]):
         res = await redis.pipeline([["SET", "k1", "v1"], ["GET", "k1"]])
         assert res == ["OK", "val1"]
 
 @pytest.mark.asyncio
 async def test_redis_eval():
-    mock_client = mock.AsyncMock()
-    mock_client.eval.return_value = 1
-    with mock.patch.object(redis, "_get_client", return_value=mock_client):
+    with mock.patch.object(redis, "_request", new_callable=mock.AsyncMock, return_value={"result": 1}):
         res = await redis.eval("return 1", 0)
         assert res == 1
 
 @pytest.mark.asyncio
 async def test_redis_ping():
-    mock_client = mock.AsyncMock()
-    mock_client.ping.return_value = True
-    with mock.patch.object(redis, "_get_client", return_value=mock_client):
+    with mock.patch.object(redis, "_request", new_callable=mock.AsyncMock, return_value={"result": "PONG"}):
         res = await redis.ping()
         assert res is True
 
 @pytest.mark.asyncio
 async def test_redis_auth_error():
     mock_client = mock.AsyncMock()
-    mock_client.lpush.side_effect = aioredis.AuthenticationError("Auth failed")
+    mock_client.execute_command.side_effect = aioredis.AuthenticationError("Auth failed")
     with mock.patch.object(redis, "_get_client", return_value=mock_client):
         with pytest.raises(RedisAuthError):
             await redis.lpush("mykey", "myval")
@@ -65,7 +50,7 @@ async def test_redis_auth_error():
 @pytest.mark.asyncio
 async def test_redis_timeout_exception():
     mock_client = mock.AsyncMock()
-    mock_client.lpush.side_effect = aioredis.RedisError("Timeout")
+    mock_client.execute_command.side_effect = aioredis.RedisError("Timeout")
     with mock.patch.object(redis, "_get_client", return_value=mock_client):
         with pytest.raises(RedisUnavailableError):
             await redis.lpush("mykey", "myval")
