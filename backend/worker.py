@@ -1100,7 +1100,8 @@ async def process_single_item(task: Dict[str, Any], user_id: int, chat_id: str, 
     text_content = task.get("text")
     update_id = task.get("update_id")
     item_id = None
-    
+    return_ids = None  # Set to list when multiple items saved (e.g. image with 2 URLs)
+
     # Retrieve user context from deferred replies in Redis (if any exist for the original message)
     user_context = None
     user_msg_id = task.get("message_id")
@@ -1391,8 +1392,13 @@ async def process_single_item(task: Dict[str, Any], user_id: int, chat_id: str, 
             except Exception as loop_err:
                 logger.error("Error processing success notification for item %s: %s", saved_id, loop_err)
                     
+        # When multiple items were saved (e.g. image with 2 extracted URLs),
+        # track all IDs to return to the caller (process_batch_task),
+        # but keep item_id = primary_id for single-item DB operations below.
+        return_ids = item_ids if len(item_ids) > 1 else primary_id
         item_id = primary_id
-            
+
+
     else:
         logger.warning("Unsupported content type '%s'", content_type)
         
@@ -1484,7 +1490,9 @@ async def process_single_item(task: Dict[str, Any], user_id: int, chat_id: str, 
         except Exception as ext_err:
             logger.error("Failed to run entity extraction on item %d: %s", item_id, ext_err)
 
-    return item_id, True
+    # Return all IDs when multiple items were saved so the caller (process_batch_task)
+    # can send a success card for every item.
+    return return_ids if return_ids is not None else item_id, True
 
 # Global task ownership registry and shutdown event
 worker_background_tasks = set()
