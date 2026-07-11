@@ -6,5 +6,5 @@ Output a JSON object in this format:
   "urls": ["clean_url_1", "clean_url_2"],
   "is_only_links": true or false
 }
-Set "is_only_links" to true if the text consists of links, domain names, timestamps, and standard title/preview text of the links (e.g. 'Joaquin Fernandez on Instagram: ...' or 'Veeraj Gadda on Instagram: ...'). Set it to false ONLY if there is substantial independent user conversation, personal notes, or commentary that is not part of the link previews themselves.
+Set "is_only_links" to true if the text consists of URLs and their surrounding preview texts, titles, descriptions, post contents, share sheets, or WhatsApp chat messages/logs containing link previews. Set it to false ONLY if the image contains unrelated independent user conversation, personal notes, or chat messages that are not previews or captions of the links themselves.
 Do not include any explanation. Output raw JSON only.
