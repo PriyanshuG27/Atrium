@@ -229,7 +229,6 @@ async def perform_nvidia_ocr(image_bytes: bytes, api_key: str) -> Optional[str]:
         
     if not models:
         models = [
-            "meta/llama-4-maverick-17b-128e-instruct",
             "nvidia/nemotron-nano-12b-v2-vl",
             "nvidia/cosmos3-nano-reasoner"
         ]

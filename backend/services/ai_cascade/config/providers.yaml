@@ -42,7 +42,7 @@ providers:
         status: active
         replacement: none
       meta/llama-4-maverick-17b-128e-instruct:
-        status: active
+        status: inactive
         replacement: nvidia/nemotron-nano-12b-v2-vl
       nvidia/nemotron-nano-12b-v2-vl:
         status: active

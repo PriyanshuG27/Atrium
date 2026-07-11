@@ -327,7 +327,7 @@ async def test_nvidia_caption_image_success(monkeypatch):
 
     async def mock_post(*args, **kwargs):
         payload = kwargs.get("json") or {}
-        assert payload.get("model") == "meta/llama-4-maverick-17b-128e-instruct"
+        assert payload.get("model") == "nvidia/nemotron-nano-12b-v2-vl"
         assert payload.get("messages")[0]["content"][0]["text"] == "Provide a detailed caption or summary of this image."
         return mock_resp
 

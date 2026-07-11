@@ -97,7 +97,7 @@ class NvidiaProvider(BaseProvider):
                             active_models.append(m)
                     except ValueError:
                         continue
-            target_model = active_models[0] if active_models else "meta/llama-4-maverick-17b-128e-instruct"
+            target_model = active_models[0] if active_models else "nvidia/nemotron-nano-12b-v2-vl"
 
         url = "https://integrate.api.nvidia.com/v1/chat/completions"
         headers = {
