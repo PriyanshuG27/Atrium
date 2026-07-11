@@ -7,6 +7,13 @@ from backend.worker import process_task
 from backend.exceptions import DuplicateItemException
 from backend.services.voice_ingester import ingest_voice
 
+@pytest.fixture(autouse=True)
+def mock_redis():
+    mock_r = AsyncMock()
+    mock_r.get.return_value = None
+    with patch("backend.worker.redis", mock_r):
+        yield mock_r
+
 @pytest.fixture
 def mock_db_connection():
     conn = MagicMock()

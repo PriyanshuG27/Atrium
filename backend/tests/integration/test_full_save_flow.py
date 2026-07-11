@@ -68,10 +68,7 @@ from backend.services.redis_client import redis, UpstashRedis
 
 # Monkeypatch UpstashRedis to run real REST requests in tests (bypassing auto-mocking)
 async def real_request(self, endpoint: str, json_data) -> dict | list:
-    client = self._get_client()
-    resp = await client.post(endpoint, json=json_data)
-    resp.raise_for_status()
-    return resp.json()
+    return await _original_upstash_request(self, endpoint, json_data)
 
 _original_upstash_request = UpstashRedis._request
 
