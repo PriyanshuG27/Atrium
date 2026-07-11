@@ -738,10 +738,13 @@ export default function Login() {
         </div>
 
         {/* Legal Links */}
-        <div className="login-step" style={{ animationDelay: '0.45s', marginTop: '2.5rem', display: 'flex', gap: '1rem' }}>
-          <a href="/privacy.html" style={{ color: 'rgba(244,239,235,0.2)', textDecoration: 'none', fontSize: 10, fontFamily: '"JetBrains Mono", monospace' }}>Privacy Policy</a>
-          <span style={{ color: 'rgba(244,239,235,0.1)', fontSize: 10, fontFamily: '"JetBrains Mono", monospace' }}>·</span>
-          <a href="/terms.html" style={{ color: 'rgba(244,239,235,0.2)', textDecoration: 'none', fontSize: 10, fontFamily: '"JetBrains Mono", monospace' }}>Terms of Service</a>
+        <div className="login-step" style={{ animationDelay: '0.45s', marginTop: '2.5rem', display: 'flex', flexDirection: 'column', gap: '0.75rem', alignItems: 'center' }}>
+          <div style={{ color: 'rgba(244,239,235,0.25)', fontSize: 10, fontFamily: '"Inter", sans-serif', textAlign: 'center', lineHeight: 1.5, maxWidth: 320 }}>
+            By logging in, you agree to our{' '}
+            <a href="/terms.html" style={{ color: 'rgba(207,163,101,0.6)', textDecoration: 'underline' }}>Terms of Service</a>
+            {' '}and{' '}
+            <a href="/privacy.html" style={{ color: 'rgba(207,163,101,0.6)', textDecoration: 'underline' }}>Privacy Policy</a>.
+          </div>
         </div>
       </div>
     </div>
