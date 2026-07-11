@@ -169,8 +169,8 @@ async def ingest_image(file_id: str, user_id: int, chat_id: str, db: AsyncConnec
         context_prompt = None
         extracted_urls = []
         is_only_links = False
-        if len(ocr_text) > 50:
-            logger.info("Using OCR text for image ingestion (length > 50)")
+        if len(ocr_text) > 20:
+            logger.info("Using OCR text for image ingestion (length > 20)")
             raw_text = f"OCR Text:\n{ocr_text}"
             
             # Extract and clean URLs via AI cascade, falling back to regex if needed

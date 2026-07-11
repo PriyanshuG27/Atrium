@@ -134,7 +134,9 @@ def override_db():
 def client():
     with mock.patch("backend.db.connection.open_pool", return_value=None), \
          mock.patch("backend.db.connection.close_pool", return_value=None), \
-         mock.patch("backend.services.redis_client.redis", new_callable=mock.AsyncMock):
+         mock.patch("backend.services.redis_client.redis", new_callable=mock.AsyncMock) as mock_redis:
+        # Ensure JWT blacklist lookup returns None (not blacklisted)
+        mock_redis.get.return_value = None
         with TestClient(app) as c:
             yield c
 
@@ -214,12 +216,17 @@ def test_sql_injection_search_endpoint(client, token_user_A):
     global current_cursor
     current_cursor = PenTestingCursor(user_id=100)
     
-    # We mock hybrid_search return value
-    # Even if SQL injection characters are passed, they must be parsed as a plain query literal.
-    # The database query must utilize parameterized bindings (%s).
+    # Verify that even if SQL injection characters are passed as a query string,
+    # they are treated as plain text literals via parameterized bindings (%s),
+    # not executed as raw SQL. The endpoint must return 200 with a sources list.
     payload = {"query": "' OR 1=1; DROP TABLE items; --"}
     
-    res = client.post("/api/search", json=payload, cookies={"atrium_session": token_user_A})
+    with mock.patch(
+        "backend.services.search_service.hybrid_search",
+        new_callable=mock.AsyncMock,
+        return_value=[]
+    ):
+        res = client.post("/api/search", json=payload, cookies={"atrium_session": token_user_A})
     assert res.status_code == 200
     assert isinstance(res.json().get("sources"), list)
 

@@ -375,12 +375,25 @@ async def perform_ocr(img_or_path_or_bytes: Union[Image.Image, str, bytes]) -> s
             try:
                 ocr_text = await perform_nvidia_ocr(image_bytes, settings.NVIDIA_API_KEY)
                 tried_nvidia = True
-                if ocr_text and len(ocr_text.split()) >= 10:
-                    return ocr_text
             except Exception as e:
                 logger.error("Direct NVIDIA OCR failed: %s", e)
         else:
             logger.warning("NVIDIA OCR provider selected, but NVIDIA_API_KEY is missing.")
+
+        # If NVIDIA returned nothing useful, immediately try Gemini verbatim OCR
+        word_count = len((ocr_text or "").split())
+        if (not ocr_text or word_count < 10) and settings.GEMINI_API_KEY:
+            logger.info("NVIDIA OCR returned low-content text (%d words). Falling back to Gemini OCR...", word_count)
+            try:
+                gemini_text = await perform_gemini_ocr(image_bytes, settings.GEMINI_API_KEY)
+                if gemini_text:
+                    logger.info("Gemini OCR fallback (from NVIDIA path) succeeded.")
+                    ocr_text = gemini_text
+            except Exception as e:
+                logger.warning("Gemini OCR fallback (from NVIDIA path) failed: %s", e)
+
+        return ocr_text or ""
+
 
     # Fallback/Default route for local/remote
     if not ocr_text and provider in ("remote", "local"):
