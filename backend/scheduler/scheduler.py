@@ -2734,10 +2734,10 @@ async def start_scheduler(app=None) -> None:
 
     _scheduler = AsyncIOScheduler()
     
-    # 1. reminders_dispatcher (every 5 minutes)
+    # 1. reminders_dispatcher (hourly at minute 0 UTC)
     _scheduler.add_job(
         reminders_dispatcher,
-        trigger=IntervalTrigger(minutes=5),
+        trigger=CronTrigger(hour="*", minute=0, timezone="UTC"),
         id="reminders_dispatcher",
         misfire_grace_time=60
     )
@@ -2798,18 +2798,18 @@ async def start_scheduler(app=None) -> None:
         misfire_grace_time=60
     )
 
-    # 9. onboarding_sequence_dispatcher (hourly at minute 5 UTC)
+    # 9. onboarding_sequence_dispatcher (hourly at minute 0 UTC)
     _scheduler.add_job(
         onboarding_sequence_dispatcher,
-        trigger=CronTrigger(hour="*", minute=5, timezone="UTC"),
+        trigger=CronTrigger(hour="*", minute=0, timezone="UTC"),
         id="onboarding_sequence_dispatcher",
         misfire_grace_time=60
     )
 
-    # 10. mid_graph_re_engagement_dispatcher (hourly at minute 10 UTC)
+    # 10. mid_graph_re_engagement_dispatcher (hourly at minute 0 UTC)
     _scheduler.add_job(
         mid_graph_re_engagement_dispatcher,
-        trigger=CronTrigger(hour="*", minute=10, timezone="UTC"),
+        trigger=CronTrigger(hour="*", minute=0, timezone="UTC"),
         id="mid_graph_re_engagement_dispatcher",
         misfire_grace_time=60
     )
@@ -2830,42 +2830,42 @@ async def start_scheduler(app=None) -> None:
         misfire_grace_time=60
     )
 
-    # 13. recall_moment_dispatcher (hourly at minute 15 UTC)
+    # 13. recall_moment_dispatcher (hourly at minute 0 UTC)
     _scheduler.add_job(
         recall_moment_dispatcher,
-        trigger=CronTrigger(hour="*", minute=15, timezone="UTC"),
+        trigger=CronTrigger(hour="*", minute=0, timezone="UTC"),
         id="recall_moment_dispatcher",
         misfire_grace_time=60
     )
 
-    # 14. weekly_profile_text_generator (hourly at minute 20 UTC)
+    # 14. weekly_profile_text_generator (hourly at minute 0 UTC)
     _scheduler.add_job(
         weekly_profile_text_generator,
-        trigger=CronTrigger(hour="*", minute=20, timezone="UTC"),
+        trigger=CronTrigger(hour="*", minute=0, timezone="UTC"),
         id="weekly_profile_text_generator",
         misfire_grace_time=60
     )
 
-    # 15. monthly_prediction_generator (hourly at minute 25 UTC)
+    # 15. monthly_prediction_generator (hourly at minute 0 UTC)
     _scheduler.add_job(
         monthly_prediction_generator,
-        trigger=CronTrigger(hour="*", minute=25, timezone="UTC"),
+        trigger=CronTrigger(hour="*", minute=0, timezone="UTC"),
         id="monthly_prediction_generator",
         misfire_grace_time=60
     )
 
-    # 16. monthly_discrepancy_scanner (hourly at minute 30 UTC)
+    # 16. monthly_discrepancy_scanner (hourly at minute 0 UTC)
     _scheduler.add_job(
         monthly_discrepancy_scanner,
-        trigger=CronTrigger(hour="*", minute=30, timezone="UTC"),
+        trigger=CronTrigger(hour="*", minute=0, timezone="UTC"),
         id="monthly_discrepancy_scanner",
         misfire_grace_time=60
     )
 
-    # 17. monthly_forward_hook (hourly at minute 35 UTC)
+    # 17. monthly_forward_hook (hourly at minute 0 UTC)
     _scheduler.add_job(
         monthly_forward_hook,
-        trigger=CronTrigger(hour="*", minute=35, timezone="UTC"),
+        trigger=CronTrigger(hour="*", minute=0, timezone="UTC"),
         id="monthly_forward_hook",
         misfire_grace_time=60
     )
@@ -2919,11 +2919,10 @@ async def start_scheduler(app=None) -> None:
         misfire_grace_time=60
     )
 
-    # 24. observability_metrics_logger (every 5 minutes)
+    # 24. observability_metrics_logger (hourly at minute 0 UTC)
     _scheduler.add_job(
         observability_metrics_logger,
-        trigger="interval",
-        minutes=5,
+        trigger=CronTrigger(hour="*", minute=0, timezone="UTC"),
         id="observability_metrics_logger",
         misfire_grace_time=60
     )
