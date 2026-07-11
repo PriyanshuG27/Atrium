@@ -322,13 +322,14 @@ export default function Login() {
   };
 
   return (
-    <div style={{
+    <div className="login-container" style={{
       width: '100%',
       height: '100dvh',
       display: 'flex',
       background: '#09080C',
       overflow: 'hidden',
       fontFamily: '"Inter", sans-serif',
+      position: 'relative',
     }}>
       <style>{`
         @keyframes login-fade-up {
@@ -345,7 +346,7 @@ export default function Login() {
         .back-link {
           position: absolute;
           top: 2rem;
-          left: 2.5rem;
+          left: 2.25rem;
           background: none;
           border: none;
           color: rgba(244,239,235,0.45);
@@ -357,15 +358,41 @@ export default function Login() {
           gap: 6px;
           padding: 0;
           transition: color 0.2s;
-          z-index: 20;
+          z-index: 100;
         }
         .back-link:hover {
           color: #CFA365 !important;
         }
+        @media (max-width: 768px) {
+          .login-container {
+            flex-direction: column !important;
+          }
+          .login-left-pane {
+            display: none !important;
+          }
+          .login-right-pane {
+            flex: 1 1 100% !important;
+            max-width: 100% !important;
+            width: 100% !important;
+            padding-top: 5rem !important;
+          }
+        }
       `}</style>
 
+      {/* Back Button */}
+      <button 
+        className="back-link login-step"
+        style={{ animationDelay: '0.02s' }}
+        onClick={() => {
+          window.history.pushState({}, '', '/');
+          window.dispatchEvent(new PopStateEvent('popstate'));
+        }}
+      >
+        ← Back to Atrium
+      </button>
+
       {/* ── LEFT: Animated knowledge graph ── */}
-      <div style={{ flex: '1 1 60%', position: 'relative', overflow: 'hidden' }}>
+      <div className="login-left-pane" style={{ flex: '1 1 60%', position: 'relative', overflow: 'hidden' }}>
         {/* Dark gradient overlay on right edge to blend into form */}
         <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to right, transparent 70%, #09080C 100%)', zIndex: 2, pointerEvents: 'none' }} />
         <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(ellipse 70% 60% at 40% 50%, rgba(207,163,101,0.04) 0%, transparent 70%)', zIndex: 1, pointerEvents: 'none' }} />
@@ -373,7 +400,7 @@ export default function Login() {
         <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />
 
         {/* Floating label in top-left */}
-        <div style={{ position: 'absolute', top: 32, left: 36, zIndex: 5 }}>
+        <div style={{ position: 'absolute', top: 96, left: 36, zIndex: 5 }}>
           <div style={{ fontFamily: '"JetBrains Mono", monospace', fontSize: 10, color: 'rgba(207,163,101,0.5)', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 6 }}>
             ATRIUM
           </div>
@@ -399,14 +426,14 @@ export default function Login() {
       </div>
 
       {/* ── RIGHT: Login form ── */}
-      <div style={{
+      <div className="login-right-pane" style={{
         flex: '0 0 400px',
         minWidth: 340,
         maxWidth: 440,
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'center',
-        padding: '4.5rem 3rem 2rem 2.5rem',
+        padding: '2rem 3rem 2rem 2.5rem',
         position: 'relative',
         zIndex: 10,
         borderLeft: '1px solid rgba(244,239,235,0.05)',
@@ -414,18 +441,6 @@ export default function Login() {
         backdropFilter: 'blur(20px)',
         overflowY: 'auto',
       }}>
-
-        {/* Back Button */}
-        <button 
-          className="back-link login-step"
-          style={{ animationDelay: '0.02s' }}
-          onClick={() => {
-            window.history.pushState({}, '', '/');
-            window.dispatchEvent(new PopStateEvent('popstate'));
-          }}
-        >
-          ← Back to Atrium
-        </button>
 
         {/* TWA overlay — visible inside Telegram */}
         {twaDebug && twaDebug.step === 'initData empty' && (

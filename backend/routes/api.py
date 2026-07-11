@@ -303,7 +303,11 @@ async def extension_download():
     from fastapi.responses import FileResponse
     from fastapi import HTTPException
 
-    ext_path = os.path.abspath("frontend/extension")
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    ext_path = os.path.join(base_dir, "frontend", "extension")
+    if not os.path.exists(ext_path):
+        ext_path = os.path.abspath("frontend/extension")
+        
     if not os.path.exists(ext_path):
         raise HTTPException(status_code=404, detail="Extension source files not found.")
 
