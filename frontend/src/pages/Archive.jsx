@@ -219,7 +219,7 @@ export default function Archive({ initialSelectedItem, onClearInitialSelect }) {
 
 
   return (
-    <div className="archive-room" style={{ width: '100%', height: '100%', position: 'relative', background: '#08070a', overflow: 'hidden' }}>
+    <div className="archive-room" style={{ width: '100%', height: '100%', position: 'relative', background: '#08070a', overflow: 'hidden', overscrollBehavior: 'none' }}>
       
       {/* Mobile quick-entry banner */}
       {pipelineStage && (

@@ -98,6 +98,7 @@ function CylinderScene({ items, matchingIds, onCardClick, hasSelection, selected
         return;
       }
       if (e.touches.length === 1 && touchStart !== 0) {
+        if (e.cancelable) e.preventDefault(); // Block pull-to-refresh / page bounce scroll
         const touchEnd = e.touches[0].clientY;
         const diff = touchStart - touchEnd;
         // Sensitivity factor for vertical drag mapping to items scroll
@@ -128,7 +129,7 @@ function CylinderScene({ items, matchingIds, onCardClick, hasSelection, selected
       el.addEventListener('wheel', onWheel, { passive: false });
       window.addEventListener('keydown', onKeyDown);
       el.addEventListener('touchstart', handleTouchStart, { passive: true });
-      el.addEventListener('touchmove', handleTouchMove, { passive: true });
+      el.addEventListener('touchmove', handleTouchMove, { passive: false });
       el.addEventListener('touchend', handleTouchEnd, { passive: true });
     }
     window.addEventListener('archive-scroll-prev', handleScrollPrev);
