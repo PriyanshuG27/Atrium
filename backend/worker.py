@@ -1335,22 +1335,30 @@ async def process_single_item(task: Dict[str, Any], user_id: int, chat_id: str, 
         item_ids = res if isinstance(res, list) else [res]
         primary_id = item_ids[0] if item_ids else None
         
+        rows_map = {}
+        try:
+            async with db_conn._pool.connection() as conn:
+                await conn.execute("SET statement_timeout = '30s'")
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        "SELECT id, source_type, title, summary, tags, source_url FROM items WHERE id = ANY(%s) AND user_id = %s;", 
+                        (item_ids, user_id)
+                    )
+                    rows = await cur.fetchall()
+                    for r in rows:
+                        rows_map[r[0]] = r
+        except Exception as query_err:
+            logger.error("Failed to query metadata for batch success notification: %s", query_err)
+            
         for saved_id in item_ids:
             try:
-                async with db_conn._pool.connection() as conn:
-                    await conn.execute("SET statement_timeout = '30s'")
-                    async with conn.cursor() as cur:
-                        await cur.execute(
-                            "SELECT source_type, title, summary, tags, source_url FROM items WHERE id = %s AND user_id = %s;", 
-                            (saved_id, user_id)
-                        )
-                        row = await cur.fetchone()
+                row = rows_map.get(saved_id)
                 if row:
-                    i_type = row[0]
-                    i_title = row[1] or ""
-                    i_summary = row[2] or ""
-                    i_tags = row[3] if row[3] else []
-                    i_url = row[4] or ""
+                    i_type = row[1]
+                    i_title = row[2] or ""
+                    i_summary = row[3] or ""
+                    i_tags = row[4] if row[4] else []
+                    i_url = row[5] or ""
                     
                     if not is_batch_item:
                         if i_type == "image":
