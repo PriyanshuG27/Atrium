@@ -8,12 +8,16 @@ export default function PWAInstallBanner() {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [visible, setVisible] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
-    // Detect iOS
+    // Detect iOS & Mobile status
     const userAgent = window.navigator.userAgent || '';
     const ios = /iPad|iPhone|iPod/.test(userAgent) && !window.MSStream;
+    const mobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
+    
     setIsIOS(ios);
+    setIsMobile(mobile);
 
     const handleBeforeInstallPrompt = (e) => {
       e.preventDefault();
@@ -27,9 +31,9 @@ export default function PWAInstallBanner() {
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
 
-    // If iOS and not already standalone, show custom install instruction
+    // If mobile and not already standalone, show banner with instructions (as fallback)
     const isStandalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
-    if (ios && !isStandalone) {
+    if (mobile && !isStandalone) {
       const dismissed = sessionStorage.getItem('atrium_pwa_banner_dismissed');
       if (!dismissed) {
         setVisible(true);
@@ -124,12 +128,16 @@ export default function PWAInstallBanner() {
               lineHeight: 1.3
             }}
           >
-            {isIOS ? (
+            {deferredPrompt ? (
+              window.location.hostname || 'atrium.onrender.com'
+            ) : isIOS ? (
               <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                 Tap Share <span role="img" aria-label="share">📤</span> and "Add to Home Screen"
               </span>
             ) : (
-              window.location.hostname || 'atrium.onrender.com'
+              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                Tap menu <span role="img" aria-label="menu">⁝</span> and select "Add to Home Screen"
+              </span>
             )}
           </span>
         </div>
@@ -137,7 +145,7 @@ export default function PWAInstallBanner() {
 
       {/* Right section: Action Buttons */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '1.15rem' }}>
-        {!isIOS && (
+        {deferredPrompt && (
           <button
             onClick={handleInstall}
             style={{
