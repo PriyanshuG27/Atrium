@@ -1181,9 +1181,9 @@ export default function Landing() {
         <span>© 2026</span>
         <span>Built with intent.</span>
         <span style={{ display: 'flex', gap: '1rem', marginLeft: 'auto' }}>
-          <a href="/privacy.html" style={{ color: 'inherit', textDecoration: 'none' }} target="_blank" rel="noopener noreferrer">Privacy Policy</a>
+          <a href="/privacy.html" style={{ color: 'inherit', textDecoration: 'none' }}>Privacy Policy</a>
           <span style={{ opacity: 0.3 }}>·</span>
-          <a href="/terms.html" style={{ color: 'inherit', textDecoration: 'none' }} target="_blank" rel="noopener noreferrer">Terms of Service</a>
+          <a href="/terms.html" style={{ color: 'inherit', textDecoration: 'none' }}>Terms of Service</a>
         </span>
       </footer>
 

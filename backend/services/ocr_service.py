@@ -275,7 +275,7 @@ async def perform_nvidia_ocr(image_bytes: bytes, api_key: str) -> Optional[str]:
 async def perform_ocr(img_or_path_or_bytes: Union[Image.Image, str, bytes]) -> str:
     """
     Unified entry point for performing OCR. Supports PIL Image, filepath string, or bytes.
-    Enforces a cascade: PaddleOCR -> NVIDIA NIM OCR -> Gemini.
+    Enforces a cascade: Configured Provider (PaddleOCR/NVIDIA/Gemini) -> Fallbacks.
     """
     # 1. Convert input to raw bytes in memory (no disk writes)
     if isinstance(img_or_path_or_bytes, bytes):
@@ -299,39 +299,70 @@ async def perform_ocr(img_or_path_or_bytes: Union[Image.Image, str, bytes]) -> s
             return ""
 
     ocr_text = ""
+    provider = getattr(settings, "OCR_PROVIDER", "local").lower()
+    tried_nvidia = False
 
-    # Step A: Try PaddleOCR (Remote or Local)
-    try:
-        provider = getattr(settings, "OCR_PROVIDER", "local")
-        if provider == "remote":
+    # Direct routes
+    if provider == "gemini":
+        logger.info("OCR provider set to Gemini. Routing directly...")
+        try:
+            from backend.services.ai_cascade.facade import AICascade
+            cascade = AICascade()
+            ocr_text = await cascade.caption_image(image_bytes)
+            return ocr_text or ""
+        except Exception as e:
+            logger.error("Direct Gemini OCR failed: %s", e)
+            return ""
+
+    elif provider == "nvidia":
+        logger.info("OCR provider set to NVIDIA. Routing directly...")
+        if settings.NVIDIA_API_KEY:
             try:
-                from backend.services.remote_ai_client import generate_remote_ocr
-                ocr_text = await generate_remote_ocr(image_bytes)
+                ocr_text = await perform_nvidia_ocr(image_bytes, settings.NVIDIA_API_KEY)
+                tried_nvidia = True
+                if ocr_text and len(ocr_text.split()) >= 10:
+                    return ocr_text
             except Exception as e:
-                logger.warning("Remote PaddleOCR failed: %s. Falling back to local PaddleOCR.", e)
-                provider = "local"
-                
-        if provider == "local":
-            if check_paddleocr_available():
-                loop = asyncio.get_running_loop()
-                executor = _get_ocr_executor()
-                result = await asyncio.wait_for(
-                    loop.run_in_executor(executor, preprocess_and_ocr_image, image_bytes),
-                    timeout=120.0
-                )
-                if not result.get("trigger_gemini_fallback"):
-                    ocr_text = result.get("ocr_text") or ""
-    except Exception as e:
-        logger.warning("PaddleOCR step failed: %s", e)
+                logger.error("Direct NVIDIA OCR failed: %s", e)
+        else:
+            logger.warning("NVIDIA OCR provider selected, but NVIDIA_API_KEY is missing.")
 
-    # Step B: Fallback to NVIDIA NIM OCR if PaddleOCR returned low-content or failed
+    # Fallback/Default route for local/remote
+    if not ocr_text and provider in ("remote", "local"):
+        try:
+            if provider == "remote":
+                try:
+                    from backend.services.remote_ai_client import generate_remote_ocr
+                    ocr_text = await generate_remote_ocr(image_bytes)
+                except Exception as e:
+                    logger.warning("Remote PaddleOCR failed: %s. Falling back to local PaddleOCR.", e)
+                    provider = "local"
+                    
+            if provider == "local":
+                if check_paddleocr_available():
+                    loop = asyncio.get_running_loop()
+                    executor = _get_ocr_executor()
+                    result = await asyncio.wait_for(
+                        loop.run_in_executor(executor, preprocess_and_ocr_image, image_bytes),
+                        timeout=120.0
+                    )
+                    if not result.get("trigger_gemini_fallback"):
+                        ocr_text = result.get("ocr_text") or ""
+        except Exception as e:
+            logger.warning("PaddleOCR step failed: %s", e)
+
+    # Fallback B: Try NVIDIA NIM OCR if PaddleOCR returned low-content or failed
     word_count = len(ocr_text.split())
-    if (not ocr_text or word_count < 10) and settings.NVIDIA_API_KEY:
+    if (not ocr_text or word_count < 10) and not tried_nvidia and settings.NVIDIA_API_KEY:
         logger.info("PaddleOCR returned low-content text (%d words). Triggering NVIDIA NIM OCR fallback...", word_count)
-        nvidia_text = await perform_nvidia_ocr(image_bytes, settings.NVIDIA_API_KEY)
-        if nvidia_text:
-            logger.info("NVIDIA NIM OCR fallback succeeded. Extracted length: %d chars", len(nvidia_text))
-            return nvidia_text
+        try:
+            nvidia_text = await perform_nvidia_ocr(image_bytes, settings.NVIDIA_API_KEY)
+            tried_nvidia = True
+            if nvidia_text:
+                logger.info("NVIDIA NIM OCR fallback succeeded. Extracted length: %d chars", len(nvidia_text))
+                ocr_text = nvidia_text
+        except Exception as e:
+            logger.warning("NVIDIA NIM OCR fallback failed: %s", e)
 
     return ocr_text
 

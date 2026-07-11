@@ -720,9 +720,9 @@ export default function Login() {
 
         {/* Legal Links */}
         <div className="login-step" style={{ animationDelay: '0.45s', marginTop: '2.5rem', display: 'flex', gap: '1rem' }}>
-          <a href="/privacy.html" style={{ color: 'rgba(244,239,235,0.2)', textDecoration: 'none', fontSize: 10, fontFamily: '"JetBrains Mono", monospace' }} target="_blank" rel="noopener noreferrer">Privacy Policy</a>
+          <a href="/privacy.html" style={{ color: 'rgba(244,239,235,0.2)', textDecoration: 'none', fontSize: 10, fontFamily: '"JetBrains Mono", monospace' }}>Privacy Policy</a>
           <span style={{ color: 'rgba(244,239,235,0.1)', fontSize: 10, fontFamily: '"JetBrains Mono", monospace' }}>·</span>
-          <a href="/terms.html" style={{ color: 'rgba(244,239,235,0.2)', textDecoration: 'none', fontSize: 10, fontFamily: '"JetBrains Mono", monospace' }} target="_blank" rel="noopener noreferrer">Terms of Service</a>
+          <a href="/terms.html" style={{ color: 'rgba(244,239,235,0.2)', textDecoration: 'none', fontSize: 10, fontFamily: '"JetBrains Mono", monospace' }}>Terms of Service</a>
         </div>
       </div>
     </div>

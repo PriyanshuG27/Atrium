@@ -905,6 +905,59 @@ export default function Settings() {
         </div>
       </div>
 
+      {/* ── SECTION: LEGAL & POLICIES ── */}
+      <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '2.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '2.5rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <span style={{ width: '4px', height: '12px', background: 'var(--accent-gold)', borderRadius: '2px' }} />
+          <h3 style={{ margin: 0, fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--accent-gold)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
+            Legal & Policies
+          </h3>
+        </div>
+        <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+          View Atrium's terms of service and how we securely encrypt, store, and process your data.
+        </p>
+        <div style={{ display: 'flex', gap: '1.5rem', marginTop: '0.5rem' }}>
+          <a
+            href="/privacy.html"
+            style={{
+              color: '#F0EDE8',
+              textDecoration: 'none',
+              fontSize: '13px',
+              fontFamily: 'var(--font-body)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              borderBottom: '1px solid rgba(244,239,235,0.1)',
+              paddingBottom: '2px',
+              transition: 'border-color 0.2s, color 0.2s'
+            }}
+            onMouseEnter={e => { e.target.style.borderColor = 'var(--accent-gold)'; e.target.style.color = 'var(--accent-gold)'; }}
+            onMouseLeave={e => { e.target.style.borderColor = 'rgba(244,239,235,0.1)'; e.target.style.color = '#F0EDE8'; }}
+          >
+            Privacy Policy 📋
+          </a>
+          <a
+            href="/terms.html"
+            style={{
+              color: '#F0EDE8',
+              textDecoration: 'none',
+              fontSize: '13px',
+              fontFamily: 'var(--font-body)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              borderBottom: '1px solid rgba(244,239,235,0.1)',
+              paddingBottom: '2px',
+              transition: 'border-color 0.2s, color 0.2s'
+            }}
+            onMouseEnter={e => { e.target.style.borderColor = 'var(--accent-gold)'; e.target.style.color = 'var(--accent-gold)'; }}
+            onMouseLeave={e => { e.target.style.borderColor = 'rgba(244,239,235,0.1)'; e.target.style.color = '#F0EDE8'; }}
+          >
+            Terms of Service ⚖️
+          </a>
+        </div>
+      </div>
+
       {/* ── SECTION: DANGER SYSTEM ACTIONS ── */}
       <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '3rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
