@@ -838,6 +838,31 @@ export default function Landing() {
   const [activeStep, setActiveStep] = useState(0);
   const [mobileStep, setMobileStep] = useState(0);
   const pinBlockRefs = useRef([]);
+
+  const touchStartX = useRef(0);
+  const touchEndX = useRef(0);
+
+  const handleTouchStart = (e) => {
+    touchStartX.current = e.targetTouches[0].clientX;
+    touchEndX.current = e.targetTouches[0].clientX;
+  };
+
+  const handleTouchMove = (e) => {
+    touchEndX.current = e.targetTouches[0].clientX;
+  };
+
+  const handleTouchEnd = () => {
+    const swipeDistance = touchStartX.current - touchEndX.current;
+    const minSwipeDistance = 50;
+    if (Math.abs(swipeDistance) > minSwipeDistance) {
+      if (swipeDistance > 0) {
+        setMobileStep((prev) => (prev < FEATURES.length - 1 ? prev + 1 : prev));
+      } else {
+        setMobileStep((prev) => (prev > 0 ? prev - 1 : prev));
+      }
+    }
+  };
+
   useEffect(() => {
     const handleScroll = () => {
       const centerY = window.innerHeight / 2;
@@ -1098,7 +1123,12 @@ export default function Landing() {
             ))}
           </div>
 
-          <div className="lp-mobile-step-card">
+          <div 
+            className="lp-mobile-step-card"
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+          >
             <div className="lp-step-visual-box">
               <StepVisual index={mobileStep} />
             </div>

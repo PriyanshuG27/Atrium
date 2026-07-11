@@ -125,4 +125,39 @@ describe('Landing Page Component', () => {
     expect(pushStateSpy).toHaveBeenCalledWith({}, '', '/login');
     expect(dispatchSpy).toHaveBeenCalledWith(expect.any(PopStateEvent));
   });
+
+  it('swipes left and right to navigate steps on mobile', () => {
+    const { container } = render(<Landing />);
+
+    // Find the mobile step card
+    const mobileCard = container.querySelector('.lp-mobile-step-card');
+    expect(mobileCard).toBeInTheDocument();
+
+    const stepNumText = mobileCard.querySelector('.lp-pin-num');
+    expect(stepNumText.textContent).toBe('01 — Send');
+
+    // Swipe left (next step)
+    fireEvent.touchStart(mobileCard, { targetTouches: [{ clientX: 200 }] });
+    fireEvent.touchMove(mobileCard, { targetTouches: [{ clientX: 100 }] });
+    fireEvent.touchEnd(mobileCard);
+
+    // Verify it navigated to step 2
+    expect(stepNumText.textContent).toBe('02 — Connect');
+
+    // Swipe left again
+    fireEvent.touchStart(mobileCard, { targetTouches: [{ clientX: 200 }] });
+    fireEvent.touchMove(mobileCard, { targetTouches: [{ clientX: 100 }] });
+    fireEvent.touchEnd(mobileCard);
+
+    // Verify it navigated to step 3
+    expect(stepNumText.textContent).toBe('03 — Ask');
+
+    // Swipe right (prev step)
+    fireEvent.touchStart(mobileCard, { targetTouches: [{ clientX: 100 }] });
+    fireEvent.touchMove(mobileCard, { targetTouches: [{ clientX: 200 }] });
+    fireEvent.touchEnd(mobileCard);
+
+    // Verify it navigated back to step 2
+    expect(stepNumText.textContent).toBe('02 — Connect');
+  });
 });
