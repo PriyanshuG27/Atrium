@@ -3034,6 +3034,9 @@ async def handle_pwa_share_target(
 @router.post("/mock-ocr")
 async def mock_ocr(payload: dict):
     """Simulates a remote OCR microservice request to benchmark HTTP/network overhead without loading models."""
+    from backend.config import settings
+    if settings.ENV == "production":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Test endpoints are disabled in production.")
     import asyncio
     # Simulate a lightweight network/inference round-trip delay (e.g. 50ms)
     await asyncio.sleep(0.05)
@@ -3043,11 +3046,17 @@ async def mock_ocr(payload: dict):
 @router.get("/remote-ai-timings")
 async def get_remote_ai_timings():
     """Returns remote AI telemetry collected by the API process."""
+    from backend.config import settings
+    if settings.ENV == "production":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Debug endpoints are disabled in production.")
     from backend.services.remote_ai_client import get_timings
     return get_timings()
 
 
-@router.get("/setup-webhook")
+@router.get(
+    "/setup-webhook",
+    dependencies=[Depends(verify_internal_key)]
+)
 async def setup_telegram_webhook(request: Request):
     """Registers the Telegram bot webhook using the server's own config variables."""
     import httpx

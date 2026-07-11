@@ -304,6 +304,14 @@ Contributions are welcome! Please review the [Contributing Guidelines](docs/CONT
 
 ---
 
+## 🔒 Security & Secret Rotation Warning
+
+> [!WARNING]
+> **Git History Exposure**: If any API key, database URL, token, or cryptographic credential was previously hardcoded or committed in the git history of this repository, it is still visible in the git history.
+> You must **rotate all previously committed keys and secrets immediately** to prevent unauthorized access. Always use environment variables via `.env` or `.env.local` (which are excluded from git by `.gitignore`).
+
+---
+
 ## 📜 License
 
 Recall is open-source software released under the MIT License.

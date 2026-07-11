@@ -23,6 +23,7 @@ async def structured_logging_middleware(request: Request, call_next):
     
     # Propagate or generate a correlation ID
     correlation_id = request.headers.get("x-correlation-id") or request.headers.get("x-request-id") or str(uuid.uuid4())
+    request.state.correlation_id = correlation_id
     
     # Hash IP for privacy
     client_ip = request.client.host if request.client else None

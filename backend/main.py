@@ -375,6 +375,27 @@ app.add_middleware(
 
 
 
+# ---------------------------------------------------------------------------
+# HTTP Security Headers Middleware
+# ---------------------------------------------------------------------------
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    
+    # CSP: Allow self, inline script elements, and FastAPI docs dependencies
+    csp_directives = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "img-src 'self' data: https://fastapi.tiangolo.com;"
+    )
+    response.headers["Content-Security-Policy"] = csp_directives
+    return response
+
+
 from backend.middleware.structured_logging_middleware import structured_logging_middleware
 app.middleware("http")(structured_logging_middleware)
 
@@ -399,16 +420,21 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
     """
     Catch-all for unhandled exceptions.
     Logs the full traceback internally but returns only a generic message
-    to the client — no stack traces, no exception types.
+    and a correlation ID to the client — no stack traces, no exception types.
     """
+    correlation_id = getattr(request.state, "correlation_id", "unknown")
     logger.exception(
-        "Unhandled exception on %s %s",
+        "Unhandled exception on %s %s [Correlation ID: %s]",
         request.method,
         request.url.path,
+        correlation_id,
     )
     return JSONResponse(
         status_code=500,
-        content={"error": "internal_server_error"},
+        content={
+            "error": "internal_server_error",
+            "correlation_id": correlation_id
+        },
     )
 
 

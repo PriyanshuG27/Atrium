@@ -169,7 +169,11 @@ async def auth_telegram(
 # Flow: browser calls /init → shows deep link → user opens bot in Telegram
 #       → bot stores user_id under token → browser polls /poll → gets cookie
 
-@router.get("/bot-session/init", summary="Initialise a bot-session browser login token")
+@router.get(
+    "/bot-session/init",
+    summary="Initialise a bot-session browser login token",
+    dependencies=[Depends(rate_limit_by_route("bot-session-init", limit=5, window=60))]
+)
 async def bot_session_init():
     """Generate a one-time OTP + token for browser login via Telegram bot."""
     import secrets, random
