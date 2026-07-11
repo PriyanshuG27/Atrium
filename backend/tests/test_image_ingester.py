@@ -189,3 +189,46 @@ async def test_ingest_image_duplicate(monkeypatch, mock_deps):
         await ingest_image("file_id_456", user_id=4, chat_id="12345", db=conn)
         
     assert excinfo.value.item_id == 404
+
+@pytest.mark.asyncio
+async def test_ingest_image_with_extracted_urls(monkeypatch, mock_deps):
+    monkeypatch.setattr("backend.services.image_ingester.download_telegram_image", mock.AsyncMock(return_value=None))
+    
+    mock_open = mock.mock_open(read_data=b"fake jpg bytes")
+    monkeypatch.setattr("builtins.open", mock_open)
+    
+    monkeypatch.setattr("os.path.exists", lambda path: True)
+    monkeypatch.setattr("os.remove", mock.Mock())
+    
+    # Mock PIL and perform_ocr to return OCR text containing two links
+    monkeypatch.setattr("PIL.Image.open", lambda path: mock.MagicMock())
+    ocr_text = (
+        "Joaquin Fernandez on Instagram:\n"
+        "https://www.instagram.com/reel/DZXWW-MyPNw/?\n"
+        "igsh=MXN5Mmt2NDJpb3g0Yg==\n"
+        "Veeraj Gadda on Instagram:\n"
+        "https://www.instagram.com/reel/DZWNkVTMGFj/?\n"
+        "igsh=MWZhN2o1ZzNxNWVlYw==\n"
+    )
+    monkeypatch.setattr("backend.services.ocr_service.perform_ocr", mock.AsyncMock(return_value=ocr_text))
+    
+    # Mock the specialized instagram url ingester
+    mock_ingest_insta = mock.AsyncMock(side_effect=[501, 502])
+    monkeypatch.setattr("backend.services.youtube_ingester.ingest_instagram", mock_ingest_insta)
+    
+    conn = MockConnection()
+    res = await ingest_image("file_id_456", user_id=4, chat_id="12345", db=conn)
+    
+    # Verify that the image node AND the two extracted urls are returned
+    assert res == [401, 501, 502]
+    assert mock_ingest_insta.call_count == 2
+    
+    # Verify first call args
+    call_args_1 = mock_ingest_insta.call_args_list[0]
+    assert "DZXWW-MyPNw" in call_args_1[0][0]
+    assert "MXN5Mmt2NDJpb3g0Yg==" in call_args_1[0][0]
+    
+    # Verify second call args
+    call_args_2 = mock_ingest_insta.call_args_list[1]
+    assert "DZWNkVTMGFj" in call_args_2[0][0]
+    assert "MWZhN2o1ZzNxNWVlYw==" in call_args_2[0][0]

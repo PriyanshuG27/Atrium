@@ -20,27 +20,33 @@ logger = logging.getLogger(__name__)
 
 def extract_urls_from_ocr(ocr_text: str) -> list[str]:
     import re
-    url_start_re = re.compile(r'^(https?://|www\.)', re.IGNORECASE)
-    url_char_re = re.compile(r'^[a-zA-Z0-9_.\-~%!$&\'()*+,;=:@/?#]+$')
-
+    # Match any URL pattern anywhere in the text
+    url_pattern = re.compile(
+        r'(https?://[^\s]+|www\.[^\s]+)', 
+        re.IGNORECASE
+    )
+    
     lines = [line.strip() for line in ocr_text.split("\n") if line.strip()]
     reconstructed_urls = []
     
-    current_url = ""
-    for line in lines:
-        if url_start_re.match(line):
-            if current_url:
-                reconstructed_urls.append(current_url)
-            current_url = line
-        elif current_url:
-            if " " not in line and url_char_re.match(line):
-                current_url += line
-            else:
-                reconstructed_urls.append(current_url)
-                current_url = ""
-                
-    if current_url:
-        reconstructed_urls.append(current_url)
+    idx = 0
+    while idx < len(lines):
+        line = lines[idx]
+        matches = url_pattern.findall(line)
+        if matches:
+            for u in matches:
+                # Check if this is the last URL in the line and the next line is a continuation query fragment
+                if u == matches[-1] and idx + 1 < len(lines):
+                    next_line = lines[idx + 1].strip()
+                    if (
+                        " " not in next_line 
+                        and not next_line.lower().startswith(("http", "www."))
+                        and re.match(r'^[a-zA-Z0-9_.\-~%!$&\'()*+,;=:@/?#]+$', next_line)
+                    ):
+                        u = u + next_line
+                        idx += 1  # Consume the next line
+                reconstructed_urls.append(u)
+        idx += 1
         
     final_urls = []
     for u in reconstructed_urls:
@@ -50,7 +56,14 @@ def extract_urls_from_ocr(ocr_text: str) -> list[str]:
         if u.lower().startswith("http://") or u.lower().startswith("https://"):
             final_urls.append(u)
             
-    return final_urls
+    seen = set()
+    deduped = []
+    for u in final_urls:
+        if u not in seen:
+            seen.add(u)
+            deduped.append(u)
+            
+    return deduped
 
 def clean_ocr_title(ocr_text: str) -> str:
     if not ocr_text:
