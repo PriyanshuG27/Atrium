@@ -176,10 +176,10 @@ async def auth_telegram(
 )
 async def bot_session_init():
     """Generate a one-time OTP + token for browser login via Telegram bot."""
-    import secrets, random
+    import secrets
     from backend.services.redis_client import redis as _redis
     token = secrets.token_urlsafe(24)
-    otp = f"{random.randint(0, 999999):06d}"   # 6-digit zero-padded
+    otp = f"{secrets.randbelow(1000000):06d}"   # 6-digit CSPRNG, not random.randint
     # token → pending (polled by browser)
     await _redis.setex(f"bot_web_login_pending:{token}", 300, "pending")
     # otp → token (looked up by bot webhook when user sends the code)
@@ -188,7 +188,11 @@ async def bot_session_init():
     return {"token": token, "otp": otp, "bot_username": bot_username, "expires_in": 300}
 
 
-@router.get("/bot-session/poll", summary="Poll bot-session login completion")
+@router.get(
+    "/bot-session/poll",
+    summary="Poll bot-session login completion",
+    dependencies=[Depends(rate_limit_by_route("bot-session-poll", limit=20, window=60))]
+)
 async def bot_session_poll(
     token: str,
     response: Response,

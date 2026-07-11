@@ -294,6 +294,7 @@ class ExtensionSaveRequest(BaseModel):
     "/extension/download",
     tags=["extension"],
     summary="Download extension files pre-packaged as a ZIP file",
+    dependencies=[Depends(rate_limit_by_route("extension_download", limit=10, window=3600))],
 )
 async def extension_download():
     import os

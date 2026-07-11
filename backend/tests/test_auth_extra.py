@@ -58,6 +58,25 @@ def client(mock_db):
     yield TestClient(app)
     app.dependency_overrides = {}
 
+
+@pytest.fixture(autouse=True)
+def reset_rate_limiter():
+    """Reset the in-process rate limiter state before every test to prevent bleed-across."""
+    import backend.services.rate_limiter as rl
+    # Clear the in-memory rate limit store if one exists
+    if hasattr(rl, "_rate_limit_store"):
+        rl._rate_limit_store.clear()
+    # Patch the rate limiter Redis to a fresh AsyncMock so no real Redis is hit
+    mock_redis = mock.AsyncMock()
+    # incr returns 1 (first request — never rate limited)
+    mock_redis.incr = mock.AsyncMock(return_value=1)
+    mock_redis.expire = mock.AsyncMock(return_value=True)
+    mock_redis.ttl = mock.AsyncMock(return_value=60)
+    mock_redis.get = mock.AsyncMock(return_value=None)
+    mock_redis.setex = mock.AsyncMock(return_value=True)
+    with mock.patch("backend.services.rate_limiter.redis", mock_redis):
+        yield
+
 def test_auth_telegram_mock_login(client):
     with mock.patch("backend.routes.auth.upsert_user", new_callable=mock.AsyncMock, return_value=42):
         res = client.get("/auth/telegram?mock=true&id=999999")
