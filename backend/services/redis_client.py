@@ -122,10 +122,11 @@ class UpstashRedis:
                                 json_data[idx] = self._hash_key(json_data[idx])
                         except ValueError:
                             pass
-                    else:
+                    elif len(json_data) > 1:
                         json_data[1] = self._hash_key(json_data[1])
                         if len(json_data) > 2 and cmd_name == "BRPOPLPUSH":
                             json_data[2] = self._hash_key(json_data[2])
+
 
         try:
             client = self._get_client()
@@ -317,7 +318,7 @@ class UpstashRedis:
         """Checks liveness of the Redis instance."""
         try:
             data = await self._request("", ["PING"])
-            if isinstance(data, dict) and data.get("result") == "PONG":
+            if isinstance(data, dict) and data.get("result") in ("PONG", True):
                 return True
             return False
         except Exception as e:
