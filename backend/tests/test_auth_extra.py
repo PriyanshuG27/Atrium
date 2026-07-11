@@ -82,7 +82,7 @@ def test_auth_telegram_valid_hmac(client):
     url = f"/auth/telegram?auth_date={now}&first_name=Priyanshu&id=123456&username=priyanshu&hash={calc_hash}"
 
     with mock.patch("backend.routes.auth.upsert_user", new_callable=mock.AsyncMock, return_value=42):
-        res = client.get(url, follow_redirects=False)
+        res = client.get(url, headers={"Accept": "text/html"}, follow_redirects=False)
         assert res.status_code == 307
         assert "dashboard" in res.headers["location"]
         assert "atrium_session" in res.cookies

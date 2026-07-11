@@ -76,11 +76,19 @@ def reset_http_client_cache():
 def reset_ai_cascade_singleton():
     """
     Resets the shared AICascade singleton force_production_llm state
-    between test executions to prevent test pollution.
+    and clears any mocked instance-level methods to prevent test pollution.
     """
     from backend.services.ai_cascade import AICascade
     cascade = AICascade()
     cascade._force_production_llm = False
+    
+    # Remove any dynamically mocked instance-level methods to restore class methods
+    for attr in list(cascade.__dict__.keys()):
+        if attr not in ("_force_production_llm", "_initialized"):
+            try:
+                delattr(cascade, attr)
+            except AttributeError:
+                pass
 
 
 @pytest.fixture(autouse=True)

@@ -287,6 +287,7 @@ async def test_worker_semaphore_leak_prevention(monkeypatch):
                 val = invalid_tasks.pop(0)
                 processing_queue.append(val)
                 return val
+            await asyncio.sleep(0.1)
             return None
             
         async def lrem(self, dest, count, val):
