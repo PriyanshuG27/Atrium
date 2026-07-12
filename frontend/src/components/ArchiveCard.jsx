@@ -46,8 +46,9 @@ export default function ArchiveCard({ item, isActive, opacity, blur, onClick }) 
   const rawTitle = item.title || item.summary || 'Untitled Signal';
   const displayTitle = rawTitle.length > 80 ? rawTitle.slice(0, 77) + '\u2026' : rawTitle;
 
-  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 768;
-  const shouldBlur = !isMobile && !lowPerf && blur > 0;
+  // Disable CSS blur filter to prevent browser rendering artifacts (chromatic/rainbow halo)
+  // and composition performance degradation on Windows/Chrome hardware acceleration.
+  const shouldBlur = false;
 
   return (
     <div 

@@ -186,16 +186,14 @@ function CylinderScene({ items, matchingIds, onCardClick, hasSelection, selected
       {items.map((item, i) => {
         const dist = i - scrollVal;
         const absDist = Math.abs(dist);
-
-        // Cull cards that are far away from active view
-        if (absDist > 1.8) return null;
+        const isVisible = absDist <= 1.8;
 
         // Position next/prev cards vertically and slightly backwards in depth
         const y = -dist * 4.4;
         const z = -absDist * 2.8;
 
         const isMatch = !matchingIds || matchingIds.has(item.id);
-        const opacity = Math.max(0, 1 - absDist * 0.65) * (isMatch ? 1 : 0.12);
+        const opacity = isVisible ? Math.max(0, 1 - absDist * 0.65) * (isMatch ? 1 : 0.12) : 0;
         const scale = 1 - absDist * 0.15;
         const blur = Math.min(absDist * 4, 8);
         const isActive = i === activeIndex && isMatch;
@@ -206,16 +204,19 @@ function CylinderScene({ items, matchingIds, onCardClick, hasSelection, selected
               transform={false}
               center
               style={{
-                pointerEvents: isActive ? 'all' : 'none',
+                pointerEvents: (isActive && isVisible) ? 'all' : 'none',
                 opacity: opacity,
+                display: isVisible ? 'block' : 'none',
               }}
             >
-              <div style={{
-                transform: `scale(${scale})`,
-                transition: 'transform 0.1s linear, opacity 0.15s ease',
-              }}>
-                <ArchiveCard item={item} isActive={isActive} opacity={1} blur={blur} onClick={() => isActive && onCardClick(item)} />
-              </div>
+              {isVisible && (
+                <div style={{
+                  transform: `scale(${scale})`,
+                  transition: 'transform 0.1s linear, opacity 0.15s ease',
+                }}>
+                  <ArchiveCard item={item} isActive={isActive} opacity={1} blur={blur} onClick={() => isActive && onCardClick(item)} />
+                </div>
+              )}
             </Html>
           </group>
         );

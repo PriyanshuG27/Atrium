@@ -97,12 +97,16 @@ export default function Archive({ initialSelectedItem, onClearInitialSelect }) {
     }
   }, [itemsList]);
 
+  const activeFetchIdRef = useRef(0);
+
   // Fetch signals archive
   const fetchItems = useCallback(async () => {
+    const fetchId = ++activeFetchIdRef.current;
     try {
       setLoading(true);
       // Fetch Page 1 immediately to resolve loading and render the first page
       const res = await apiFetch('/api/items?page=1&limit=50');
+      if (fetchId !== activeFetchIdRef.current) return;
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const firstPage = data.items || data || [];
@@ -119,13 +123,18 @@ export default function Archive({ initialSelectedItem, onClearInitialSelect }) {
           while (hasMore && pageNum <= 6) {
             try {
               const bgRes = await apiFetch(`/api/items?page=${pageNum}&limit=50`);
+              if (fetchId !== activeFetchIdRef.current) return;
               if (!bgRes.ok) break;
               const bgData = await bgRes.json();
               const bgFetched = bgData.items || bgData || [];
               if (bgFetched.length === 0) {
                 hasMore = false;
               } else {
-                setItems(prev => [...prev, ...bgFetched]);
+                setItems(prev => {
+                  const existingIds = new Set(prev.map(it => it.id));
+                  const uniqueNew = bgFetched.filter(it => !existingIds.has(it.id));
+                  return [...prev, ...uniqueNew];
+                });
                 if (bgFetched.length < 50) {
                   hasMore = false;
                 } else {
@@ -140,6 +149,7 @@ export default function Archive({ initialSelectedItem, onClearInitialSelect }) {
         })();
       }
     } catch (err) {
+      if (fetchId !== activeFetchIdRef.current) return;
       setError(err.message);
       setLoading(false);
     }
