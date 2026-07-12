@@ -1,317 +1,283 @@
-<p align="center">
-  <h1 align="center">Recall</h1>
-  <p align="center"><strong>Your thoughts deserve more than a graveyard of bookmarks.</strong></p>
-  <p align="center">Turn scattered voice notes, articles, PDFs, and screenshots into an interactive 3D spatial knowledge graph you can explore, talk to, and actually remember.</p>
-</p>
+# Atrium
 
-<p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License"></a>
-  <a href="https://python.org"><img src="https://img.shields.io/badge/Python-3.11+-3776AB.svg?logo=python&logoColor=white" alt="Python"></a>
-  <a href="backend/main.py"><img src="https://img.shields.io/badge/FastAPI-0.111+-009688.svg?logo=fastapi&logoColor=white" alt="FastAPI"></a>
-  <a href="frontend/src/App.jsx"><img src="https://img.shields.io/badge/React-18.3+-61DAFB.svg?logo=react&logoColor=black" alt="React"></a>
-  <a href="backend/db/schema.sql"><img src="https://img.shields.io/badge/PostgreSQL-pgvector-4169E1.svg?logo=postgresql&logoColor=white" alt="PostgreSQL"></a>
-  <a href="docs/INDEX.md"><img src="https://img.shields.io/badge/Docs-Engineering_Manual-purple.svg" alt="Docs"></a>
-</p>
+### Your second brain should remember for you.
+
+Atrium captures ideas from anywhere, organizes them automatically, lets you explore them visually, and helps you remember them over time.
+
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.11+-3776AB.svg?logo=python&logoColor=white)](backend/requirements.txt)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.138.0-009688.svg?logo=fastapi&logoColor=white)](backend/main.py)
+[![React](https://img.shields.io/badge/React-18.3-61DAFB.svg?logo=react&logoColor=black)](frontend/package.json)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-pgvector-4169E1.svg?logo=postgresql&logoColor=white)](backend/db/schema.sql)
 
 ---
 
-## 🎬 Primary Demo
+## Atrium at a Glance
 
-> [!TIP]
-> **Experience Recall**: Send a voice note while walking, bookmark an article on your phone, and clip a technical diagram from your browser—then explore all three inside a living 3D constellation.
-
-<p align="center">
-  <img src="https://via.placeholder.com/1200x675.png?text=Primary+Demo+GIF%3A+Telegram+Voice+Drop+%E2%86%92+3D+Constellation+%E2%86%92+RAG+Camera+Flight" alt="Primary Demo GIF" width="100%" />
-  <br>
-  <sub><strong>Demo Spec:</strong> 1200x675 MP4/GIF showcasing instant Telegram capture, Three.js 3D graph rendering, and RAG camera auto-flight.</sub>
-</p>
+*   **⚡ Ingest from Anywhere**: Send voice notes, links, PDFs, or photos to a Telegram bot.
+*   **🌌 3D Constellations**: Explore your knowledge graph in a spatial three-dimensional map.
+*   **💬 Chat with Context**: Query your mind using a built-in RAG assistant.
+*   **🎴 Spaced Repetition**: Retain saved insights with SM-2 quizzes.
+*   **🔒 Complete Ownership**: Self-hostable, backed by PostgreSQL, with simple Markdown imports and exports.
 
 ---
 
-## 💭 The Problem
+## 🎬 The Experience
 
-We consume dozens of valuable ideas every day:
-
-* A 30-minute technical podcast episode listened to during a morning walk
-* A 20-page research PDF saved to a downloads folder
-* A code snippet or architecture diagram clipped late at night
-* A spontaneous voice thought recorded on a phone
-
-**What happens to them?**
-
-They end up buried in static bookmark folders, forgotten phone screenshots, and unopened browser tabs. 80% of what we save is never seen again. Traditional note apps force you to manually tag, sort into folder hierarchies, and write manual summaries—turning learning into administrative friction.
-
----
-
-## 💡 The Vision
-
-Recall was built on a simple premise: **Capturing knowledge should take zero effort, and retrieving it should feel like magic.**
-
-Instead of requiring manual organization, Recall processes your raw inputs in the background, extracts core concepts, and maps them mathematically into a **60 FPS 3D spatial constellation**.
-
-When you need an answer weeks later, you don't hunt through folders. You ask Recall in plain English. Your second brain answers with precise sources and **auto-pilots the 3D camera straight to the exact node where that thought lives**.
+```text
+┌───────────────────────────────────────────────────────────────────────────┐
+│                                                                           │
+│                      [ 🌌 3D Spatial Constellation ]                       │
+│                                                                           │
+│          ● (Machine Learning)                                             │
+│         /  \                                                              │
+│  ● (Math)    ● (FastAPI) ─── ● (RAG Search)                               │
+│               \             /                                             │
+│                ● ─── ● ─── ● (Three.js Viewport)                          │
+│                                                                           │
+│  Camera Pilot Mode: Ask a question in the chat drawer ──► Click citation  │
+│  badge ──► Viewport interpolates and flies directly to the source node.   │
+│                                                                           │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+*(Demonstration recording coming soon)*
 
 ---
 
-## ☀️ A Day with Recall
+## The Workflow Shift
 
-> **8:15 AM — Morning Walk**  
-> You record a 45-second voice note on Telegram: *"Research how pgvector HNSW index construction parameters impact search latency under concurrency."*  
-> *Recall transcribes the audio via Whisper, extracts key technical entities, and embeds the thought in 384-dimensional vector space.*
+Traditional personal knowledge management systems (Obsidian, Notion, Logseq) require continuous organization. Atrium automates the friction away.
 
-> **1:30 PM — Lunch Research**  
-> You find an insightful technical article on vector indexing while browsing on your laptop. You click the Recall Chrome extension button once.  
-> *Recall extracts the page text, generates a concise summary, and connects it to your morning voice note inside the 3D graph.*
-
-> **9:00 PM — Evening Reflection**  
-> You open Recall (`/map`) and type into the RAG drawer: *"What did I learn today about vector search optimization?"*  
-> Recall responds with a synthesized answer and a citation badge `[1]`. You click `[1]`.  
-> *The 3D camera smoothly flies across your constellation, zooming directly onto the node created from your morning voice note.*
-
-> **9:05 PM — Active Retention**  
-> You open `/drill`. Recall has automatically generated a flashcard testing your retention of HNSW `ef_construction` parameters. You rate your recall confidence, and SuperMemo SM-2 schedules the next review interval.
+| Action | Traditional PKM | The Atrium Way |
+|---|---|---|
+| **Save** | Create a file, name it, and save | Send a Telegram message |
+| **Structure** | Create folders and link notes manually | AI organizes them automatically in 3D |
+| **Retrieve** | Search for keywords | Ask a question in natural language |
+| **Explore** | Scroll through list files | Fly through relationships visually |
+| **Retain** | Forget later | Automated scheduled quizzes |
 
 ---
 
-## 🔄 The Recall Journey
+## Why Atrium Exists (Philosophy)
+
+*   **Frictionless capture is essential.** If saving a thought takes more than two seconds, you won't do it. Telegram provides a zero-friction input gateway.
+*   **Brains are spatial computers.** Lists and grids do not match how we think. Navigating concepts spatially in a three-dimensional coordinate graph matches our neural mapping.
+*   **Saving does not equal knowing.** Gathering bookmarks creates an illusion of competence. Active recall is the only way to build long-term retention.
+
+---
+
+## Feature Showcase
+
+### 1. Zero-Friction Ingestion
+```text
+┌─────────────────────────────────────────────────────────┐
+│ Telegram Bot                                            │
+│ User: https://arxiv.org/abs/2305.16261                  │
+│ Bot: 📥 Link Captured! "RAG: Retrieval-Augmented..."    │
+│      💡 How do you plan to apply this search pattern?   │
+└─────────────────────────────────────────────────────────┘
+```
+Send links, voice notes, PDFs, or photos. Atrium acknowledges the upload instantly, then asks a single targeted follow-up question in your chosen psychological mood to deepen retention.
+*(Screenshots coming soon)*
+
+### 2. Conversational RAG & Camera Pilot
+Ask your database questions. The RAG assistant answers using your notes as context. Click any citation badge (`[1]`) in the chat drawer to trigger a camera fly-to animation that pilots the camera straight to the cited node.
+*(Screenshots coming soon)*
+
+### 3. Interactive 3D Observatory
+Navigate your thoughts. View notes clustered into colored communities by semantic similarity in a force-directed 3D graph, or browse cards chronologically in a 3D cylindrical carousel.
+*(Screenshots coming soon)*
+
+### 4. Active Retention Quizzes (SM-2)
+```text
+┌─────────────────────────────────────────────────────────┐
+│ Drill Room                                              │
+│ Question: What is the main bottleneck in RAG pipelines? │
+│ [Show Answer] ──► Select Confidence:                    │
+│ [ Again (0d) ]   [ Shaky (1d) ]   [ Locked (6d) ]       |
+└─────────────────────────────────────────────────────────┘
+```
+Keep saved ideas fresh. The system generates flashcards and schedules reviews. You select your retention rating to update the card's next review date.
+*(Screenshots coming soon)*
+
+---
+
+## How It Works
+
+Atrium processes notes asynchronously to ensure instantaneous webhook responses:
 
 ```
-  1. CAPTURE    ──► Voice notes, links, or PDFs via Telegram or Chrome Clipper
-       │
-  2. UNDERSTAND ──► Automated AI summarization, OCR image parsing, and Whisper transcription
-       │
-  3. CONNECT    ──► 384-dim vector embeddings cluster related thoughts in 3D space
-       │
-  4. ASK        ──► Conversational RAG with interactive camera auto-flight citation badges
-       │
-  5. REMEMBER   ──► Active recall flashcards scheduled automatically via SuperMemo SM-2
+Capture ──► Understand ──► Connect ──► Explore ──► Remember
 ```
 
----
-
-## 🖼️ Visual Gallery
-
-| Room / Interface | Spec & Dimensions | Interaction Purpose |
-|---|---|---|
-| **3D Constellation Map** | 1920x1080 Screenshot (`/map`) | 60 FPS spatial node graph with Louvain community color clusters |
-| **Glass Archive Cylinder** | 1920x1080 Screenshot (`/archive`) | 3D glass cylinder browsing with inertia scroll and tag filters |
-| **Conversational RAG Drawer** | 800x450 GIF | Clicking citation `[1]` triggers smooth 3D camera flight to cited node |
-| **SuperMemo SM-2 Flashcard Room** | 1920x1080 Screenshot (`/drill`) | Active recall testing room with SM-2 interval confidence ratings |
-| **Telegram & Chrome Capture** | 800x450 GIF | 1-click web clipping and instant Telegram voice note processing |
+1.  **Capture**: Webhooks receive the Telegram message and immediately write it to the task queue.
+2.  **Understand**: Workers transcribes audio, parse documents, run OCR, and extract summaries.
+3.  **Connect**: The system generates vector embeddings, mapping the summaries to coordinates in our 3D graph.
+4.  **Explore**: The new note is pushed to active WebSockets, rendering instantly in the frontend viewports.
+5.  **Remember**: Scheduled tasks queue items for your active review quizzes during offpeak hours.
 
 ---
 
-## ⚡ What Recall Lets You Do
+## Technical Architecture
 
-### 📱 Capture Anywhere
-> **Zero-friction ingestion without interrupting your flow.**  
-> Send voice notes, photos of book pages, PDFs, or article links to your Telegram bot or click the Chrome sidepanel. Powered by Whisper audio transcription, Hugging Face PaddleOCR, and asynchronous Upstash Redis worker queues.
-
-### 🌌 3D Observatory Map
-> **Explore your personal universe of thoughts in spatial 3D.**  
-> Walk through a spatial 3D graph of your mind (`/map`) or scroll through a glass archive cylinder (`/archive`). Rendered with Three.js and React Three Fiber at 60 FPS using force-directed graph positioning and vector cosine similarity.
-
-### 💬 Conversational RAG & Camera Flight
-> **Ask questions and fly directly to the source of your thoughts.**  
-> Type a question in plain English. Click a citation badge `[1]` in the answer, and the 3D camera pilots straight to the source item. Driven by Reciprocal Rank Fusion (RRF) combining `pgvector` HNSW cosine search and `pg_trgm` GIN trigram text search.
-
-### 🎴 Spaced Repetition (SuperMemo SM-2)
-> **Turn static bookmarks into memories you actually keep.**  
-> Review auto-generated flashcards (`/drill`) tailored to your saved content. Rate your recall confidence to space out future reviews using the SuperMemo SM-2 interval algorithm.
-
-### 📝 Obsidian Vault Sync
-> **Maintain total ownership over your local data.**  
-> Two-way sync your Recall knowledge base with your local Obsidian vault using standard Open Knowledge Format (OKF) Markdown files with YAML frontmatter.
-
----
-
-## 📊 Traditional Notes vs. Recall
-
-| Experience | Traditional Note Apps | Recall |
-|---|---|---|
-| **Friction** | Manual titles, tags, and folder organization | Zero-friction capture via Telegram & Chrome extension |
-| **Search** | Exact keyword matching only | Hybrid Vector (HNSW) + Trigram (GIN) semantic retrieval |
-| **Navigation** | Static lists and nested folders | Interactive 60 FPS 3D spatial constellation map |
-| **RAG Answers** | Text-only output | Interactive answer citations with 3D camera auto-flight |
-| **Retention** | Saved and forgotten forever | Active recall flashcards scheduled via SuperMemo SM-2 |
-| **Security** | Plaintext database storage | Fernet AES-128 cryptographic encryption at rest |
-
----
-
-## 🏗️ Deep System Architecture
+Atrium separates API gateways from heavy processing worker queues to protect webhooks from timeouts.
 
 ```mermaid
+%%{init: {'theme': 'dark', 'themeVariables': { 'primaryColor': '#1e293b', 'primaryTextColor': '#f8fafc', 'primaryBorderColor': '#475569', 'lineColor': '#38bdf8' }}}%%
 flowchart TB
-    subgraph INGEST["1. INGESTION & CLIENT GATEWAY"]
-        TG["Telegram Bot\n(< 50ms ACK)"]
-        EXT["Chrome Extension\n(Manifest v3 Sidepanel)"]
-        SPA["React 18 SPA\n(TWA HMAC / JWT Cookie)"]
+    %% Nodes and Styles
+    classDef client fill:#0088cc,stroke:#006699,stroke-width:2px,color:#fff;
+    classDef gateway fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#f8fafc;
+    classDef queue fill:#e11d48,stroke:#be123c,stroke-width:2px,color:#fff;
+    classDef worker fill:#4f46e5,stroke:#4338ca,stroke-width:2px,color:#fff;
+    classDef db fill:#10b981,stroke:#059669,stroke-width:2px,color:#fff;
+    classDef ai fill:#d97706,stroke:#b45309,stroke-width:2px,color:#fff;
+
+    subgraph CAPTURE["Capture & Client UI"]
+        TG["Telegram Bot App\n(Voice/Link Ingest)"]:::client
+        WEB["React 3D Observatory\n(SPA / Three.js R3F)"]:::client
     end
 
-    subgraph GATEWAY["2. FASTAPI BACKEND GATEWAY (Koyeb Serverless)"]
-        SEC["SecretMasking Filter\n& Fernet Key Vault"]
-        LIMIT["Sliding Rate Limiter\n(Upstash Redis)"]
-        ROUTERS["FastAPI Routers\n(API, Webhook, WebSockets)"]
+    subgraph GATEWAY["FastAPI Application Gateway"]
+        ROUTERS["API Routers & Middleware\n(Rate Limiter, CORS, TWA Auth)"]:::gateway
     end
 
-    subgraph ASYNC["3. ASYNCHRONOUS ENGINE & CONCURRENCY CONTROLS"]
-        REDIS[("Upstash Redis Queue\nrecall:tasks")]
-        WORKER["Async Worker Pool\n(asyncio.Semaphore = 3)"]
-        DLQ["Dead Letter Queue\n(DLQ Boot Failover)"]
-        SCHED["APScheduler Engine\n(22 Background Cron Jobs)"]
+    subgraph QUEUE["Asynchronous Queue System"]
+        REDIS[("Upstash Redis Queue\n(atrium:tasks List)")]:::queue
     end
 
-    subgraph AI_PIPELINE["4. MULTI-PROVIDER AI WORKLOADS"]
-        STT["Voice/Audio Transcription\nGroq Whisper Turbo (Serverless)"]
-        OCR["Image/PDF OCR\nGemini 2.5 Flash (Serverless)"]
-        EMBED["Vector Embeddings & Reranker\nFastEmbed / Reranker (Azure VM)"]
-        CASCADE["LLM Failover Cascade\nGroq ➔ Gemini ➔ Bookmark Fallback"]
+    subgraph WORKERS["Async Processing Loop"]
+        WORKER["Task Processing Worker\n(Semaphore Concurrency: 3)"]:::worker
     end
 
-    subgraph STORAGE["5. DATABASE & HYBRID RETRIEVAL ENGINE (Neon PostgreSQL)"]
-        DB[("Neon PostgreSQL 16\n(15 Normalized Tables)")]
-        HNSW["384-dim HNSW Index\n(Cosine Vector Search < 10ms)"]
-        GIN["GIN Trigram Index\n(Fuzzy Text Search < 5ms)"]
-        RRF["Hybrid RAG Retrieval Engine\n(Reciprocal Rank Fusion)"]
-        LOUVAIN["Louvain Community Clustering\n(Graph Clustering & Cache)"]
+    subgraph PIPELINES["Multi-Provider AI Cascade"]
+        STT["Groq Whisper\n(Voice Transcribe)"]:::ai
+        OCR["NVIDIA NIM / Gemini\n(OCR Extraction)"]:::ai
+        CASCADE["LLM Cascade Engine\n(Groq / Gemini / OpenRouter)"]:::ai
+        EMBED["Local ONNX Embeddings\n(384-dim Vector)"]:::ai
     end
 
-    subgraph CLIENT_3D["6. 3D OBSERVATORY FRONTEND (Three.js / R3F @ 60 FPS)"]
-        MAP["3D Constellation Map\n(/map)"]
-        CYLINDER["Glass Archive Cylinder\n(/archive)"]
-        FLIGHT["Camera Auto-Flight Engine\n(Citation Badges [1] [2])"]
-        DRILL["Active Recall Drill Room\n(SuperMemo SM-2)"]
+    subgraph STORAGE["Storage & Semantic Search Hub"]
+        POSTGRES[("Neon PostgreSQL 16\n(Range Partitioned items Table)")]:::db
+        HNSW["pgvector HNSW Cosine Index\n(idx_items_embedding)"]:::db
+        GIN["pg_trgm GIN Trigram Index\n(idx_items_text_gin)"]:::db
     end
 
-    TG --> GATEWAY
-    EXT --> GATEWAY
-    SPA --> GATEWAY
-
-    GATEWAY --> SEC
-    SEC --> LIMIT
-    LIMIT --> ROUTERS
-    ROUTERS --> REDIS
-
-    REDIS --> WORKER
-    WORKER --> STT
-    WORKER --> OCR
-    WORKER --> EMBED
-    WORKER --> CASCADE
-    WORKER --> DLQ
-
-    EMBED --> HNSW
-    CASCADE --> DB
-    SCHED --> LOUVAIN
-
-    HNSW --> RRF
-    GIN --> RRF
-    RRF --> FLIGHT
-
-    DB --> MAP
-    LOUVAIN --> MAP
-    DB --> CYLINDER
-    FLIGHT --> MAP
-    DB --> DRILL
+    %% Flow Arrows
+    TG -->|"Webhook Post"| ROUTERS
+    WEB -->|"REST API / WebSockets"| ROUTERS
+    ROUTERS -->|"Atomic LPUSH"| REDIS
+    REDIS -->|"Atomic BRPOPLPUSH"| WORKER
+    WORKER -->|"Process Audio"| STT
+    WORKER -->|"Scan Media"| OCR
+    WORKER -->|"Summarize"| CASCADE
+    WORKER -->|"Vectorize"| EMBED
+    STT & OCR & CASCADE & EMBED -->|"Structured Metadata"| WORKER
+    WORKER -->|"Fernet Encrypted INSERT"| POSTGRES
+    POSTGRES --> HNSW & GIN
+    POSTGRES -.->|"Louvain Clusters Cache"| REDIS
+    POSTGRES -->|"3D Graph Coordinates"| WEB
 ```
 
-> 📖 *For exact sequence diagrams, concurrency limits, Fernet AES-128 crypto schemas, and SQL DDL specs, explore the [System Architecture Guide](docs/ARCHITECTURE.md).*
+For detailed specifications, see the [Architecture Overview](docs/architecture/overview.md).
 
 ---
 
-## 🛠️ Technology Stack
+## Technology Stack
 
-<p align="center">
-  <!-- Core Frameworks & Tools -->
-  <a href="https://skillicons.dev">
-    <img src="https://skillicons.dev/icons?i=python,fastapi,react,vite,threejs,postgres,redis,vercel,nodejs,js,docker,git,github,vscode,md&perline=15" alt="Core Stack Icons" />
-  </a>
-  <br><br>
-  <!-- AI Cascade, Vector Engines & Cloud Infrastructure -->
-  <img src="https://img.shields.io/badge/Modal_GPU-Whisper_%2B_Qwen-000000?logoColor=white" alt="Modal GPU" />
-  <img src="https://img.shields.io/badge/FastEmbed-ONNX-FF6F00?logoColor=white" alt="FastEmbed" />
-  <img src="https://img.shields.io/badge/Hugging_Face-PaddleOCR-FFD21E?logo=huggingface&logoColor=black" alt="Hugging Face" />
-  <img src="https://img.shields.io/badge/Groq-3--Tier_LLM-F05032?logoColor=white" alt="Groq" />
-  <img src="https://img.shields.io/badge/Google_Gemini-API-8E44AD?logo=google&logoColor=white" alt="Gemini" />
-  <img src="https://img.shields.io/badge/OpenRouter-API-4A90E2?logoColor=white" alt="OpenRouter" />
-  <img src="https://img.shields.io/badge/Koyeb-Serverless-000000?logoColor=white" alt="Koyeb" />
-  <img src="https://img.shields.io/badge/pgvector-HNSW_384d-2EA44F?logo=postgresql&logoColor=white" alt="pgvector" />
-  <img src="https://img.shields.io/badge/Pytest-525_Tests-0A9EDC?logo=pytest&logoColor=white" alt="Pytest" />
-  <img src="https://img.shields.io/badge/Playwright-E2E-2EAD33?logo=playwright&logoColor=white" alt="Playwright" />
-</p>
-
+| Layer | Technologies | Purpose |
+|---|---|---|
+| **Frontend** | React 18, Three.js, React Three Fiber, GSAP, Tone.js | Smooth 3D constellation viewports and sound design |
+| **Backend** | FastAPI, uvicorn, psycopg3, Pydantic, APScheduler | REST APIs and background scheduled tasks |
+| **Database** | Neon PostgreSQL 16, pgvector, pg_trgm | Relational storage, vector searches, and fuzzy text matches |
+| **Cache & Queue** | Upstash Redis (REST compatibility) | Task queue, sliding rate-limits, and graph cache |
+| **AI Pipelines** | Groq Whisper, NVIDIA NIM OCR, Google Gemini, FastEmbed | Transcription, fallback OCR, LLM cascade summaries |
 
 ---
 
-## ⚡ Quick Start
+## Repository Structure
 
-Launch Recall locally in under 3 minutes.
+```text
+Atrium/
+├── backend/            # FastAPI application, database schemas, and queue workers
+├── frontend/           # React single page app and Three.js canvas engines
+├── docs/               # Technical documentation library
+│   ├── getting-started/# Guides for setting up bots, workspaces, and envs
+│   ├── product/        # Features, RAG, search, and troubleshooting guides
+│   ├── architecture/   # Diagrams, database, caching, and security specs
+│   └── development/    # API routes, testing, setup, and contributing guides
+├── scripts/            # Database seeding and developer tools
+└── Makefile            # Local execution and build shortcuts
+```
 
-### 1. Backend Setup
+---
 
+## Quick Start
+
+### 1. Prerequisites
+Ensure you have the following installed:
+- Python 3.11+
+- Node.js 18+ with `npm`
+- PostgreSQL (with `pgvector` and `pg_trgm` extensions)
+- Redis instance
+
+### 2. Backend Setup
 ```bash
-git clone https://github.com/PriyanshuG27/Recall.git
-cd Recall/backend
+git clone https://github.com/PriyanshuG27/Atrium.git
+cd Atrium/backend
 
-# Create virtual environment
+# Create virtual environment and install dependencies
 python -m venv .venv
-
-# Activate environment (Windows: .venv\Scripts\activate | Linux/macOS: source .venv/bin/activate)
-source .venv/bin/activate
-
-# Install requirements & configure env
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+
+# Configure environment and run DDL migrations
 cp .env.example .env.local
+make schema
 
 # Start FastAPI server
-uvicorn backend.main:app --reload --port 8000
+make dev-backend
 ```
 
-### 2. Frontend Setup (Separate Terminal)
-
+### 3. Frontend Setup
+In a new terminal window, navigate to the frontend directory:
 ```bash
-cd Recall/frontend
+cd Atrium/frontend
 npm install
-npm run dev
-```
 
+# Start development server
+make dev-frontend
+```
 Open `http://localhost:5173` in your browser.
 
-> 🛠️ *For Makefile targets, test suites, and environment details, read the [Development Guide](docs/DEVELOPMENT.md).*
+---
+
+## Documentation Directory
+
+| Guide Category | Description |
+|---|---|
+| **[INDEX Hub](docs/INDEX.md)** | Technical navigation table of contents for all active documentation. |
+| **[Getting Started](docs/getting-started/installation.md)** | Guides for installing dependencies, bot creation, and environment variables. |
+| **[Product Specs](docs/product/overview.md)** | Detailed pages on search, quizzes, chat drawers, and troubleshooting. |
+| **[Architecture Details](docs/architecture/overview.md)** | Structural manuals for databases, caches, security, and authentication. |
+| **[Development Manual](docs/development/setup.md)** | API routes, testing strategies, coding standards, and deployment. |
 
 ---
 
-## 📚 Technical Documentation Library
+## Project Roadmap
 
-Recall is backed by a complete engineering manual inside `docs/`:
-
-* 🚀 [System Architecture Guide](docs/ARCHITECTURE.md) — System design, sequence diagrams, and lifecycles.
-* 🗄️ [Database Reference](docs/DATABASE.md) — DDL schemas, `pgvector` HNSW indexes, and production queries.
-* 🔌 [API Reference](docs/API.md) — Complete specification for all 50 FastAPI REST & WebSocket endpoints.
-* 🌟 [Feature Status Matrix](docs/FEATURES.md) — Feature status breakdown across production, dev, and legacy code.
-* 🛠️ [Development Guide](docs/DEVELOPMENT.md) — Environment setup, `Makefile` targets, and contributor workflows.
-* ☁️ [Deployment Guide](docs/DEPLOYMENT.md) — Hosting setup (Koyeb, Vercel, Azure Student VM) and 28 environment variables.
-* 🛡️ [Security Architecture](docs/SECURITY.md) — Cryptography, Fernet AES-128, HMAC verification, and PII masking.
-* 🧪 [Testing Strategy](docs/TESTING.md) — Test pyramid breakdown across 151 test files.
-* 🤝 [Contributing Guidelines](docs/CONTRIBUTING.md) — Coding standards, workspace rules, and PR checklist.
-* 📊 [Visual Diagrams Collection](docs/DIAGRAMS.md) — 10 code-derived Mermaid diagrams.
-* 📋 [Architecture Decision Records (ADRs)](docs/adr/README.md) — Formal records (`ADR-001` through `ADR-006`).
+*   **Current State**: Multi-modal ingestion, 3D spatial observatory constellation, conversational RAG, SM-2 flashcard drills, Hearth partnerships, and OKF ZIP backups.
+*   **Upcoming**: Direct Obsidian vault sync plugin, local offline LLM options, and Chrome web clipper integrations.
+*   **Long-Term Vision**: Collaborative multi-user graphs, automated document graph linking, and advanced mind-mapping rooms.
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
-Contributions are welcome! Please review the [Contributing Guidelines](docs/CONTRIBUTING.md) before submitting pull requests.
-
----
-
-## 🔒 Security & Secret Rotation Warning
-
-> [!WARNING]
-> **Git History Exposure**: If any API key, database URL, token, or cryptographic credential was previously hardcoded or committed in the git history of this repository, it is still visible in the git history.
-> You must **rotate all previously committed keys and secrets immediately** to prevent unauthorized access. Always use environment variables via `.env` or `.env.local` (which are excluded from git by `.gitignore`).
+Contributions are welcome. Please refer to our [Contributing Guidelines](docs/development/contributing.md) for pull request verification checklists, testing standards, and development requirements.
 
 ---
 
-## 📜 License
+## License
 
-Recall is open-source software released under the MIT License.
+Atrium is open-source software licensed under the [MIT License](LICENSE).
