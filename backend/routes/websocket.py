@@ -71,8 +71,20 @@ async def legacy_websocket_endpoint(websocket: WebSocket, token: Optional[str] =
 @router.websocket("/api/ws")
 @router.websocket("/api/ws/{token}")
 async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = None):
-    # Try getting token from cookies if not in path
+    # Try getting token from cookies or subprotocols if not in path
     jwt_token = token
+    subprotocol = None
+
+    # 1. Check Sec-WebSocket-Protocol header first (safest, hides token from URL logs)
+    protocol_header = websocket.headers.get("sec-websocket-protocol")
+    if not jwt_token and protocol_header:
+        parts = [p.strip() for p in protocol_header.split(",")]
+        # Client sends: ['atrium-token', token]
+        if len(parts) == 2 and parts[0] == "atrium-token":
+            jwt_token = parts[1]
+            subprotocol = "atrium-token"
+
+    # 2. Fall back to cookies
     if not jwt_token:
         jwt_token = websocket.cookies.get("atrium_session") or websocket.cookies.get("jwt")
     
@@ -92,8 +104,8 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = None):
         await websocket.close(code=4001)
         return
 
-    # Accept the connection
-    await websocket.accept()
+    # Accept the connection (pass subprotocol back to browser handshake)
+    await websocket.accept(subprotocol=subprotocol)
 
     # Generate a unique connection ID for horizontal routing
     connection_id = uuid.uuid4().hex

@@ -132,3 +132,25 @@ async def test_path_websocket_redis_broadcast(mock_redis_global):
     
     mock_redis_global.smembers.assert_called_once_with("ws:connections:user:99")
     assert 99 not in active_connections
+
+
+def test_secure_websocket_protocol_valid(client):
+    token = generate_jwt({"sub": "42", "exp": int(time.time()) + 3600}, VALID_ENV["JWT_SECRET"])
+    with client.websocket_connect("/api/ws", subprotocols=["atrium-token", token]) as websocket:
+        resp = websocket.receive_json()
+        assert resp == {"type": "connected", "user_id": 42}
+        assert websocket.accepted_subprotocol == "atrium-token"
+
+
+def test_secure_websocket_protocol_invalid(client):
+    with pytest.raises(WebSocketDisconnect) as exc_info:
+        with client.websocket_connect("/api/ws", subprotocols=["atrium-token", "invalid_token"]) as websocket:
+            pass
+    assert exc_info.value.code in (4001, 1000)
+
+
+def test_secure_websocket_protocol_empty(client):
+    with pytest.raises(WebSocketDisconnect) as exc_info:
+        with client.websocket_connect("/api/ws", subprotocols=["atrium-token", ""]) as websocket:
+            pass
+    assert exc_info.value.code in (4001, 1000)

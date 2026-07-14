@@ -766,6 +766,7 @@ async def weekly_profile_text_generator() -> None:
                 else:
                     transition_context = f"This is their first classification. Focus on explaining the primary cognitive driver of their {code} signature."
 
+                hubs = []
                 async with pool.connection() as conn:
                     async with conn.cursor() as cur:
                         await cur.execute(
@@ -774,21 +775,23 @@ async def weekly_profile_text_generator() -> None:
                         )
                         hubs = [r[0] for r in await cur.fetchall()]
                         
-                        cascade = AICascade()
-                        hubs_str = ", ".join(hubs) if hubs else "general topics"
-                        
-                        prompt = (
-                            f"You are a Cognitive Graph Profiler. The user has been classified as {code} (MBTI-style Mind Type).\n"
-                            f"Their top 3 active clusters are: {hubs_str}.\n"
-                            f"{transition_context}\n\n"
-                            f"Write a highly personalized, analytical, and engaging 4-sentence profile summary explaining their cognitive style and transition.\n"
-                            f"Constraint: Do not use clinical jargon, do not use template words, and connect the topics explicitly."
-                        )
-                        
-                        summary_text = await cascade.call_llm(prompt)
-                        if not summary_text or len(summary_text) < 10:
-                            summary_text = f"You are actively building a graph of ideas under {hubs_str}. Your current Mind Type is {code}."
+                cascade = AICascade()
+                hubs_str = ", ".join(hubs) if hubs else "general topics"
+                
+                prompt = (
+                    f"You are a Cognitive Graph Profiler. The user has been classified as {code} (MBTI-style Mind Type).\n"
+                    f"Their top 3 active clusters are: {hubs_str}.\n"
+                    f"{transition_context}\n\n"
+                    f"Write a highly personalized, analytical, and engaging 4-sentence profile summary explaining their cognitive style and transition.\n"
+                    f"Constraint: Do not use clinical jargon, do not use template words, and connect the topics explicitly."
+                )
+                
+                summary_text = await cascade.call_llm(prompt)
+                if not summary_text or len(summary_text) < 10:
+                    summary_text = f"You are actively building a graph of ideas under {hubs_str}. Your current Mind Type is {code}."
 
+                async with pool.connection() as conn:
+                    async with conn.cursor() as cur:
                         await cur.execute(
                             "UPDATE users SET mind_type_summary = %s, mind_type_detailed = NULL WHERE id = %s;",
                             (summary_text, user_id)
@@ -869,6 +872,8 @@ async def monthly_prediction_generator() -> None:
                 return
 
             try:
+                hubs = []
+                recent_saves = ""
                 async with pool.connection() as conn:
                     async with conn.cursor() as cur:
                         await cur.execute(
@@ -884,45 +889,47 @@ async def monthly_prediction_generator() -> None:
                         items = await cur.fetchall()
                         recent_saves = "\n".join(f"- {title}: {summary[:100]}" for title, summary in items if title)
 
-                        cascade = AICascade()
-                        hubs_str = ", ".join(hubs) if hubs else "None"
-                        
-                        prompt = (
-                            f"You are a Predictive Cognitive Engine.\n"
-                            f"Analyze the user's recent saved ideas and semantic hubs:\n"
-                            f"Hubs: {hubs_str}\n"
-                            f"Recent saves:\n{recent_saves}\n\n"
-                            f"Predict what specific topic or concept they will save next within a 5-7 days window.\n"
-                            f"Format your reply as a JSON object with keys: \"prediction\", \"confidence\", \"explanation\".\n\n"
-                            f"Constraints:\n"
-                            f"- High specificity is required (do not predict generic topics like 'technology' or 'self-improvement').\n"
-                            f"- If your confidence is less than 0.72, return \"confidence\": 0.0 and do not make a prediction.\n"
-                            f"- Do not hedge or use placeholders."
-                        )
+                cascade = AICascade()
+                hubs_str = ", ".join(hubs) if hubs else "None"
+                
+                prompt = (
+                    f"You are a Predictive Cognitive Engine.\n"
+                    f"Analyze the user's recent saved ideas and semantic hubs:\n"
+                    f"Hubs: {hubs_str}\n"
+                    f"Recent saves:\n{recent_saves}\n\n"
+                    f"Predict what specific topic or concept they will save next within a 5-7 days window.\n"
+                    f"Format your reply as a JSON object with keys: \"prediction\", \"confidence\", \"explanation\".\n\n"
+                    f"Constraints:\n"
+                    f"- High specificity is required (do not predict generic topics like 'technology' or 'self-improvement').\n"
+                    f"- If your confidence is less than 0.72, return \"confidence\": 0.0 and do not make a prediction.\n"
+                    f"- Do not hedge or use placeholders."
+                )
 
-                        res = await cascade.call_llm(prompt)
-                        if res:
-                            try:
-                                import re
-                                match = re.search(r"\{.*\}", res, re.DOTALL)
-                                if match:
-                                    parsed = json.loads(match.group(0))
-                                    prediction = parsed.get("prediction")
-                                    confidence = float(parsed.get("confidence") or 0.0)
-                                    explanation = parsed.get("explanation")
+                res = await cascade.call_llm(prompt)
+                if res:
+                    try:
+                        import re
+                        match = re.search(r"\{.*\}", res, re.DOTALL)
+                        if match:
+                            parsed = json.loads(match.group(0))
+                            prediction = parsed.get("prediction")
+                            confidence = float(parsed.get("confidence") or 0.0)
+                            explanation = parsed.get("explanation")
 
-                                    if confidence >= 0.72 and prediction:
-                                        msg = (
-                                            f"🔮 *Monthly Prediction*\n\n"
-                                            f"Based on your recent saves, your graph predicts you will next explore: *{prediction}* (Confidence: {confidence:.2f})\n\n"
-                                            f"_{explanation}_"
-                                        )
-                                        from backend.worker import send_telegram_message
-                                        await send_telegram_message(chat_id, msg)
-                                        logger.info("Sent monthly prediction to user %d: %s", user_id, prediction)
-                            except Exception as parse_err:
-                                logger.error("Failed to parse monthly prediction JSON: %s", parse_err)
+                            if confidence >= 0.72 and prediction:
+                                msg = (
+                                    f"🔮 *Monthly Prediction*\n\n"
+                                    f"Based on your recent saves, your graph predicts you will next explore: *{prediction}* (Confidence: {confidence:.2f})\n\n"
+                                    f"_{explanation}_"
+                                )
+                                from backend.worker import send_telegram_message
+                                await send_telegram_message(chat_id, msg)
+                                logger.info("Sent monthly prediction to user %d: %s", user_id, prediction)
+                    except Exception as parse_err:
+                        logger.error("Failed to parse monthly prediction JSON: %s", parse_err)
 
+                async with pool.connection() as conn:
+                    async with conn.cursor() as cur:
                         await cur.execute(
                             "UPDATE users SET last_prediction_at = NOW() WHERE id = %s;",
                             (user_id,)
@@ -968,6 +975,8 @@ async def monthly_discrepancy_scanner() -> None:
                 return
 
             try:
+                hubs = []
+                item_samples = ""
                 async with pool.connection() as conn:
                     async with conn.cursor() as cur:
                         await cur.execute(
@@ -984,35 +993,41 @@ async def monthly_discrepancy_scanner() -> None:
                         items = await cur.fetchall()
                         item_samples = "\n".join(f"- {t}: {s[:100]}" for t, s in items if t)
 
-                        cascade = AICascade()
-                        prompt = (
-                            f"You are a Cognitive Discrepancy Analyzer.\n"
-                            f"Compare the user's stated self-description of their interests with their actual saved topics:\n"
-                            f"Stated self-description: \"{self_desc}\"\n"
-                            f"Actual saved hubs: {hubs_str}\n"
-                            f"Sample item saves:\n{item_samples}\n\n"
-                            f"Determine if the user's stated interests substantially diverge from what they actually save in practice.\n"
-                            f"If they substantially diverge, write a direct, honest, and constructive confession insight highlighting the gap (max 2 sentences).\n"
-                            f"If they align or the gap is weak, output ONLY: ALIGNED_NO_GAP\n\n"
-                            f"Constraint: Output ONLY raw conversational text. Do NOT wrap in JSON, quotes, or code block formatting."
-                        )
+                cascade = AICascade()
+                prompt = (
+                    f"You are a Cognitive Discrepancy Analyzer.\n"
+                    f"Compare the user's stated self-description of their interests with their actual saved topics:\n"
+                    f"Stated self-description: \"{self_desc}\"\n"
+                    f"Actual saved hubs: {hubs_str}\n"
+                    f"Sample item saves:\n{item_samples}\n\n"
+                    f"Determine if the user's stated interests substantially diverge from what they actually save in practice.\n"
+                    f"If they substantially diverge, write a direct, honest, and constructive confession insight highlighting the gap (max 2 sentences).\n"
+                    f"If they align or the gap is weak, output ONLY: ALIGNED_NO_GAP\n\n"
+                    f"Constraint: Output ONLY raw conversational text. Do NOT wrap in JSON, quotes, or code block formatting."
+                )
 
-                        res = await cascade.call_llm(prompt)
-                        if res and "ALIGNED_NO_GAP" not in res:
-                            confession_text = res.strip()
+                res = await cascade.call_llm(prompt)
+                
+                confession_text = None
+                item_a = 0
+                item_b = 0
+                if res and "ALIGNED_NO_GAP" not in res:
+                    confession_text = res.strip()
+                    
+                    # Fallback extraction if LLM still outputs JSON
+                    if confession_text.startswith("{") and confession_text.endswith("}"):
+                        try:
+                            import json as _json
+                            parsed = _json.loads(confession_text)
+                            if "insight" in parsed:
+                                confession_text = parsed["insight"]
+                            elif "confession" in parsed:
+                                confession_text = parsed["confession"]
+                        except Exception:
+                            pass
                             
-                            # Fallback extraction if LLM still outputs JSON
-                            if confession_text.startswith("{") and confession_text.endswith("}"):
-                                try:
-                                    import json as _json
-                                    parsed = _json.loads(confession_text)
-                                    if "insight" in parsed:
-                                        confession_text = parsed["insight"]
-                                    elif "confession" in parsed:
-                                        confession_text = parsed["confession"]
-                                except Exception:
-                                    pass
-                            
+                    async with pool.connection() as conn:
+                        async with conn.cursor() as cur:
                             await cur.execute("SELECT id FROM items WHERE user_id = %s ORDER BY created_at DESC LIMIT 2;", (user_id,))
                             item_rows = await cur.fetchall()
                             item_a = item_rows[0][0] if len(item_rows) > 0 else 0
@@ -1027,14 +1042,16 @@ async def monthly_discrepancy_scanner() -> None:
                             )
                             await conn.commit()
 
-                            msg = (
-                                f"💭 *Graph Reflection*\n\n"
-                                f"{confession_text}"
-                            )
-                            from backend.worker import send_telegram_message
-                            await send_telegram_message(chat_id, msg)
-                            logger.info("Sent discrepancy confession reflection to user %d", user_id)
+                    msg = (
+                        f"💭 *Graph Reflection*\n\n"
+                        f"{confession_text}"
+                    )
+                    from backend.worker import send_telegram_message
+                    await send_telegram_message(chat_id, msg)
+                    logger.info("Sent discrepancy confession reflection to user %d", user_id)
 
+                async with pool.connection() as conn:
+                    async with conn.cursor() as cur:
                         await cur.execute(
                             "UPDATE users SET last_confession_at = NOW() WHERE id = %s;",
                             (user_id,)
@@ -1079,6 +1096,19 @@ async def monthly_forward_hook() -> None:
                 return
 
             try:
+                top_hubs_labels = []
+                centroid = []
+                saved_texts = set()
+                domain_rows = []
+
+                def parse_vector(emb):
+                    if isinstance(emb, str):
+                        try:
+                            return [float(x) for x in emb.strip("[]").split(",")]
+                        except Exception:
+                            return [0.0] * 384
+                    return list(emb)
+
                 async with pool.connection() as conn:
                     async with conn.cursor() as cur:
                         await cur.execute(
@@ -1106,14 +1136,6 @@ async def monthly_forward_hook() -> None:
                         if not emb_rows:
                             return
 
-                        def parse_vector(emb):
-                            if isinstance(emb, str):
-                                try:
-                                    return [float(x) for x in emb.strip("[]").split(",")]
-                                except Exception:
-                                    return [0.0] * 384
-                            return list(emb)
-
                         vectors = [parse_vector(r[0]) for r in emb_rows]
                         vector_len = len(vectors[0])
                         centroid = [sum(v[i] for v in vectors) / len(vectors) for i in range(vector_len)]
@@ -1124,7 +1146,6 @@ async def monthly_forward_hook() -> None:
 
                         await cur.execute("SELECT title, tags FROM items WHERE user_id = %s;", (user_id,))
                         user_saves = await cur.fetchall()
-                        saved_texts = set()
                         for title, tags in user_saves:
                             if title:
                                 saved_texts.add(title.lower())
@@ -1134,47 +1155,49 @@ async def monthly_forward_hook() -> None:
 
                         await cur.execute("SELECT domain_name, embedding FROM static_domain_centroids;")
                         domain_rows = await cur.fetchall()
+
+                best_domain = None
+                best_score = -1.0
+
+                for domain_name, d_emb in domain_rows:
+                    if domain_name.lower() in saved_texts:
+                        continue
+                    
+                    d_vec = parse_vector(d_emb)
+                    sim = sum(x * y for x, y in zip(centroid, d_vec))
+                    
+                    score = 0.0
+                    if 0.60 <= sim <= 0.78:
+                        score = sim
                         
-                        best_domain = None
-                        best_score = -1.0
+                    if score > best_score:
+                        best_score = score
+                        best_domain = domain_name
 
-                        for domain_name, d_emb in domain_rows:
-                            if domain_name.lower() in saved_texts:
-                                continue
-                            
-                            d_vec = parse_vector(d_emb)
-                            sim = sum(x * y for x, y in zip(centroid, d_vec))
-                            
-                            score = 0.0
-                            if 0.60 <= sim <= 0.78:
-                                score = sim
-                                
-                            if score > best_score:
-                                best_score = score
-                                best_domain = domain_name
+                if best_domain and best_score > 0.0:
+                    cascade = AICascade()
+                    hubs_str = ", ".join(top_hubs_labels)
+                    
+                    prompt = (
+                        f"The user has a mind graph focused on: {hubs_str}.\n"
+                        f"A gap analysis identified that the adjacent concept of '{best_domain}' is conspicuously absent from their saves.\n\n"
+                        f"Write a concise 3-sentence observation. Explain why '{best_domain}' fits adjacent to their current interests, but is absent, prompting them to think about how it bridges their ideas.\n"
+                        f"Constraint: Do not use clinical jargon, do not use template words, and speak directly to their thinking shape."
+                    )
 
-                        if best_domain and best_score > 0.0:
-                            cascade = AICascade()
-                            hubs_str = ", ".join(top_hubs_labels)
-                            
-                            prompt = (
-                                f"The user has a mind graph focused on: {hubs_str}.\n"
-                                f"A gap analysis identified that the adjacent concept of '{best_domain}' is conspicuously absent from their saves.\n\n"
-                                f"Write a concise 3-sentence observation. Explain why '{best_domain}' fits adjacent to their current interests, but is absent, prompting them to think about how it bridges their ideas.\n"
-                                f"Constraint: Do not use clinical jargon, do not use template words, and speak directly to their thinking shape."
-                            )
+                    hook_text = await cascade.call_llm(prompt)
+                    if hook_text:
+                        msg = (
+                            f"Your graph has been building a framework for {hubs_str}.\n"
+                            f"The one piece it hasn’t touched: *{best_domain}*.\n\n"
+                            f"{hook_text}"
+                        )
+                        from backend.worker import send_telegram_message
+                        await send_telegram_message(chat_id, msg)
+                        logger.info("Sent forward hook gap notification to user %d: %s", user_id, best_domain)
 
-                            hook_text = await cascade.call_llm(prompt)
-                            if hook_text:
-                                msg = (
-                                    f"Your graph has been building a framework for {hubs_str}.\n"
-                                    f"The one piece it hasn’t touched: *{best_domain}*.\n\n"
-                                    f"{hook_text}"
-                                )
-                                from backend.worker import send_telegram_message
-                                await send_telegram_message(chat_id, msg)
-                                logger.info("Sent forward hook gap notification to user %d: %s", user_id, best_domain)
-
+                async with pool.connection() as conn:
+                    async with conn.cursor() as cur:
                         await cur.execute(
                             "UPDATE users SET last_forward_hook_at = NOW() WHERE id = %s;",
                             (user_id,)

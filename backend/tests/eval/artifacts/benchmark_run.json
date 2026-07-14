@@ -3,53 +3,53 @@
     "precision_at_1": 80.0,
     "recall_at_3": 100.0,
     "mrr": 0.888888888888889,
-    "avg_latency_seconds": 0.038983313333301337,
+    "avg_latency_seconds": 0.011908793332986533,
     "success_rate_percent": 100.0
   },
   "Baseline RRF (With Rewrite)": {
     "precision_at_1": 86.66666666666667,
     "recall_at_3": 100.0,
     "mrr": 0.9222222222222223,
-    "avg_latency_seconds": 0.010230666666757315,
+    "avg_latency_seconds": 0.0015334866669339438,
     "success_rate_percent": 100.0
   },
   "Xenova/ms-marco (No Rewrite)": {
     "precision_at_1": 100.0,
     "recall_at_3": 100.0,
     "mrr": 1.0,
-    "avg_latency_seconds": 0.1668947399998918,
-    "peak_ram_increase_mb": 130.625,
+    "avg_latency_seconds": 0.06165050666507644,
+    "peak_ram_increase_mb": 130.04296875,
     "success_rate_percent": 100.0
   },
   "Xenova/ms-marco (With Rewrite)": {
     "precision_at_1": 100.0,
     "recall_at_3": 100.0,
     "mrr": 1.0,
-    "avg_latency_seconds": 0.16573054666660028,
-    "peak_ram_increase_mb": 130.625,
+    "avg_latency_seconds": 0.05875562000049588,
+    "peak_ram_increase_mb": 130.04296875,
     "success_rate_percent": 100.0
   },
   "BAAI/bge-rerank (No Rewrite)": {
     "precision_at_1": 100.0,
     "recall_at_3": 100.0,
     "mrr": 1.0,
-    "avg_latency_seconds": 1.0687177866668207,
-    "peak_ram_increase_mb": 1183.9375,
+    "avg_latency_seconds": 0.4798204933331969,
+    "peak_ram_increase_mb": 1181.625,
     "success_rate_percent": 100.0
   },
   "BAAI/bge-rerank (With Rewrite)": {
     "precision_at_1": 100.0,
     "recall_at_3": 100.0,
     "mrr": 1.0,
-    "avg_latency_seconds": 0.9302737799999401,
-    "peak_ram_increase_mb": 1183.9375,
+    "avg_latency_seconds": 0.4329541666666046,
+    "peak_ram_increase_mb": 1181.625,
     "success_rate_percent": 100.0
   },
   "jinaai/jina-rer (No Rewrite)": {
     "precision_at_1": 100.0,
     "recall_at_3": 100.0,
     "mrr": 1.0,
-    "avg_latency_seconds": 0.6136612999999973,
+    "avg_latency_seconds": 0.535267926667196,
     "peak_ram_increase_mb": 0.0,
     "success_rate_percent": 100.0
   },
@@ -57,7 +57,7 @@
     "precision_at_1": 100.0,
     "recall_at_3": 100.0,
     "mrr": 1.0,
-    "avg_latency_seconds": 0.5483215800001441,
+    "avg_latency_seconds": 0.49563879999914207,
     "peak_ram_increase_mb": 0.0,
     "success_rate_percent": 100.0
   }

@@ -74,7 +74,7 @@ export function useGraphSocket(token, initialGraph) {
           base = `${isHttps ? 'wss:' : 'ws:'}//${base}`;
         }
       }
-      const wsUrl = `${base.replace(/\/$/, '')}/api/ws/${token}`;
+      const wsUrl = `${base.replace(/\/$/, '')}/api/ws`;
 
       // Prevent duplicate connection attempts if already open or connecting
       if (
@@ -86,7 +86,8 @@ export function useGraphSocket(token, initialGraph) {
       }
 
       setConnectionStatus('connecting');
-      const socket = new WebSocket(wsUrl);
+      const protocols = token ? ['atrium-token', token] : undefined;
+      const socket = new WebSocket(wsUrl, protocols);
       socketRef.current = socket;
 
       socket.onopen = () => {
